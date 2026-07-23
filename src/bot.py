@@ -1,0 +1,200 @@
+"""Telegram-интерфейс локального MVP и публикация в канал."""
+
+import html
+import logging
+from typing import Any
+
+from telegram import Bot, Update
+from telegram.constants import ParseMode
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
+
+from src.config import Settings
+from src.domain.models import DealDecision, DecisionAction, ListingSnapshot
+from src.service import DealService
+
+logger = logging.getLogger(__name__)
+
+
+class DealBot:
+    """Команды Telegram поверх независимого DealService."""
+
+    def __init__(self, settings: Settings, service: DealService) -> None:
+        self.settings = settings
+        self.service = service
+
+    def allowed(self, update: Update) -> bool:
+        user = update.effective_user
+        return bool(user and user.id in self.settings.telegram_allowed_user_ids)
+
+    async def deny(self, update: Update) -> None:
+        if update.effective_message:
+            await update.effective_message.reply_text("Доступ к боту не настроен.")
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        del context
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        await update.effective_message.reply_text(
+            "Dubai Deal Sniper запущен.\n\n"
+            "/scan — получить свежие объявления и выполнить расчёт\n"
+            "/deals — показать последние подходящие варианты\n"
+            "/status — состояние локального хранилища"
+        )
+
+    async def identity(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показывает ID пользователя для первоначальной настройки allowlist."""
+        del context
+        user = update.effective_user
+        if user and update.effective_message:
+            await update.effective_message.reply_text(f"Ваш Telegram user ID: {user.id}")
+
+    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        del context
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        await update.effective_message.reply_text(
+            f"Сохранено версий объявлений: {self.service.repository.count_snapshots()}"
+        )
+
+    async def scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        del context
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        status_message = await update.effective_message.reply_text("Получаю свежие объявления…")
+        try:
+            report = await self.service.scan()
+        except Exception:
+            logger.exception("Ошибка сканирования")
+            await status_message.edit_text(
+                "Источник временно недоступен. Подробности записаны в лог."
+            )
+            return
+        await status_message.edit_text(report.summary())
+        candidates = [
+            item
+            for item in report.decisions
+            if item.decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        ][:5]
+        for item in candidates:
+            await update.effective_message.reply_text(
+                format_card(item.listing, item.decision),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+            )
+        if self.settings.telegram_channel_id:
+            await publish_candidates(
+                update.get_bot(),
+                self.settings.telegram_channel_id,
+                self.service,
+                candidates,
+            )
+
+    async def deals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        del context
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        decisions = self.service.repository.latest_decisions(limit=20)
+        candidates = [
+            item
+            for item in decisions
+            if item[1].action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        ][:5]
+        if not candidates:
+            await update.effective_message.reply_text(
+                "Подходящих вариантов пока нет. Выполните /scan."
+            )
+            return
+        for listing, decision in candidates:
+            await update.effective_message.reply_text(
+                format_card(listing, decision),
+                parse_mode=ParseMode.HTML,
+            )
+
+
+def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
+    """Создаёт безопасную HTML-карточку решения."""
+    market = decision.market
+    market_text = (
+        f"{market.low_aed:,.0f}–{market.high_aed:,.0f} AED" if market else "недостаточно данных"
+    )
+    profit = (
+        f"{decision.expected_profit_aed:,.0f} AED"
+        if decision.expected_profit_aed is not None
+        else "—"
+    )
+    roi = f"{decision.roi_percent}%" if decision.roi_percent is not None else "—"
+    return (
+        f"<b>{html.escape(decision.action.value)}</b>\n"
+        f"<b>{html.escape(listing.title)}</b>\n"
+        f"Цена: <b>{listing.price_aed:,.0f} AED</b>\n"
+        f"Рынок: {market_text}\n"
+        f"Ожидаемая прибыль: {profit}\n"
+        f"ROI: {roi}\n"
+        f"Уверенность: {decision.confidence:.0%}\n"
+        f'<a href="{html.escape(str(listing.url), quote=True)}">Открыть объявление</a>'
+    )
+
+
+def build_application(settings: Settings) -> Application[Any, Any, Any, Any, Any, Any]:
+    """Собирает Telegram Application для тестирования и запуска."""
+    service = DealService.from_settings(settings)
+    bot = DealBot(settings, service)
+    application = ApplicationBuilder().token(settings.require_bot_token()).build()
+    application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(CommandHandler("help", bot.start))
+    application.add_handler(CommandHandler("id", bot.identity))
+    application.add_handler(CommandHandler("status", bot.status))
+    application.add_handler(CommandHandler("scan", bot.scan))
+    application.add_handler(CommandHandler("deals", bot.deals))
+    return application
+
+
+def run_bot(settings: Settings) -> None:
+    """Запускает long polling с корректным завершением библиотеки."""
+    build_application(settings).run_polling(drop_pending_updates=False)
+
+
+async def scan_and_publish(settings: Settings) -> int:
+    """Однократно сканирует источник и публикует новые кандидаты в канал."""
+    channel_id = settings.telegram_channel_id
+    if not channel_id:
+        raise RuntimeError("TELEGRAM_CHANNEL_ID не задан в .env")
+    service = DealService.from_settings(settings)
+    report = await service.scan()
+    candidates = [
+        item
+        for item in report.decisions
+        if item.decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+    ]
+    async with Bot(settings.require_bot_token()) as bot:
+        return await publish_candidates(bot, channel_id, service, candidates)
+
+
+async def publish_candidates(
+    bot: Bot,
+    target_id: str,
+    service: DealService,
+    candidates: list[Any],
+) -> int:
+    """Публикует только ещё не доставленные версии объявлений."""
+    sent = 0
+    for item in candidates:
+        listing_id = f"{item.listing.source}:{item.listing.source_listing_id}"
+        if service.repository.notification_sent(target_id, listing_id, item.content_hash):
+            continue
+        await bot.send_message(
+            chat_id=target_id,
+            text=format_card(item.listing, item.decision),
+            parse_mode=ParseMode.HTML,
+        )
+        service.repository.mark_notification_sent(target_id, listing_id, item.content_hash)
+        sent += 1
+    return sent
