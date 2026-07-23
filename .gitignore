@@ -1,0 +1,33 @@
+# Окружение Python
+venv/
+.venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Базы данных
+*.db
+data/
+
+# Конфиденциальные данные
+.env
+*.tfstate
+*.tfstate.*
+service-account*.json
+*-service-account*.json
+.gcloud/
+.firebase/
+
+# Terraform и Firebase
+.terraform/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Логи и временные файлы
+*.log
+.pytest_cache/
+.idea/
+.vscode/

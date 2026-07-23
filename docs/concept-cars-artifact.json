@@ -1,0 +1,206 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Автомобильный Deal Sniper: правильная концепция MVP",
+    "generatedAt": "2026-07-23T14:00:00+04:00",
+    "blocks": [
+      {
+        "id": "report_title",
+        "type": "markdown",
+        "body": "# Автомобильный Deal Sniper: правильная концепция MVP"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "body": "## Executive Summary\n\n- **Продукт должен отвечать не на вопрос «дешёвая ли машина», а на вопрос «до какой цены её безопасно покупать».** Главный результат — максимальная цена покупки, диапазон ожидаемой чистой прибыли, ROI, ликвидность и список рисков.\n- **Источники должны образовывать портфель доказательств, а не список одинаковых парсеров.** Asking prices, C2B-транзакции, certified retail, государственная история и фактические результаты собственных сделок имеют разный вес и назначение.\n- **Gemini не должен определять рыночную цену и прибыль.** Цены рассчитывает детерминированный движок сопоставимых автомобилей, расходы — отдельная модель полной себестоимости, а Vertex AI извлекает признаки из текста и объясняет уже рассчитанное решение.\n- **Backend стандартизирован на Firebase и Google Cloud:** Cloud Run, Firestore, Scheduler, Tasks, Storage и Secret Manager обслуживают первый Telegram-бот; TMA добавляется после пилота через Firebase Hosting/Auth поверх того же API."
+      },
+      {
+        "id": "concept_gap_intro",
+        "type": "markdown",
+        "body": "## Текущая архитектура решает соседнюю, но не главную задачу\n\nИсходная реализация строит цепочку «новое объявление → Gemini → `is_deal` → Telegram». Это автоматизирует классификацию текста, но не моделирует экономику сделки перекупщика. Один URL считается неизменным объектом, изменение фиксированной цены не сохраняется как новая версия, рыночная стоимость берётся из ответа модели, а риски документов, состояния и ликвидности не являются условиями допуска. Следовательно, система может быстро и аккуратно доставить неверное решение."
+      },
+      {
+        "id": "concept_gap_table_block",
+        "type": "table",
+        "tableId": "concept_gap_table"
+      },
+      {
+        "id": "implementation_gap_note",
+        "type": "markdown",
+        "sourceId": "implementation_audit_sql",
+        "body": "## В коде присутствуют только вспомогательные части целевого решения\n\nБинарная проверка исходников показывает: базовое хранение URL и Telegram-отправка реализованы, но семь ключевых слоёв принятия автомобильного решения отсутствуют. Наличие файла или класса не засчитывалось, если он работает на mock-данных либо передаёт ответственность Gemini вместо расчёта. Это объясняет, почему точечное исправление импортов не превратит текущий MVP в Deal Sniper."
+      },
+      {
+        "id": "implementation_gap_chart_block",
+        "type": "chart",
+        "chartId": "implementation_gap_chart"
+      },
+      {
+        "id": "decision_model",
+        "type": "markdown",
+        "body": "## Правильная единица решения — возможность покупки, а не объявление\n\nДля каждого автомобиля система должна хранить неизменяемые снимки: фиксированную цену, характеристики, описание, фотографии, статус объявления и доступные документы. Повторный URL со сниженной ценой — это новая версия возможности, а не дубликат.\n\n### Нормализованный автомобиль\n\nМинимальный ключ сравнения: марка, модель, поколение, год, комплектация, двигатель, привод, GCC/import specs, пробег, тип продавца, история ДТП, состояние кузова/шасси, техническое состояние и эмират. Без комплектации, спецификации региона и пробега сравнение цен ненадёжно. Сам Dubizzle отмечает, что стоимость зависит, в частности, от пробега, спецификации, комплектации, истории и состояния: [руководство по оценке автомобиля](https://www.dubizzle.com/blog/cars/car-valuation/).\n\n### Решение должно строиться на диапазонах\n\n- **Консервативная цена перепродажи** — нижняя граница диапазона сопоставимых машин после поправок на пробег, состояние, спецификацию, продавца и ожидаемый торг. Активная цена объявления не равна цене закрытой сделки.\n- **Полная себестоимость** = покупка + доставка + проверка + регистрация + ремонт + подготовка к продаже + стоимость капитала/хранения + резерв риска.\n- **Ожидаемая чистая прибыль** = консервативная чистая цена перепродажи − полная себестоимость.\n- **ROI** = ожидаемая чистая прибыль / задействованный капитал.\n- **Максимальная цена покупки** = консервативная цена перепродажи − все непокупные расходы − целевая прибыль − резерв риска.\n\nИменно `max_buy_price_aed` должен быть главным числом алерта. Сигнал создаётся для нового объявления или существенного снижения фиксированной цены ниже этого лимита."
+      },
+      {
+        "id": "risk_gate",
+        "type": "markdown",
+        "body": "## Риск сначала ограничивает решение, потом влияет на цену\n\nНекоторые признаки нельзя компенсировать красивым дисконтом. Неизвестный статус документов, повреждение шасси, признаки затопления, невозможность проверить VIN или критически неполное описание должны переводить кандидат в `needs_inspection` либо `reject`, а не просто уменьшать score.\n\nRTA предоставляет технический статус автомобиля с историей владения и другой значимой информацией, но получение отчёта требует идентификации и относится к отдельному процессу проверки: [RTA Technical Vehicle Status Report](https://www.rta.ae/wps/portal/rta/ae/home/rta-services/service-details?serviceId=485). Техническая проверка также является реальной операционной стадией, а не выводом LLM: [RTA Vehicle Technical Inspection](https://www.rta.ae/wps/portal/rta/ae/home/rta-services/service-details?serviceId=454). Dubizzle отдельно предлагает физическую предпродажную инспекцию: [Car Inspection](https://uae.dubizzle.com/motors/services/inspection/).\n\nПоэтому автоматический сигнал должен иметь уровень уверенности: `high`, `medium`, `low`. При низкой уверенности допустим только алерт «проверить», но не рекомендация покупать."
+      },
+      {
+        "id": "source_workflows",
+        "type": "markdown",
+        "body": "## Для разных типов объявлений нужны разные поправки\n\n### Частные классифайды\n\nДля Dubizzle, OpenSooq и других частных объявлений важны свежесть, изменение asking price, тип продавца, полнота характеристик и скорость контакта. Снижение цены сохраняется как новая версия. Удалённое объявление нельзя автоматически считать проданным по указанной цене.\n\n### Управляемые площадки и дилерский inventory\n\nCarSwitch, Cars24, Automall и Al Tayer дают более структурированные автомобили, но их цены включают сервисную, инспекционную, гарантийную или дилерскую премию. Эти наблюдения нельзя напрямую смешивать с частными asking prices.\n\nОдинаковая машина может быть опубликована на нескольких площадках. До расчёта медианы нужен межсайтовый entity resolution по VIN, телефону, фотографиям и устойчивому отпечатку характеристик; иначе один автомобиль ошибочно станет несколькими независимыми аналогами."
+      },
+      {
+        "id": "source_portfolio",
+        "type": "markdown",
+        "body": "## Полезный контур включает шесть классов источников\n\n**Частные лиды:** Dubizzle, OpenSooq и другие классифайды дают возможности покупки по фиксированной цене и массив частных asking prices.\n\n**Активный рынок:** [DubiCars](https://www.dubicars.com/uae/used), [YallaMotor](https://uae.yallamotor.com/), [Cars24 UAE](https://www.cars24.ae/buy-used-cars-dubai/) и [CarSwitch](https://carswitch.com/uae) расширяют покрытие аналогов. Их цены нельзя смешивать без поправки на дилерскую маржу, гарантию, инспекцию и тип продавца.\n\n**Транзакционные ориентиры:** [BuyAnyCar Historical Values](https://www.buyanycar.com/vehicle-historical-values) заявляет данные реальных C2B-транзакций. Это потенциально более сильный сигнал, чем asking price, но он отражает оптовый/C2B уровень и требует проверки условий доступа и покрытия.\n\n**Верхняя граница retail:** certified inventory [Al-Futtaim Automall](https://www.automall.ae/en/) и [Al Tayer Pre-Owned](https://www.altayermotors.com/poc/) полезен как retail ceiling, но содержит премию за проверку, гарантию и дилерский сервис.\n\n**История и состояние:** RTA, отчёты инспекции и проверка импортной истории — отдельные risk sources, а не рыночные аналоги.\n\n**Расходы и ground truth:** каталоги запчастей, реальные счета сервисов и собственные завершённые сделки должны замыкать модель. Собственные `purchase → repair → sale` — единственный источник, на котором можно честно калибровать прибыль."
+      },
+      {
+        "id": "source_portfolio_table_block",
+        "type": "table",
+        "tableId": "source_portfolio_table"
+      },
+      {
+        "id": "source_weighting",
+        "type": "markdown",
+        "body": "## Больше источников полезно только при сохранении происхождения данных\n\nКаждое наблюдение должно нести `source_role`, `price_type`, `seller_type`, `condition_level`, `observed_at`, `access_method` и `source_confidence`. Comparable engine не должен строить одну среднюю цену: он отдельно оценивает private asking, dealer asking, certified retail и transaction/offer benchmarks, а затем применяет подходящий слой к конкретному решению.\n\nВ `source_registry` нужно хранить частоту обновления, доступные поля, правила дедупликации, ограничения доступа, состояние адаптера и последнюю успешную проверку схемы. Сайт без официального API нельзя считать устойчиво подключённым, пока не проверены его условия использования и технический способ получения данных."
+      },
+      {
+        "id": "target_architecture",
+        "type": "markdown",
+        "body": "## Целевая архитектура следует за решением и стандартом Google Cloud\n\n1. **Cloud Scheduler** запускает коллекторы с заданной частотой.\n2. **Cloud Run Jobs** получают объявления, сохраняют сырой HTML/JSON в Cloud Storage и метаданные в Firestore. [Запуск Jobs по расписанию](https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule)\n3. **Cloud Firestore** хранит источники, объявления, неизменяемые версии, автомобили, решения, пользователей, уведомления и outcomes; детерминированные ID и транзакции обеспечивают идемпотентность. [Firestore transactions](https://firebase.google.com/docs/firestore/manage-data/transactions)\n4. **Cloud Tasks** вызывает закрытые обработчики Cloud Run, ограничивает частоту и повторяет временно неуспешные обработки и Telegram-доставку. [HTTP target tasks](https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks)\n5. **Vehicle normalizer и entity tracker** нормализуют признаки и объединяют одну машину между источниками.\n6. **Comparable, Cost, Risk и Decision engines** детерминированно строят диапазон цены, полную себестоимость, `max_buy_price`, прибыль, ROI и действие.\n7. **Vertex AI Gemini через `google-genai`** извлекает неструктурированные признаки и объясняет готовое решение; production использует service account, а не API-ключ.\n8. **Cloud Run Service на FastAPI** предоставляет Telegram webhook, обработчики Tasks и Application API.\n9. **Secret Manager, Cloud Logging и Monitoring** отвечают за секреты и эксплуатационную наблюдаемость.\n10. **Firebase Hosting и Authentication** после пилота обслуживают TMA; Hosting проксирует API в Cloud Run. [Firebase Hosting + Cloud Run](https://firebase.google.com/docs/hosting/cloud-run)\n11. **Outcome loop** сохраняет фактическую покупку, ремонт, продажу и срок; BigQuery добавляется только после появления истории для аналитики.\n\nПервый MVP не требует VPS, PostgreSQL, Redis и Celery. Backend работает независимо от Telegram, а повтор Cloud Task не должен создавать второй снимок, решение, вызов Vertex AI или уведомление."
+      },
+      {
+        "id": "kpis",
+        "type": "markdown",
+        "body": "## Качество продукта измеряется результатом сделок, а не числом алертов\n\n### Основные показатели\n\n- **Precision подтверждённых сигналов:** доля осмотренных алертов, которые после проверки сохраняют требуемую прибыль и ROI. Это главный ранний показатель качества.\n- **Фактическая чистая прибыль и ROI:** рассчитываются по завершённым продажам; это итоговая, но запаздывающая метрика.\n- **Время до полезного сигнала:** от появления нового объявления или снижения цены до доставки решения.\n\n### Диагностика и ограничения\n\nНужно отдельно отслеживать покрытие корректными аналогами, ошибку прогноза цены продажи, ошибку ремонта, долю сигналов `needs_inspection`, потерянные уведомления и количество обращений к LLM на одну версию объявления. Цели нельзя достоверно установить до пилота: сначала нужны проверенные осмотры и несколько завершённых циклов покупки-продажи."
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "body": "## Рекомендуемые следующие шаги\n\n1. Подготовить Google Cloud foundation: проект, регион, Firestore, Storage, Tasks, Scheduler, Artifact Registry, Secret Manager, service accounts и Infrastructure as Code.\n2. Реализовать Firestore-модель, детерминированные ID и хранение сырого снимка в Cloud Storage.\n3. Провести access audit и развернуть Dubizzle collector как первый Cloud Run Job без скрытого mock fallback.\n4. Добавить идемпотентную обработку через Cloud Tasks, нормализацию, сопоставимые цены, расходы и Decision Engine.\n5. Выпустить Cloud Run API и простой Telegram-бот с webhook и надёжной доставкой через Tasks.\n6. Провести пилот на 100–300 объявлениях, затем подключать дополнительные классифайды.\n7. Разрабатывать TMA на Firebase Hosting/Auth только поверх стабильного Cloud Run API."
+      },
+      {
+        "id": "open_questions",
+        "type": "markdown",
+        "body": "## Вопросы, которые определят параметры MVP\n\n- Какой капитал допустим на одну машину и сколько одновременных позиций возможно?\n- Какова минимальная чистая прибыль и минимальный ROI после всех расходов?\n- Какой максимальный срок перепродажи приемлем?\n- Какие марки, модели, годы и типы повреждений пользователь умеет оценивать?\n- Допустимы ли import/non-GCC и автомобили с заявленными повреждениями?\n- Есть ли законный и устойчивый способ получать данные классифайдов с нужной частотой?\n- Какой существующий Firebase project и Google Cloud region следует использовать?\n- Какие бюджеты и лимиты нужны для Firestore, Cloud Run, Storage, Tasks и Vertex AI?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "body": "## Ограничения и допущения\n\nВывод основан на `SPEC.md` и исходниках проекта по состоянию на 23 июля 2026 года, открытых страницах Dubizzle и RTA и официальной документации Google Cloud/Firebase. В проекте нет данных о фактических закрытых продажах, ремонтах, объёме Firestore-операций и стоимости облачной обработки, поэтому числовые пороги и бюджет инфраструктуры не считаются проверенными. Asking prices используются только как приближение; правила площадок, регион ресурсов, составные индексы Firestore, IAM и лимиты расходов должны быть подтверждены перед production-запуском."
+      }
+    ],
+    "cards": [],
+    "charts": [
+      {
+        "id": "implementation_gap_chart",
+        "title": "Наличие обязательных слоёв в текущем коде",
+        "subtitle": "Бинарная оценка по результатам аудита: 1 — реализовано хотя бы базово, 0 — отсутствует",
+        "showDescription": true,
+        "type": "bar",
+        "dataset": "implementation_gap",
+        "sourceId": "implementation_audit_sql",
+        "encodings": {
+          "x": {"field": "layer", "type": "nominal"},
+          "y": {"field": "implemented", "type": "quantitative", "aggregate": "sum", "unit": "наличие"}
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "concept_gap_table",
+        "title": "Текущая и целевая постановка задачи",
+        "subtitle": "Сопоставление показывает, почему замены парсера недостаточно: требуется другая модель решения",
+        "showDescription": true,
+        "dataset": "concept_gap",
+        "sourceId": "concept_gap_sql",
+        "columns": [
+          {"field": "aspect", "label": "Аспект"},
+          {"field": "current", "label": "Сейчас"},
+          {"field": "target", "label": "Правильная модель"}
+        ],
+        "defaultSort": {"field": "aspect", "direction": "asc"}
+      },
+      {
+        "id": "source_portfolio_table",
+        "title": "Приоритетный портфель автомобильных источников",
+        "subtitle": "Приоритет отражает ценность для первого рабочего контура, а не обещание технической доступности",
+        "showDescription": true,
+        "dataset": "source_portfolio",
+        "sourceId": "source_portfolio_sql",
+        "columns": [
+          {"field": "category", "label": "Класс"},
+          {"field": "source", "label": "Источник"},
+          {"field": "signal", "label": "Что даёт"},
+          {"field": "priority", "label": "Волна"},
+          {"field": "caveat", "label": "Главное ограничение"}
+        ],
+        "defaultSort": {"field": "priority", "direction": "asc"}
+      }
+    ],
+    "sources": [
+      {"id": "project_source", "label": "Текущая спецификация и реализация", "path": "SPEC.md"},
+      {"id": "implementation_audit_sql", "label": "Матрица наличия архитектурных слоёв", "query": {"engine": "sqlite", "language": "sql", "sql": "SELECT 'Версии объявлений' AS layer, 0 AS implemented UNION ALL SELECT 'Нормализация', 0 UNION ALL SELECT 'Аналоги', 0 UNION ALL SELECT 'Полные расходы', 0 UNION ALL SELECT 'Риск-фильтры', 0 UNION ALL SELECT 'Decision engine', 0 UNION ALL SELECT 'Уведомления', 1 UNION ALL SELECT 'Outcome loop', 0", "description": "Материализует бинарную матрицу, полученную ручным аудитом SPEC.md и исходников.", "executed_at": "2026-07-23T10:00:00+04:00"}},
+      {"id": "concept_gap_sql", "label": "Сопоставление текущей и целевой концепции", "query": {"engine": "sqlite", "language": "sql", "sql": "SELECT 'Главный результат' AS aspect, 'is_deal и общий score' AS current, 'Максимальная цена покупки, прибыль, ROI, confidence и действие' AS target UNION ALL SELECT 'Объект учёта', 'URL объявления', 'Автомобиль, источник и неизменяемые версии фиксированной цены' UNION ALL SELECT 'Рыночная цена', 'Одна оценка Gemini', 'Диапазон нормализованных аналогов с покрытием и поправками' UNION ALL SELECT 'Расходы', 'Цена и предполагаемый ремонт', 'Полная себестоимость владения и перепродажи плюс резерв риска' UNION ALL SELECT 'Роль LLM', 'Цена, ремонт, прибыль и решение', 'Извлечение неструктурированных признаков и объяснение' UNION ALL SELECT 'Источники', 'Один общий конвейер', 'Раздельные поправки для типов классифайдов' UNION ALL SELECT 'Риск', 'Часть рассуждения модели', 'Жёсткие стоп-факторы, инспекция и диапазоны неопределённости'", "description": "Материализует сопоставление, полученное из ручного аудита архитектуры.", "executed_at": "2026-07-23T10:00:00+04:00"}},
+      {"id": "source_portfolio_sql", "label": "Классификация автомобильных источников", "query": {"engine": "sqlite", "language": "sql", "sql": "SELECT 'Рынок/лиды' AS category, 'Dubizzle' AS source, 'Private/dealer asking и новые лиды' AS signal, '1' AS priority, 'Кросс-листинг и asking не равен продаже' AS caveat UNION ALL SELECT 'Рынок', 'DubiCars', 'Private/dealer asking по ОАЭ', '1', 'Дилерская доля и дубликаты' UNION ALL SELECT 'Рынок', 'YallaMotor', 'Used, new и certified asking', '1', 'Нужно разделять тип предложения' UNION ALL SELECT 'Транзакции', 'BuyAnyCar Historical Values', 'Исторические C2B-транзакции', '1', 'Оптовый уровень, покрытие и доступ требуют проверки' UNION ALL SELECT 'Проверка', 'RTA Vehicle Status', 'История владения и технический статус', '1', 'Авторизация, оплата, on-demand' UNION ALL SELECT 'Проверка', 'Физическая инспекция', 'Состояние, OBD, кузов и шасси', '1', 'Только после shortlist, не полностью автоматическая' UNION ALL SELECT 'Рынок/лиды', 'CarSwitch', 'Управляемые объявления и valuation', '2', 'Сервисная/дилерская премия' UNION ALL SELECT 'Рынок', 'Cars24 UAE', 'Inspected retail inventory', '2', 'Гарантия и retail premium' UNION ALL SELECT 'Рынок/лиды', 'OpenSooq', 'Частные объявления по всем эмиратам', '2', 'Высокий шум и смешанные категории' UNION ALL SELECT 'Retail ceiling', 'Al-Futtaim Automall', 'Certified asking', '2', 'Премия за гарантию и подготовку' UNION ALL SELECT 'Retail ceiling', 'Al Tayer Pre-Owned', 'Certified asking по представленным брендам', '2', 'Ограниченное покрытие брендов' UNION ALL SELECT 'Exit floor', 'SellAnyCar', 'Быстрый C2B offer', '2', 'Не розничная цена перепродажи' UNION ALL SELECT 'Расходы', 'PartSouq', 'Каталожные цены и наличие деталей', '2', 'Не включает работу и локальные скидки' UNION ALL SELECT 'Проверка', 'CarReport', 'VIN-история и импортные данные', '3', 'Покрытие и точность нужно валидировать' UNION ALL SELECT 'Ground truth', 'Собственные завершённые сделки', 'Покупка, ремонт, продажа и срок', '1', 'Данные появятся только после операционного пилота'", "description": "Материализует классификацию источников с фиксированными ценами и наборов проверки.", "executed_at": "2026-07-23T10:00:00+04:00"}},
+      {"id": "dubizzle_valuation", "label": "Dubizzle: факторы оценки автомобиля", "url": "https://www.dubizzle.com/blog/cars/car-valuation/"},
+      {"id": "rta_status", "label": "RTA: технический статус автомобиля", "url": "https://www.rta.ae/wps/portal/rta/ae/home/rta-services/service-details?serviceId=485"},
+      {"id": "rta_inspection", "label": "RTA: техническая инспекция", "url": "https://www.rta.ae/wps/portal/rta/ae/home/rta-services/service-details?serviceId=454"}
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-23T14:00:00+04:00",
+    "status": "ready",
+    "datasets": {
+      "concept_gap": [
+        {"aspect": "Главный результат", "current": "is_deal и общий score", "target": "Максимальная цена покупки, прибыль, ROI, confidence и действие"},
+        {"aspect": "Объект учёта", "current": "URL объявления", "target": "Автомобиль, источник и неизменяемые версии фиксированной цены"},
+        {"aspect": "Рыночная цена", "current": "Одна оценка Gemini", "target": "Диапазон нормализованных аналогов с покрытием и поправками"},
+        {"aspect": "Расходы", "current": "Цена и предполагаемый ремонт", "target": "Полная себестоимость владения и перепродажи плюс резерв риска"},
+        {"aspect": "Роль LLM", "current": "Цена, ремонт, прибыль и решение", "target": "Извлечение неструктурированных признаков и объяснение"},
+        {"aspect": "Источники", "current": "Один общий конвейер", "target": "Раздельные поправки для типов классифайдов"},
+        {"aspect": "Риск", "current": "Часть рассуждения модели", "target": "Жёсткие стоп-факторы, инспекция и диапазоны неопределённости"}
+      ],
+      "implementation_gap": [
+        {"layer": "Версии объявлений", "implemented": 0},
+        {"layer": "Нормализация", "implemented": 0},
+        {"layer": "Аналоги", "implemented": 0},
+        {"layer": "Полные расходы", "implemented": 0},
+        {"layer": "Риск-фильтры", "implemented": 0},
+        {"layer": "Decision engine", "implemented": 0},
+        {"layer": "Уведомления", "implemented": 1},
+        {"layer": "Outcome loop", "implemented": 0}
+      ],
+      "source_portfolio": [
+        {"category": "Рынок/лиды", "source": "Dubizzle", "signal": "Private/dealer asking и новые лиды", "priority": "1", "caveat": "Кросс-листинг и asking не равен продаже"},
+        {"category": "Рынок", "source": "DubiCars", "signal": "Private/dealer asking по ОАЭ", "priority": "1", "caveat": "Дилерская доля и дубликаты"},
+        {"category": "Рынок", "source": "YallaMotor", "signal": "Used, new и certified asking", "priority": "1", "caveat": "Нужно разделять тип предложения"},
+        {"category": "Транзакции", "source": "BuyAnyCar Historical Values", "signal": "Исторические C2B-транзакции", "priority": "1", "caveat": "Оптовый уровень, покрытие и доступ требуют проверки"},
+        {"category": "Проверка", "source": "RTA Vehicle Status", "signal": "История владения и технический статус", "priority": "1", "caveat": "Авторизация, оплата, on-demand"},
+        {"category": "Проверка", "source": "Физическая инспекция", "signal": "Состояние, OBD, кузов и шасси", "priority": "1", "caveat": "Только после shortlist, не полностью автоматическая"},
+        {"category": "Рынок/лиды", "source": "CarSwitch", "signal": "Управляемые объявления и valuation", "priority": "2", "caveat": "Сервисная/дилерская премия"},
+        {"category": "Рынок", "source": "Cars24 UAE", "signal": "Inspected retail inventory", "priority": "2", "caveat": "Гарантия и retail premium"},
+        {"category": "Рынок/лиды", "source": "OpenSooq", "signal": "Частные объявления по всем эмиратам", "priority": "2", "caveat": "Высокий шум и смешанные категории"},
+        {"category": "Retail ceiling", "source": "Al-Futtaim Automall", "signal": "Certified asking", "priority": "2", "caveat": "Премия за гарантию и подготовку"},
+        {"category": "Retail ceiling", "source": "Al Tayer Pre-Owned", "signal": "Certified asking по представленным брендам", "priority": "2", "caveat": "Ограниченное покрытие брендов"},
+        {"category": "Exit floor", "source": "SellAnyCar", "signal": "Быстрый C2B offer", "priority": "2", "caveat": "Не розничная цена перепродажи"},
+        {"category": "Расходы", "source": "PartSouq", "signal": "Каталожные цены и наличие деталей", "priority": "2", "caveat": "Не включает работу и локальные скидки"},
+        {"category": "Проверка", "source": "CarReport", "signal": "VIN-история и импортные данные", "priority": "3", "caveat": "Покрытие и точность нужно валидировать"},
+        {"category": "Ground truth", "source": "Собственные завершённые сделки", "signal": "Покупка, ремонт, продажа и срок", "priority": "1", "caveat": "Данные появятся только после операционного пилота"}
+      ]
+    }
+  },
+  "sources": [
+    {"id": "project_source", "label": "Текущая спецификация и реализация", "path": "SPEC.md"},
+    {"id": "implementation_audit_sql", "label": "Матрица наличия архитектурных слоёв", "query": {"engine": "sqlite", "language": "sql", "sql": "SELECT 'Версии объявлений' AS layer, 0 AS implemented UNION ALL SELECT 'Нормализация', 0 UNION ALL SELECT 'Аналоги', 0 UNION ALL SELECT 'Полные расходы', 0 UNION ALL SELECT 'Риск-фильтры', 0 UNION ALL SELECT 'Decision engine', 0 UNION ALL SELECT 'Уведомления', 1 UNION ALL SELECT 'Outcome loop', 0", "description": "Материализует бинарную матрицу, полученную ручным аудитом SPEC.md и исходников.", "executed_at": "2026-07-23T10:00:00+04:00"}},
+    {"id": "concept_gap_sql", "label": "Сопоставление текущей и целевой концепции", "query": {"engine": "sqlite", "language": "sql", "sql": "SELECT 'Главный результат' AS aspect, 'is_deal и общий score' AS current, 'Максимальная цена покупки, прибыль, ROI, confidence и действие' AS target UNION ALL SELECT 'Объект учёта', 'URL объявления', 'Автомобиль, источник и неизменяемые версии фиксированной цены' UNION ALL SELECT 'Рыночная цена', 'Одна оценка Gemini', 'Диапазон нормализованных аналогов с покрытием и поправками' UNION ALL SELECT 'Расходы', 'Цена и предполагаемый ремонт', 'Полная себестоимость владения и перепродажи плюс резерв риска' UNION ALL SELECT 'Роль LLM', 'Цена, ремонт, прибыль и решение', 'Извлечение неструктурированных признаков и объяснение' UNION ALL SELECT 'Источники', 'Один общий конвейер', 'Раздельные поправки для типов классифайдов' UNION ALL SELECT 'Риск', 'Часть рассуждения модели', 'Жёсткие стоп-факторы, инспекция и диапазоны неопределённости'", "description": "Материализует сопоставление, полученное из ручного аудита архитектуры.", "executed_at": "2026-07-23T10:00:00+04:00"}},
+    {"id": "source_portfolio_sql", "label": "Классификация автомобильных источников", "query": {"engine": "sqlite", "language": "sql", "sql": "SELECT 'Рынок/лиды' AS category, 'Dubizzle' AS source, 'Private/dealer asking и новые лиды' AS signal, '1' AS priority, 'Кросс-листинг и asking не равен продаже' AS caveat UNION ALL SELECT 'Рынок', 'DubiCars', 'Private/dealer asking по ОАЭ', '1', 'Дилерская доля и дубликаты' UNION ALL SELECT 'Рынок', 'YallaMotor', 'Used, new и certified asking', '1', 'Нужно разделять тип предложения' UNION ALL SELECT 'Транзакции', 'BuyAnyCar Historical Values', 'Исторические C2B-транзакции', '1', 'Оптовый уровень, покрытие и доступ требуют проверки' UNION ALL SELECT 'Проверка', 'RTA Vehicle Status', 'История владения и технический статус', '1', 'Авторизация, оплата, on-demand' UNION ALL SELECT 'Проверка', 'Физическая инспекция', 'Состояние, OBD, кузов и шасси', '1', 'Только после shortlist, не полностью автоматическая' UNION ALL SELECT 'Рынок/лиды', 'CarSwitch', 'Управляемые объявления и valuation', '2', 'Сервисная/дилерская премия' UNION ALL SELECT 'Рынок', 'Cars24 UAE', 'Inspected retail inventory', '2', 'Гарантия и retail premium' UNION ALL SELECT 'Рынок/лиды', 'OpenSooq', 'Частные объявления по всем эмиратам', '2', 'Высокий шум и смешанные категории' UNION ALL SELECT 'Retail ceiling', 'Al-Futtaim Automall', 'Certified asking', '2', 'Премия за гарантию и подготовку' UNION ALL SELECT 'Retail ceiling', 'Al Tayer Pre-Owned', 'Certified asking по представленным брендам', '2', 'Ограниченное покрытие брендов' UNION ALL SELECT 'Exit floor', 'SellAnyCar', 'Быстрый C2B offer', '2', 'Не розничная цена перепродажи' UNION ALL SELECT 'Расходы', 'PartSouq', 'Каталожные цены и наличие деталей', '2', 'Не включает работу и локальные скидки' UNION ALL SELECT 'Проверка', 'CarReport', 'VIN-история и импортные данные', '3', 'Покрытие и точность нужно валидировать' UNION ALL SELECT 'Ground truth', 'Собственные завершённые сделки', 'Покупка, ремонт, продажа и срок', '1', 'Данные появятся только после операционного пилота'", "description": "Материализует классификацию источников с фиксированными ценами и наборов проверки.", "executed_at": "2026-07-23T10:00:00+04:00"}},
+    {"id": "dubizzle_valuation", "label": "Dubizzle: факторы оценки автомобиля", "url": "https://www.dubizzle.com/blog/cars/car-valuation/"},
+    {"id": "rta_status", "label": "RTA: технический статус автомобиля", "url": "https://www.rta.ae/wps/portal/rta/ae/home/rta-services/service-details?serviceId=485"},
+    {"id": "rta_inspection", "label": "RTA: техническая инспекция", "url": "https://www.rta.ae/wps/portal/rta/ae/home/rta-services/service-details?serviceId=454"}
+  ]
+}
