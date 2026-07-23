@@ -34,7 +34,7 @@ html:not([data-portable-source-tooltips-ready]) .portable-chart-summary>.portabl
 </style>
 </head>
 <body>
-<main id="data-analytics-portable-fallback" class="portable-fallback" data-portable-fallback="true" data-portable-surface="report"><header class="portable-page-header"><div class="portable-page-heading"><p class="portable-surface-label">Data Analytics report</p><h1>Автомобильный Deal Sniper: правильная концепция MVP</h1></div><div class="portable-page-meta"><time datetime="2026-07-23T14:00:00+04:00">Jul 23, 2026, 10:00 AM UTC</time></div></header><div class="portable-block-stack">
+<main id="data-analytics-portable-fallback" class="portable-fallback" data-portable-fallback="true" data-portable-surface="report"><header class="portable-page-header"><div class="portable-page-heading"><p class="portable-surface-label">Data Analytics report</p><h1>Автомобильный Deal Sniper: правильная концепция MVP</h1></div><div class="portable-page-meta"><time datetime="2026-07-23T15:00:00+04:00">Jul 23, 2026, 11:00 AM UTC</time></div></header><div class="portable-block-stack">
 <div class="portable-block portable-layout-full" data-artifact-block-id="executive_summary" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Executive Summary</h2>
 <ul><li><strong>Продукт должен отвечать не на вопрос «дешёвая ли машина», а на вопрос «до какой цены её безопасно покупать».</strong> Главный результат — максимальная цена покупки, диапазон ожидаемой чистой прибыли, ROI, ликвидность и список рисков.</li><li><strong>Источники должны образовывать портфель доказательств, а не список одинаковых парсеров.</strong> Asking prices, C2B-транзакции, certified retail, государственная история и фактические результаты собственных сделок имеют разный вес и назначение.</li><li><strong>Gemini не должен определять рыночную цену и прибыль.</strong> Цены рассчитывает детерминированный движок сопоставимых автомобилей, расходы — отдельная модель полной себестоимости, а Vertex AI извлекает признаки из текста и объясняет уже рассчитанное решение.</li><li><strong>Backend стандартизирован на Firebase и Google Cloud:</strong> Cloud Run, Firestore, Scheduler, Tasks, Storage и Secret Manager обслуживают первый Telegram-бот; TMA добавляется после пилота через Firebase Hosting/Auth поверх того же API.</li></ul></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="concept_gap_intro" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Текущая архитектура решает соседнюю, но не главную задачу</h2>
@@ -63,14 +63,14 @@ html:not([data-portable-source-tooltips-ready]) .portable-chart-summary>.portabl
 <div class="portable-block portable-layout-full" data-artifact-block-id="source_portfolio" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Полезный контур включает шесть классов источников</h2>
 <p><strong>Частные лиды:</strong> Dubizzle, OpenSooq и другие классифайды дают возможности покупки по фиксированной цене и массив частных asking prices.</p>
 <p><strong>Активный рынок:</strong> <a href="https://www.dubicars.com/uae/used" rel="noreferrer">DubiCars</a>, <a href="https://uae.yallamotor.com/" rel="noreferrer">YallaMotor</a>, <a href="https://www.cars24.ae/buy-used-cars-dubai/" rel="noreferrer">Cars24 UAE</a> и <a href="https://carswitch.com/uae" rel="noreferrer">CarSwitch</a> расширяют покрытие аналогов. Их цены нельзя смешивать без поправки на дилерскую маржу, гарантию, инспекцию и тип продавца.</p>
-<p><strong>Транзакционные ориентиры:</strong> <a href="https://www.buyanycar.com/vehicle-historical-values" rel="noreferrer">BuyAnyCar Historical Values</a> заявляет данные реальных C2B-транзакций. Это потенциально более сильный сигнал, чем asking price, но он отражает оптовый/C2B уровень и требует проверки условий доступа и покрытия.</p>
+<p><strong>Транзакционные ориентиры:</strong> <a href="https://www.buyanycar.com/vehicle-historical-values" rel="noreferrer">BuyAnyCar Historical Values</a> заявляет данные реальных C2B-транзакций. Это потенциально более сильный сигнал, чем asking price, но он отражает оптовый/C2B уровень и требует проверки покрытия, структуры и свежести данных.</p>
 <p><strong>Верхняя граница retail:</strong> certified inventory <a href="https://www.automall.ae/en/" rel="noreferrer">Al-Futtaim Automall</a> и <a href="https://www.altayermotors.com/poc/" rel="noreferrer">Al Tayer Pre-Owned</a> полезен как retail ceiling, но содержит премию за проверку, гарантию и дилерский сервис.</p>
 <p><strong>История и состояние:</strong> RTA, отчёты инспекции и проверка импортной истории — отдельные risk sources, а не рыночные аналоги.</p>
 <p><strong>Расходы и ground truth:</strong> каталоги запчастей, реальные счета сервисов и собственные завершённые сделки должны замыкать модель. Собственные <code>purchase → repair → sale</code> — единственный источник, на котором можно честно калибровать прибыль.</p></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="source_portfolio_table_block" data-artifact-block-type="table" data-layout="full"><section class="portable-content-card portable-table-card" data-artifact-id="source_portfolio_table" data-artifact-kind="table" data-table-id="source_portfolio_table" data-portable-visual-title="Приоритетный портфель автомобильных источников"><header class="portable-visual-header"><h2>Приоритетный портфель автомобильных источников</h2><p>Приоритет отражает ценность для первого рабочего контура, а не обещание технической доступности</p></header><div class="portable-inline-source portable-source-summary" data-source-id="source_portfolio_sql"><div class="portable-inline-source-content portable-source-summary-content"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for Приоритетный портфель автомобильных источников</span><strong>Source: Классификация автомобильных источников</strong><p class="portable-source-description-data">Материализует классификацию источников с фиксированными ценами и наборов проверки.</p><pre class="portable-source-query-data" aria-hidden="true"><code>SELECT &#39;Рынок/лиды&#39; AS category, &#39;Dubizzle&#39; AS source, &#39;Private/dealer asking и новые лиды&#39; AS signal, &#39;1&#39; AS priority, &#39;Кросс-листинг и asking не равен продаже&#39; AS caveat UNION ALL SELECT &#39;Рынок&#39;, &#39;DubiCars&#39;, &#39;Private/dealer asking по ОАЭ&#39;, &#39;1&#39;, &#39;Дилерская доля и дубликаты&#39; UNION ALL SELECT &#39;Рынок&#39;, &#39;YallaMotor&#39;, &#39;Used, new и certified asking&#39;, &#39;1&#39;, &#39;Нужно разделять тип предложения&#39; UNION ALL SELECT &#39;Транзакции&#39;, &#39;BuyAnyCar Historical Values&#39;, &#39;Исторические C2B-транзакции&#39;, &#39;1&#39;, &#39;Оптовый уровень, покрытие и доступ требуют проверки&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;RTA Vehicle Status&#39;, &#39;История владения и технический статус&#39;, &#39;1&#39;, &#39;Авторизация, оплата, on-demand&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;Физическая инспекция&#39;, &#39;Состояние, OBD, кузов и шасси&#39;, &#39;1&#39;, &#39;Только после shortlist, не полностью автоматическая&#39; UNION ALL SELECT &#39;Рынок/лиды&#39;, &#39;CarSwitch&#39;, &#39;Управляемые объявления и valuation&#39;, &#39;2&#39;, &#39;Сервисная/дилерская премия&#39; UNION ALL SELECT &#39;Рынок&#39;, &#39;Cars24 UAE&#39;, &#39;Inspected retail inventory&#39;, &#39;2&#39;, &#39;Гарантия и retail premium&#39; UNION ALL SELECT &#39;Рынок/лиды&#39;, &#39;OpenSooq&#39;, &#39;Частные объявления по всем эмиратам&#39;, &#39;2&#39;, &#39;Высокий шум и смешанные категории&#39; UNION ALL SELECT &#39;Retail ceiling&#39;, &#39;Al-Futtaim Automall&#39;, &#39;Certified asking&#39;, &#39;2&#39;, &#39;Премия за гарантию и подготовку&#39; UNION ALL SELECT &#39;Retail ceiling&#39;, &#39;Al Tayer Pre-Owned&#39;, &#39;Certified asking по представленным брендам&#39;, &#39;2&#39;, &#39;Ограниченное покрытие брендов&#39; UNION ALL SELECT &#39;Exit floor&#39;, &#39;SellAnyCar&#39;, &#39;Быстрый C2B offer&#39;, &#39;2&#39;, &#39;Не розничная цена перепродажи&#39; UNION ALL SELECT &#39;Расходы&#39;, &#39;PartSouq&#39;, &#39;Каталожные цены и наличие деталей&#39;, &#39;2&#39;, &#39;Не включает работу и локальные скидки&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;CarReport&#39;, &#39;VIN-история и импортные данные&#39;, &#39;3&#39;, &#39;Покрытие и точность нужно валидировать&#39; UNION ALL SELECT &#39;Ground truth&#39;, &#39;Собственные завершённые сделки&#39;, &#39;Покупка, ремонт, продажа и срок&#39;, &#39;1&#39;, &#39;Данные появятся только после операционного пилота&#39;</code></pre></div></div><div class="portable-table-source-region"><div class="portable-table-scroll"><table><caption>Приоритетный портфель автомобильных источников</caption><thead><tr><th scope="col">Класс</th><th scope="col">Источник</th><th scope="col">Что даёт</th><th scope="col" class="portable-table-number">Волна</th><th scope="col">Главное ограничение</th></tr></thead><tbody><tr><td>Рынок/лиды</td><td>Dubizzle</td><td>Private/dealer asking и новые лиды</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-2"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-2" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Кросс-листинг и asking не равен продаже</td></tr><tr><td>Рынок</td><td>DubiCars</td><td>Private/dealer asking по ОАЭ</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-3"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-3" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Дилерская доля и дубликаты</td></tr><tr><td>Рынок</td><td>YallaMotor</td><td>Used, new и certified asking</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-4"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-4" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Нужно разделять тип предложения</td></tr><tr><td>Транзакции</td><td>BuyAnyCar Historical Values</td><td>Исторические C2B-транзакции</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-5"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-5" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Оптовый уровень, покрытие и доступ требуют проверки</td></tr><tr><td>Проверка</td><td>RTA Vehicle Status</td><td>История владения и технический статус</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-6"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-6" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Авторизация, оплата, on-demand</td></tr><tr><td>Проверка</td><td>Физическая инспекция</td><td>Состояние, OBD, кузов и шасси</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-7"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-7" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Только после shortlist, не полностью автоматическая</td></tr><tr><td>Ground truth</td><td>Собственные завершённые сделки</td><td>Покупка, ремонт, продажа и срок</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-8"><span class="portable-source-value-text">1</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-8" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 1</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Данные появятся только после операционного пилота</td></tr><tr><td>Рынок/лиды</td><td>CarSwitch</td><td>Управляемые объявления и valuation</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-9"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-9" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Сервисная/дилерская премия</td></tr><tr><td>Рынок</td><td>Cars24 UAE</td><td>Inspected retail inventory</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-10"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-10" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Гарантия и retail premium</td></tr><tr><td>Рынок/лиды</td><td>OpenSooq</td><td>Частные объявления по всем эмиратам</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-11"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-11" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Высокий шум и смешанные категории</td></tr><tr><td>Retail ceiling</td><td>Al-Futtaim Automall</td><td>Certified asking</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-12"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-12" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Премия за гарантию и подготовку</td></tr><tr><td>Retail ceiling</td><td>Al Tayer Pre-Owned</td><td>Certified asking по представленным брендам</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-13"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-13" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Ограниченное покрытие брендов</td></tr><tr><td>Exit floor</td><td>SellAnyCar</td><td>Быстрый C2B offer</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-14"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-14" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Не розничная цена перепродажи</td></tr><tr><td>Расходы</td><td>PartSouq</td><td>Каталожные цены и наличие деталей</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-15"><span class="portable-source-value-text">2</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-15" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 2</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Не включает работу и локальные скидки</td></tr><tr><td>Проверка</td><td>CarReport</td><td>VIN-история и импортные данные</td><td class="portable-table-source-cell portable-table-number"><span class="portable-source-tooltip portable-source-value" data-portable-source-host="true" tabindex="0" aria-describedby="portable-source-tooltip-16"><span class="portable-source-value-text">3</span><span class="portable-source-tooltip-content" id="portable-source-tooltip-16" role="tooltip"><span class="portable-source-tooltip-heading" aria-hidden="true">Source for 3</span><strong>Source: Классификация автомобильных источников</strong></span></span></td><td>Покрытие и точность нужно валидировать</td></tr></tbody></table></div></div></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="source_weighting" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Больше источников полезно только при сохранении происхождения данных</h2>
-<p>Каждое наблюдение должно нести <code>source_role</code>, <code>price_type</code>, <code>seller_type</code>, <code>condition_level</code>, <code>observed_at</code>, <code>access_method</code> и <code>source_confidence</code>. Comparable engine не должен строить одну среднюю цену: он отдельно оценивает private asking, dealer asking, certified retail и transaction/offer benchmarks, а затем применяет подходящий слой к конкретному решению.</p>
-<p>В <code>source_registry</code> нужно хранить частоту обновления, доступные поля, правила дедупликации, ограничения доступа, состояние адаптера и последнюю успешную проверку схемы. Сайт без официального API нельзя считать устойчиво подключённым, пока не проверены его условия использования и технический способ получения данных.</p></section></div>
+<p>Каждое наблюдение должно нести <code>source_role</code>, <code>price_type</code>, <code>seller_type</code>, <code>condition_level</code>, <code>observed_at</code>, <code>integration_method</code> и <code>source_confidence</code>. Comparable engine не должен строить одну среднюю цену: он отдельно оценивает private asking, dealer asking, certified retail и transaction/offer benchmarks, а затем применяет подходящий слой к конкретному решению.</p>
+<p>В <code>source_registry</code> нужно хранить частоту обновления, доступные поля, правила дедупликации, технические лимиты, состояние адаптера и последнюю успешную проверку схемы. Источник считается стабильно подключённым только после проверки формата, авторизации, лимитов, частоты, мониторинга и обработки изменений схемы.</p></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="target_architecture" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Целевая архитектура следует за решением и стандартом Google Cloud</h2>
 <ol><li><strong>Cloud Scheduler</strong> запускает коллекторы с заданной частотой.</li><li><strong>Cloud Run Jobs</strong> получают объявления, сохраняют сырой HTML/JSON в Cloud Storage и метаданные в Firestore. <a href="https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule" rel="noreferrer">Запуск Jobs по расписанию</a></li><li><strong>Cloud Firestore</strong> хранит источники, объявления, неизменяемые версии, автомобили, решения, пользователей, уведомления и outcomes; детерминированные ID и транзакции обеспечивают идемпотентность. <a href="https://firebase.google.com/docs/firestore/manage-data/transactions" rel="noreferrer">Firestore transactions</a></li><li><strong>Cloud Tasks</strong> вызывает закрытые обработчики Cloud Run, ограничивает частоту и повторяет временно неуспешные обработки и Telegram-доставку. <a href="https://docs.cloud.google.com/tasks/docs/creating-http-target-tasks" rel="noreferrer">HTTP target tasks</a></li><li><strong>Vehicle normalizer и entity tracker</strong> нормализуют признаки и объединяют одну машину между источниками.</li><li><strong>Comparable, Cost, Risk и Decision engines</strong> детерминированно строят диапазон цены, полную себестоимость, <code>max_buy_price</code>, прибыль, ROI и действие.</li><li><strong>Vertex AI Gemini через `google-genai`</strong> извлекает неструктурированные признаки и объясняет готовое решение; production использует service account, а не API-ключ.</li><li><strong>Cloud Run Service на FastAPI</strong> предоставляет Telegram webhook, обработчики Tasks и Application API.</li><li><strong>Secret Manager, Cloud Logging и Monitoring</strong> отвечают за секреты и эксплуатационную наблюдаемость.</li><li><strong>Firebase Hosting и Authentication</strong> после пилота обслуживают TMA; Hosting проксирует API в Cloud Run. <a href="https://firebase.google.com/docs/hosting/cloud-run" rel="noreferrer">Firebase Hosting + Cloud Run</a></li><li><strong>Outcome loop</strong> сохраняет фактическую покупку, ремонт, продажу и срок; BigQuery добавляется только после появления истории для аналитики.</li></ol>
 <p>Первый MVP не требует VPS, PostgreSQL, Redis и Celery. Backend работает независимо от Telegram, а повтор Cloud Task не должен создавать второй снимок, решение, вызов Vertex AI или уведомление.</p></section></div>
@@ -80,11 +80,11 @@ html:not([data-portable-source-tooltips-ready]) .portable-chart-summary>.portabl
 <h3>Диагностика и ограничения</h3>
 <p>Нужно отдельно отслеживать покрытие корректными аналогами, ошибку прогноза цены продажи, ошибку ремонта, долю сигналов <code>needs_inspection</code>, потерянные уведомления и количество обращений к LLM на одну версию объявления. Цели нельзя достоверно установить до пилота: сначала нужны проверенные осмотры и несколько завершённых циклов покупки-продажи.</p></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="next_steps" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Рекомендуемые следующие шаги</h2>
-<ol><li>Подготовить Google Cloud foundation: проект, регион, Firestore, Storage, Tasks, Scheduler, Artifact Registry, Secret Manager, service accounts и Infrastructure as Code.</li><li>Реализовать Firestore-модель, детерминированные ID и хранение сырого снимка в Cloud Storage.</li><li>Провести access audit и развернуть Dubizzle collector как первый Cloud Run Job без скрытого mock fallback.</li><li>Добавить идемпотентную обработку через Cloud Tasks, нормализацию, сопоставимые цены, расходы и Decision Engine.</li><li>Выпустить Cloud Run API и простой Telegram-бот с webhook и надёжной доставкой через Tasks.</li><li>Провести пилот на 100–300 объявлениях, затем подключать дополнительные классифайды.</li><li>Разрабатывать TMA на Firebase Hosting/Auth только поверх стабильного Cloud Run API.</li></ol></section></div>
+<ol><li>Создать безопасный baseline: README с честным статусом, отключение legacy production entrypoint, синхронизация зависимостей, удаление фиктивной WhatsApp-ссылки, pytest и GitHub Actions.</li><li>Подготовить fixture-набор объявлений и реализовать независимые Domain Models и нормализацию.</li><li>Реализовать и протестировать Comparable, Cost, Risk и Decision Engines без LLM и облачной инфраструктуры.</li><li>Ограничить Vertex AI извлечением признаков и объяснением готового решения.</li><li>Затем подготовить Google Cloud foundation, Firestore, Storage, Tasks, Scheduler и первый collector Job.</li><li>Выпустить Cloud Run API и простой Telegram-бот, провести пилот на 100–300 объявлениях.</li><li>После калибровки подключать дополнительные источники и разрабатывать TMA поверх стабильного API.</li></ol></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="open_questions" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Вопросы, которые определят параметры MVP</h2>
-<ul><li>Какой капитал допустим на одну машину и сколько одновременных позиций возможно?</li><li>Какова минимальная чистая прибыль и минимальный ROI после всех расходов?</li><li>Какой максимальный срок перепродажи приемлем?</li><li>Какие марки, модели, годы и типы повреждений пользователь умеет оценивать?</li><li>Допустимы ли import/non-GCC и автомобили с заявленными повреждениями?</li><li>Есть ли законный и устойчивый способ получать данные классифайдов с нужной частотой?</li><li>Какой существующий Firebase project и Google Cloud region следует использовать?</li><li>Какие бюджеты и лимиты нужны для Firestore, Cloud Run, Storage, Tasks и Vertex AI?</li></ul></section></div>
+<ul><li>Какой капитал допустим на одну машину и сколько одновременных позиций возможно?</li><li>Какова минимальная чистая прибыль и минимальный ROI после всех расходов?</li><li>Какой максимальный срок перепродажи приемлем?</li><li>Какие марки, модели, годы и типы повреждений пользователь умеет оценивать?</li><li>Допустимы ли import/non-GCC и автомобили с заявленными повреждениями?</li><li>Какие форматы, лимиты и частота обновления доступны для каждого источника?</li><li>Какой существующий Firebase project и Google Cloud region следует использовать?</li><li>Какие бюджеты и лимиты нужны для Firestore, Cloud Run, Storage, Tasks и Vertex AI?</li></ul></section></div>
 <div class="portable-block portable-layout-full" data-artifact-block-id="caveats" data-artifact-block-type="markdown" data-layout="full"><section class="portable-markdown"><h2>Ограничения и допущения</h2>
-<p>Вывод основан на <code>SPEC.md</code> и исходниках проекта по состоянию на 23 июля 2026 года, открытых страницах Dubizzle и RTA и официальной документации Google Cloud/Firebase. В проекте нет данных о фактических закрытых продажах, ремонтах, объёме Firestore-операций и стоимости облачной обработки, поэтому числовые пороги и бюджет инфраструктуры не считаются проверенными. Asking prices используются только как приближение; правила площадок, регион ресурсов, составные индексы Firestore, IAM и лимиты расходов должны быть подтверждены перед production-запуском.</p></section></div></div><section class="portable-sources" aria-labelledby="portable-sources-heading"><h2 id="portable-sources-heading">Sources</h2><ol><li><strong>Текущая спецификация и реализация</strong><span class="portable-source-meta">SPEC.md</span></li><li><strong>Матрица наличия архитектурных слоёв</strong><span class="portable-source-meta">sqlite · 2026-07-23T10:00:00+04:00</span><p>Материализует бинарную матрицу, полученную ручным аудитом SPEC.md и исходников.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>SELECT &#39;Версии объявлений&#39; AS layer, 0 AS implemented UNION ALL SELECT &#39;Нормализация&#39;, 0 UNION ALL SELECT &#39;Аналоги&#39;, 0 UNION ALL SELECT &#39;Полные расходы&#39;, 0 UNION ALL SELECT &#39;Риск-фильтры&#39;, 0 UNION ALL SELECT &#39;Decision engine&#39;, 0 UNION ALL SELECT &#39;Уведомления&#39;, 1 UNION ALL SELECT &#39;Outcome loop&#39;, 0</code></pre></details></li><li><strong>Сопоставление текущей и целевой концепции</strong><span class="portable-source-meta">sqlite · 2026-07-23T10:00:00+04:00</span><p>Материализует сопоставление, полученное из ручного аудита архитектуры.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>SELECT &#39;Главный результат&#39; AS aspect, &#39;is_deal и общий score&#39; AS current, &#39;Максимальная цена покупки, прибыль, ROI, confidence и действие&#39; AS target UNION ALL SELECT &#39;Объект учёта&#39;, &#39;URL объявления&#39;, &#39;Автомобиль, источник и неизменяемые версии фиксированной цены&#39; UNION ALL SELECT &#39;Рыночная цена&#39;, &#39;Одна оценка Gemini&#39;, &#39;Диапазон нормализованных аналогов с покрытием и поправками&#39; UNION ALL SELECT &#39;Расходы&#39;, &#39;Цена и предполагаемый ремонт&#39;, &#39;Полная себестоимость владения и перепродажи плюс резерв риска&#39; UNION ALL SELECT &#39;Роль LLM&#39;, &#39;Цена, ремонт, прибыль и решение&#39;, &#39;Извлечение неструктурированных признаков и объяснение&#39; UNION ALL SELECT &#39;Источники&#39;, &#39;Один общий конвейер&#39;, &#39;Раздельные поправки для типов классифайдов&#39; UNION ALL SELECT &#39;Риск&#39;, &#39;Часть рассуждения модели&#39;, &#39;Жёсткие стоп-факторы, инспекция и диапазоны неопределённости&#39;</code></pre></details></li><li><strong>Классификация автомобильных источников</strong><span class="portable-source-meta">sqlite · 2026-07-23T10:00:00+04:00</span><p>Материализует классификацию источников с фиксированными ценами и наборов проверки.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>SELECT &#39;Рынок/лиды&#39; AS category, &#39;Dubizzle&#39; AS source, &#39;Private/dealer asking и новые лиды&#39; AS signal, &#39;1&#39; AS priority, &#39;Кросс-листинг и asking не равен продаже&#39; AS caveat UNION ALL SELECT &#39;Рынок&#39;, &#39;DubiCars&#39;, &#39;Private/dealer asking по ОАЭ&#39;, &#39;1&#39;, &#39;Дилерская доля и дубликаты&#39; UNION ALL SELECT &#39;Рынок&#39;, &#39;YallaMotor&#39;, &#39;Used, new и certified asking&#39;, &#39;1&#39;, &#39;Нужно разделять тип предложения&#39; UNION ALL SELECT &#39;Транзакции&#39;, &#39;BuyAnyCar Historical Values&#39;, &#39;Исторические C2B-транзакции&#39;, &#39;1&#39;, &#39;Оптовый уровень, покрытие и доступ требуют проверки&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;RTA Vehicle Status&#39;, &#39;История владения и технический статус&#39;, &#39;1&#39;, &#39;Авторизация, оплата, on-demand&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;Физическая инспекция&#39;, &#39;Состояние, OBD, кузов и шасси&#39;, &#39;1&#39;, &#39;Только после shortlist, не полностью автоматическая&#39; UNION ALL SELECT &#39;Рынок/лиды&#39;, &#39;CarSwitch&#39;, &#39;Управляемые объявления и valuation&#39;, &#39;2&#39;, &#39;Сервисная/дилерская премия&#39; UNION ALL SELECT &#39;Рынок&#39;, &#39;Cars24 UAE&#39;, &#39;Inspected retail inventory&#39;, &#39;2&#39;, &#39;Гарантия и retail premium&#39; UNION ALL SELECT &#39;Рынок/лиды&#39;, &#39;OpenSooq&#39;, &#39;Частные объявления по всем эмиратам&#39;, &#39;2&#39;, &#39;Высокий шум и смешанные категории&#39; UNION ALL SELECT &#39;Retail ceiling&#39;, &#39;Al-Futtaim Automall&#39;, &#39;Certified asking&#39;, &#39;2&#39;, &#39;Премия за гарантию и подготовку&#39; UNION ALL SELECT &#39;Retail ceiling&#39;, &#39;Al Tayer Pre-Owned&#39;, &#39;Certified asking по представленным брендам&#39;, &#39;2&#39;, &#39;Ограниченное покрытие брендов&#39; UNION ALL SELECT &#39;Exit floor&#39;, &#39;SellAnyCar&#39;, &#39;Быстрый C2B offer&#39;, &#39;2&#39;, &#39;Не розничная цена перепродажи&#39; UNION ALL SELECT &#39;Расходы&#39;, &#39;PartSouq&#39;, &#39;Каталожные цены и наличие деталей&#39;, &#39;2&#39;, &#39;Не включает работу и локальные скидки&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;CarReport&#39;, &#39;VIN-история и импортные данные&#39;, &#39;3&#39;, &#39;Покрытие и точность нужно валидировать&#39; UNION ALL SELECT &#39;Ground truth&#39;, &#39;Собственные завершённые сделки&#39;, &#39;Покупка, ремонт, продажа и срок&#39;, &#39;1&#39;, &#39;Данные появятся только после операционного пилота&#39;</code></pre></details></li><li><strong>Dubizzle: факторы оценки автомобиля</strong></li><li><strong>RTA: технический статус автомобиля</strong></li><li><strong>RTA: техническая инспекция</strong></li></ol></section></main>
+<p>Вывод основан на <code>SPEC.md</code> и исходниках проекта по состоянию на 23 июля 2026 года, открытых страницах автомобильных источников и официальной документации Google Cloud/Firebase. В проекте нет данных о фактических закрытых продажах, ремонтах, объёме Firestore-операций и стоимости облачной обработки, поэтому числовые пороги и бюджет инфраструктуры не считаются проверенными. Asking prices используются только как приближение; форматы и лимиты источников, регион ресурсов, составные индексы Firestore, IAM и лимиты расходов должны быть подтверждены перед production-запуском.</p></section></div></div><section class="portable-sources" aria-labelledby="portable-sources-heading"><h2 id="portable-sources-heading">Sources</h2><ol><li><strong>Текущая спецификация и реализация</strong><span class="portable-source-meta">SPEC.md</span></li><li><strong>Матрица наличия архитектурных слоёв</strong><span class="portable-source-meta">sqlite · 2026-07-23T10:00:00+04:00</span><p>Материализует бинарную матрицу, полученную ручным аудитом SPEC.md и исходников.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>SELECT &#39;Версии объявлений&#39; AS layer, 0 AS implemented UNION ALL SELECT &#39;Нормализация&#39;, 0 UNION ALL SELECT &#39;Аналоги&#39;, 0 UNION ALL SELECT &#39;Полные расходы&#39;, 0 UNION ALL SELECT &#39;Риск-фильтры&#39;, 0 UNION ALL SELECT &#39;Decision engine&#39;, 0 UNION ALL SELECT &#39;Уведомления&#39;, 1 UNION ALL SELECT &#39;Outcome loop&#39;, 0</code></pre></details></li><li><strong>Сопоставление текущей и целевой концепции</strong><span class="portable-source-meta">sqlite · 2026-07-23T10:00:00+04:00</span><p>Материализует сопоставление, полученное из ручного аудита архитектуры.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>SELECT &#39;Главный результат&#39; AS aspect, &#39;is_deal и общий score&#39; AS current, &#39;Максимальная цена покупки, прибыль, ROI, confidence и действие&#39; AS target UNION ALL SELECT &#39;Объект учёта&#39;, &#39;URL объявления&#39;, &#39;Автомобиль, источник и неизменяемые версии фиксированной цены&#39; UNION ALL SELECT &#39;Рыночная цена&#39;, &#39;Одна оценка Gemini&#39;, &#39;Диапазон нормализованных аналогов с покрытием и поправками&#39; UNION ALL SELECT &#39;Расходы&#39;, &#39;Цена и предполагаемый ремонт&#39;, &#39;Полная себестоимость владения и перепродажи плюс резерв риска&#39; UNION ALL SELECT &#39;Роль LLM&#39;, &#39;Цена, ремонт, прибыль и решение&#39;, &#39;Извлечение неструктурированных признаков и объяснение&#39; UNION ALL SELECT &#39;Источники&#39;, &#39;Один общий конвейер&#39;, &#39;Раздельные поправки для типов классифайдов&#39; UNION ALL SELECT &#39;Риск&#39;, &#39;Часть рассуждения модели&#39;, &#39;Жёсткие стоп-факторы, инспекция и диапазоны неопределённости&#39;</code></pre></details></li><li><strong>Классификация автомобильных источников</strong><span class="portable-source-meta">sqlite · 2026-07-23T10:00:00+04:00</span><p>Материализует классификацию источников с фиксированными ценами и наборов проверки.</p><details class="portable-source-query" open><summary>SQL query</summary><pre><code>SELECT &#39;Рынок/лиды&#39; AS category, &#39;Dubizzle&#39; AS source, &#39;Private/dealer asking и новые лиды&#39; AS signal, &#39;1&#39; AS priority, &#39;Кросс-листинг и asking не равен продаже&#39; AS caveat UNION ALL SELECT &#39;Рынок&#39;, &#39;DubiCars&#39;, &#39;Private/dealer asking по ОАЭ&#39;, &#39;1&#39;, &#39;Дилерская доля и дубликаты&#39; UNION ALL SELECT &#39;Рынок&#39;, &#39;YallaMotor&#39;, &#39;Used, new и certified asking&#39;, &#39;1&#39;, &#39;Нужно разделять тип предложения&#39; UNION ALL SELECT &#39;Транзакции&#39;, &#39;BuyAnyCar Historical Values&#39;, &#39;Исторические C2B-транзакции&#39;, &#39;1&#39;, &#39;Оптовый уровень, покрытие и доступ требуют проверки&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;RTA Vehicle Status&#39;, &#39;История владения и технический статус&#39;, &#39;1&#39;, &#39;Авторизация, оплата, on-demand&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;Физическая инспекция&#39;, &#39;Состояние, OBD, кузов и шасси&#39;, &#39;1&#39;, &#39;Только после shortlist, не полностью автоматическая&#39; UNION ALL SELECT &#39;Рынок/лиды&#39;, &#39;CarSwitch&#39;, &#39;Управляемые объявления и valuation&#39;, &#39;2&#39;, &#39;Сервисная/дилерская премия&#39; UNION ALL SELECT &#39;Рынок&#39;, &#39;Cars24 UAE&#39;, &#39;Inspected retail inventory&#39;, &#39;2&#39;, &#39;Гарантия и retail premium&#39; UNION ALL SELECT &#39;Рынок/лиды&#39;, &#39;OpenSooq&#39;, &#39;Частные объявления по всем эмиратам&#39;, &#39;2&#39;, &#39;Высокий шум и смешанные категории&#39; UNION ALL SELECT &#39;Retail ceiling&#39;, &#39;Al-Futtaim Automall&#39;, &#39;Certified asking&#39;, &#39;2&#39;, &#39;Премия за гарантию и подготовку&#39; UNION ALL SELECT &#39;Retail ceiling&#39;, &#39;Al Tayer Pre-Owned&#39;, &#39;Certified asking по представленным брендам&#39;, &#39;2&#39;, &#39;Ограниченное покрытие брендов&#39; UNION ALL SELECT &#39;Exit floor&#39;, &#39;SellAnyCar&#39;, &#39;Быстрый C2B offer&#39;, &#39;2&#39;, &#39;Не розничная цена перепродажи&#39; UNION ALL SELECT &#39;Расходы&#39;, &#39;PartSouq&#39;, &#39;Каталожные цены и наличие деталей&#39;, &#39;2&#39;, &#39;Не включает работу и локальные скидки&#39; UNION ALL SELECT &#39;Проверка&#39;, &#39;CarReport&#39;, &#39;VIN-история и импортные данные&#39;, &#39;3&#39;, &#39;Покрытие и точность нужно валидировать&#39; UNION ALL SELECT &#39;Ground truth&#39;, &#39;Собственные завершённые сделки&#39;, &#39;Покупка, ремонт, продажа и срок&#39;, &#39;1&#39;, &#39;Данные появятся только после операционного пилота&#39;</code></pre></details></li><li><strong>Dubizzle: факторы оценки автомобиля</strong></li><li><strong>RTA: технический статус автомобиля</strong></li><li><strong>RTA: техническая инспекция</strong></li></ol></section></main>
 <script data-data-analytics-portable-source-tooltips="true">(() => {
   const RUNTIME_FLAG = "__dataAnalyticsPortableSourceTooltipsInitialized";
   const READY_ATTRIBUTE = "data-portable-source-tooltips-ready";
@@ -425,186 +425,187 @@ html:not([data-portable-source-tooltips-ready]) .portable-chart-summary>.portabl
 })();</script>
 <div id="data-analytics-portable-reader" aria-hidden="true" inert></div>
 <template id="data-analytics-portable-artifact-payload-source" data-compression="gzip-base64">
-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
+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
+Zsye7cX/9l48+G9Mxwk5OKYAAA==
 </template>
 <template id="data-analytics-portable-reader-runtime-source" data-compression="gzip-base64">
 H4sIAAAAAAACCuy9a3fjNrYg+v38CilTV0MeQ4pk15MyyqfiR6e665VyVdLVjseESUhCTIEKCNnl
