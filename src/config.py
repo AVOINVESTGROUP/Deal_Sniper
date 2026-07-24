@@ -25,11 +25,14 @@ class Settings:
     source_pages: int
     carswitch_url_template: str
     carswitch_pages: int
+    cars24_url_template: str
+    cars24_pages: int
     request_timeout_seconds: float
     target_profit_aed: Decimal
     min_roi_percent: Decimal
     min_comparables_count: int
     default_cost_aed: Decimal
+    channel_max_posts_per_run: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,11 +55,20 @@ class Settings:
                 "https://carswitch.com/dubai/used-cars/search?page={page}",
             ),
             carswitch_pages=max(1, int(os.getenv("CARSWITCH_MAX_PAGES", "3"))),
+            cars24_url_template=os.getenv(
+                "CARS24_URL_TEMPLATE",
+                "https://www.cars24.ae/buy-used-cars-dubai/?page={page}",
+            ),
+            cars24_pages=max(1, int(os.getenv("CARS24_MAX_PAGES", "3"))),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
             target_profit_aed=Decimal(os.getenv("TARGET_PROFIT_AED", "5000")),
             min_roi_percent=Decimal(os.getenv("MIN_ROI_PERCENT", "10")),
             min_comparables_count=max(2, int(os.getenv("MIN_COMPARABLES_COUNT", "3"))),
             default_cost_aed=Decimal(os.getenv("DEFAULT_NON_PURCHASE_COST_AED", "5000")),
+            channel_max_posts_per_run=max(
+                1,
+                int(os.getenv("CHANNEL_MAX_POSTS_PER_RUN", "10")),
+            ),
         )
 
     def require_bot_token(self) -> str:

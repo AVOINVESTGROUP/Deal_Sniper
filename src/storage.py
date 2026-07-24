@@ -29,6 +29,12 @@ class Repository(Protocol):
         self, target_id: str, listing_id: str, content_hash: str
     ) -> None: ...
 
+    def source_enabled(self, source_name: str, default: bool = True) -> bool: ...
+
+    def set_source_enabled(self, source_name: str, enabled: bool) -> None: ...
+
+    def claim_telegram_update(self, update_id: int) -> bool: ...
+
 
 def snapshot_hash(snapshot: ListingSnapshot) -> str:
     """Вычисляет hash только по значимым полям объявления."""
@@ -80,6 +86,15 @@ class LocalRepository:
                     content_hash TEXT NOT NULL,
                     sent_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (target_id, listing_id, content_hash)
+                );
+                CREATE TABLE IF NOT EXISTS source_registry (
+                    source_name TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS telegram_updates (
+                    update_id INTEGER PRIMARY KEY,
+                    claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 """
             )
@@ -189,6 +204,38 @@ class LocalRepository:
                 """,
                 (target_id, listing_id, content_hash),
             )
+
+    def source_enabled(self, source_name: str, default: bool = True) -> bool:
+        """Возвращает сохранённое состояние источника или его состояние по умолчанию."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT enabled FROM source_registry WHERE source_name = ?",
+                (source_name,),
+            ).fetchone()
+        return bool(row["enabled"]) if row is not None else default
+
+    def set_source_enabled(self, source_name: str, enabled: bool) -> None:
+        """Включает или отключает источник без удаления накопленной истории."""
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_registry(source_name, enabled, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(source_name) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (source_name, int(enabled)),
+            )
+
+    def claim_telegram_update(self, update_id: int) -> bool:
+        """Атомарно закрепляет Telegram update за единственным обработчиком."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO telegram_updates(update_id) VALUES (?)",
+                (update_id,),
+            )
+        return cursor.rowcount == 1
 
     def import_snapshots(self, snapshots: Iterable[ListingSnapshot]) -> int:
         """Упрощает тестовую пакетную загрузку без mock fallback."""

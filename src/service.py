@@ -7,6 +7,7 @@ from src.config import Settings
 from src.domain.engines import ComparablePriceEngine, DecisionEngine, DecisionPolicy
 from src.domain.models import ComparableVehicle, CostEstimate, DealDecision, ListingSnapshot
 from src.sources.base import CompositeSource, SourceAdapter
+from src.sources.cars24 import Cars24Source
 from src.sources.carswitch import CarSwitchSource
 from src.sources.dubicars import DubiCarsSource
 from src.storage import LocalRepository, Repository
@@ -44,11 +45,11 @@ class DealService:
         self,
         settings: Settings,
         repository: Repository,
-        source: SourceAdapter,
+        sources: dict[str, SourceAdapter],
     ) -> None:
         self.settings = settings
         self.repository = repository
-        self.source = source
+        self.sources = sources
         self.market_engine = ComparablePriceEngine()
         self.decision_engine = DecisionEngine(
             DecisionPolicy(
@@ -66,28 +67,56 @@ class DealService:
             repository: Repository = FirestoreRepository(settings.google_cloud_project)
         else:
             repository = LocalRepository(settings.database_path)
-        return cls(
-            settings=settings,
-            repository=repository,
-            source=CompositeSource(
-                [
-                    DubiCarsSource(
-                        settings.source_url_template,
-                        pages=settings.source_pages,
-                        timeout_seconds=settings.request_timeout_seconds,
-                    ),
-                    CarSwitchSource(
-                        settings.carswitch_url_template,
-                        pages=settings.carswitch_pages,
-                        timeout_seconds=settings.request_timeout_seconds,
-                    ),
-                ]
+        sources: dict[str, SourceAdapter] = {
+            "dubicars": DubiCarsSource(
+                settings.source_url_template,
+                pages=settings.source_pages,
+                timeout_seconds=settings.request_timeout_seconds,
             ),
-        )
+            "carswitch": CarSwitchSource(
+                settings.carswitch_url_template,
+                pages=settings.carswitch_pages,
+                timeout_seconds=settings.request_timeout_seconds,
+            ),
+            "cars24": Cars24Source(
+                settings.cars24_url_template,
+                pages=settings.cars24_pages,
+                timeout_seconds=settings.request_timeout_seconds,
+            ),
+        }
+        return cls(settings=settings, repository=repository, sources=sources)
 
-    async def scan(self) -> ScanReport:
+    def source_statuses(self) -> dict[str, bool]:
+        """Возвращает доступные адаптеры и централизованные переключатели Firestore/SQLite."""
+        return {
+            name: self.repository.source_enabled(name, default=True)
+            for name in self.sources
+        }
+
+    def set_source_enabled(self, source_name: str, enabled: bool) -> None:
+        """Меняет состояние зарегистрированного адаптера без удаления данных."""
+        normalized = source_name.strip().casefold()
+        if normalized not in self.sources:
+            raise ValueError(f"Неизвестный источник: {source_name}")
+        self.repository.set_source_enabled(normalized, enabled)
+
+    async def scan(self, source_name: str | None = None) -> ScanReport:
         """Собирает источник, сохраняет версии и рассчитывает доступные группы."""
-        fetched = await self.source.fetch()
+        if source_name is not None:
+            normalized = source_name.strip().casefold()
+            if normalized not in self.sources:
+                raise ValueError(f"Неизвестный источник: {source_name}")
+            source: SourceAdapter = self.sources[normalized]
+        else:
+            enabled = [
+                adapter
+                for name, adapter in self.sources.items()
+                if self.repository.source_enabled(name, default=True)
+            ]
+            if not enabled:
+                raise RuntimeError("Все источники отключены")
+            source = CompositeSource(enabled)
+        fetched = await source.fetch()
         report = ScanReport(fetched=len(fetched))
         version_hashes: dict[str, str] = {}
         for listing in fetched:

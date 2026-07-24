@@ -40,7 +40,8 @@ class DealBot:
             "Dubai Deal Sniper запущен.\n\n"
             "/scan — получить свежие объявления и выполнить расчёт\n"
             "/deals — показать последние подходящие варианты\n"
-            "/status — состояние локального хранилища"
+            "/status — состояние локального хранилища\n"
+            "/sources — управление источниками"
         )
 
     async def identity(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -118,6 +119,69 @@ class DealBot:
                 parse_mode=ParseMode.HTML,
             )
 
+    async def sources_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Показывает зарегистрированные площадки и команды управления ими."""
+        del context
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        await update.effective_message.reply_text(format_sources(self.service))
+
+    async def source_enable(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Включает зарегистрированный источник из Telegram."""
+        await self._set_source(update, context, enabled=True)
+
+    async def source_disable(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Отключает источник, сохраняя объявления и историю цен."""
+        await self._set_source(update, context, enabled=False)
+
+    async def _set_source(
+        self,
+        update: Update,
+        context: ContextTypes.DEFAULT_TYPE,
+        *,
+        enabled: bool,
+    ) -> None:
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        if not context.args:
+            await update.effective_message.reply_text(
+                "Укажите источник. Пример: /source_on cars24"
+            )
+            return
+        try:
+            self.service.set_source_enabled(context.args[0], enabled)
+        except ValueError:
+            await update.effective_message.reply_text(format_sources(self.service))
+            return
+        action = "включён" if enabled else "отключён"
+        await update.effective_message.reply_text(
+            f"Источник {context.args[0].casefold()} {action}.\n\n{format_sources(self.service)}"
+        )
+
+    async def source_scan(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Проверяет один адаптер независимо от общего расписания."""
+        if not self.allowed(update):
+            await self.deny(update)
+            return
+        assert update.effective_message
+        if not context.args:
+            await update.effective_message.reply_text(
+                "Укажите источник. Пример: /source_scan cars24"
+            )
+            return
+        source_name = context.args[0].casefold()
+        await update.effective_message.reply_text(f"Проверяю источник {source_name}…")
+        try:
+            report = await self.service.scan(source_name)
+        except (RuntimeError, ValueError) as error:
+            await update.effective_message.reply_text(f"Ошибка источника: {error}")
+            return
+        await update.effective_message.reply_text(f"{source_name}: {report.summary()}")
+
 
 def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
     """Создаёт безопасную HTML-карточку решения."""
@@ -143,6 +207,22 @@ def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
     )
 
 
+def format_sources(service: DealService) -> str:
+    """Формирует компактную панель управления источниками."""
+    lines = ["Источники объявлений:"]
+    for name, enabled in service.source_statuses().items():
+        lines.append(f"{'✅' if enabled else '⛔'} {name}")
+    lines.extend(
+        [
+            "",
+            "/source_on cars24 — включить",
+            "/source_off cars24 — отключить",
+            "/source_scan cars24 — проверить отдельно",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def build_application(settings: Settings) -> Application[Any, Any, Any, Any, Any, Any]:
     """Собирает Telegram Application для тестирования и запуска."""
     service = DealService.from_settings(settings)
@@ -154,6 +234,10 @@ def build_application(settings: Settings) -> Application[Any, Any, Any, Any, Any
     application.add_handler(CommandHandler("status", bot.status))
     application.add_handler(CommandHandler("scan", bot.scan))
     application.add_handler(CommandHandler("deals", bot.deals))
+    application.add_handler(CommandHandler("sources", bot.sources_status))
+    application.add_handler(CommandHandler(("source_on", "source_add"), bot.source_enable))
+    application.add_handler(CommandHandler(("source_off", "source_remove"), bot.source_disable))
+    application.add_handler(CommandHandler("source_scan", bot.source_scan))
     return application
 
 
@@ -174,6 +258,15 @@ async def scan_and_publish(settings: Settings) -> int:
         for item in report.decisions
         if item.decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
     ]
+    candidates.sort(
+        key=lambda item: (
+            item.decision.expected_profit_aed or 0,
+            item.decision.roi_percent or 0,
+            item.decision.confidence,
+        ),
+        reverse=True,
+    )
+    candidates = candidates[: settings.channel_max_posts_per_run]
     async with Bot(settings.require_bot_token()) as bot:
         return await publish_candidates(bot, channel_id, service, candidates)
 

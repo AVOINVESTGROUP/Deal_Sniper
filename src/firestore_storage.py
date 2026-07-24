@@ -3,6 +3,7 @@
 import hashlib
 from datetime import UTC, datetime
 
+from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 
 from src.domain.models import DealDecision, ListingSnapshot
@@ -121,6 +122,37 @@ class FirestoreRepository:
                 "sent_at": datetime.now(UTC),
             }
         )
+
+    def source_enabled(self, source_name: str, default: bool = True) -> bool:
+        """Читает переключатель источника из централизованного реестра Firestore."""
+        document = self.client.collection("source_registry").document(source_name).get()
+        data = document.to_dict() or {}
+        value = data.get("enabled")
+        return value if isinstance(value, bool) else default
+
+    def set_source_enabled(self, source_name: str, enabled: bool) -> None:
+        """Сохраняет переключатель источника, доступный API и фоновым задачам."""
+        self.client.collection("source_registry").document(source_name).set(
+            {
+                "source_name": source_name,
+                "enabled": enabled,
+                "updated_at": datetime.now(UTC),
+            },
+            merge=True,
+        )
+
+    def claim_telegram_update(self, update_id: int) -> bool:
+        """Атомарно блокирует повторную обработку webhook-доставки Telegram."""
+        try:
+            self.client.collection("telegram_updates").document(str(update_id)).create(
+                {
+                    "update_id": update_id,
+                    "claimed_at": datetime.now(UTC),
+                }
+            )
+        except AlreadyExists:
+            return False
+        return True
 
 
 def _stable_id(*parts: str) -> str:

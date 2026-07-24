@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.domain.models import ListingSnapshot
+from src.sources.cars24 import parse_cars24_page
 from src.sources.carswitch import parse_carswitch_page
 from src.sources.dubicars import parse_search_page
 from src.storage import LocalRepository
@@ -58,6 +59,29 @@ CARSWITCH_HTML = """
 </script>
 """
 
+CARS24_HTML = """
+<script>
+window.__PRELOADED_STATE__ = {
+  "carListing": {
+    "content": [{
+      "appointmentId": "9714840800",
+      "make": "MITSUBISHI",
+      "model": "ASX",
+      "year": "2021",
+      "variant": "GLX LOWLINE",
+      "listingActive": true,
+      "booked": false,
+      "price": 33999,
+      "odometerReading": 78171,
+      "city": "Dubai",
+      "shareUrl": "https://c24ae.live/example",
+      "mainImage": {"path": "cars/9714840800/front.jpg"}
+    }]
+  }
+};
+</script>
+"""
+
 
 def listing(price: str) -> ListingSnapshot:
     """Создаёт версию одного объявления."""
@@ -93,6 +117,16 @@ def test_carswitch_json_ld_parser() -> None:
     assert results[0].price_aed == Decimal("38150")
 
 
+def test_cars24_preloaded_state_parser() -> None:
+    results = parse_cars24_page(CARS24_HTML)
+    assert len(results) == 1
+    assert results[0].source_listing_id == "9714840800"
+    assert results[0].make == "Mitsubishi"
+    assert results[0].model == "Asx"
+    assert results[0].price_aed == Decimal("33999")
+    assert results[0].mileage_km == 78_171
+
+
 def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:
     repository = LocalRepository(tmp_path / "deal_sniper.db")
     first = repository.save_snapshot(listing("79000"))
@@ -107,3 +141,13 @@ def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:
     assert not repository.notification_sent("channel", "test:42", changed[2])
     repository.mark_notification_sent("channel", "test:42", changed[2])
     assert repository.notification_sent("channel", "test:42", changed[2])
+
+    assert repository.source_enabled("cars24")
+    repository.set_source_enabled("cars24", False)
+    assert not repository.source_enabled("cars24")
+    repository.set_source_enabled("cars24", True)
+    assert repository.source_enabled("cars24")
+
+    assert repository.claim_telegram_update(12345)
+    assert not repository.claim_telegram_update(12345)
+    assert repository.claim_telegram_update(12346)
