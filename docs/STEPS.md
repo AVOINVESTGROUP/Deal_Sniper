@@ -103,3 +103,32 @@
 - [x] Повторные доставки одного Telegram webhook блокируются атомарным `update_id` в SQLite/Firestore.
 - [x] Production-проверка дважды отправила одинаковый webhook: команда выполнена один раз, повтор безопасно отклонён.
 - [x] Меню команд Telegram обновлено командами управления источниками; расписание после проверки снова включено.
+
+## Фаза 12: Нормализация, identity resolution и версия расчётного ядра
+
+- [x] Добавлены `NormalizedVehicle`, `VehicleIdentity` и `Outcome`; неизвестные признаки не заменяются догадками.
+- [x] Межсайтовые совпадения объединяются по VIN либо строгому набору марки, модели, года, пробега, цены, trim и specification.
+- [x] Comparable selector учитывает год, пробег, поколение, trim, specification, свежесть, тип продавца и исключает cross-source дубли.
+- [x] Аналоги получают детерминированные поправки за год, пробег и тип продавца до расчёта MAD/квантилей.
+- [x] Реализованы полноценные Cost и Risk Engines: инспекция, ремонт, подготовка, хранение, капитал, продажа и резерв риска.
+- [x] Решения версионированы `engine_version=2.0.0`; новый алгоритм пересчитывает snapshot, неизменный алгоритм — нет.
+- [x] Сквозной fixture-тест подтверждает `CONTACT` для выгодной машины и отсутствие повторной обработки неизменённых данных.
+
+## Фаза 13: Raw archive, фоновые задачи и персональная воронка
+
+- [x] Каждый успешный HTTP-ответ источника сохраняется до парсинга: локально в `data/raw`, в production — в Cloud Storage; checksum и provenance записываются в Repository.
+- [x] Сбор отделён от расчёта: `main.py collect --source <name>` обслуживает отдельный Cloud Run Job одной площадки.
+- [x] Новые версии ставятся в `listing-processing`, а Telegram-доставка — в `telegram-delivery`.
+- [x] Имена Cloud Tasks детерминированы, повторная постановка и повторная доставка не создают дубли.
+- [x] `/scan` и `/source_scan` запускают Cloud Run Jobs и сразу освобождают Telegram webhook.
+- [x] Добавлены персональные `/settings`, бюджет, прибыль, ROI, марки, `/watchlist` и состояния `WATCH`, `CONTACTED`, `INSPECT`, `REJECT`.
+- [x] Созданы production bucket `avo-deal-sniper-raw-snapshots` и очереди `listing-processing`/`telegram-delivery` с retry/backoff.
+- [x] Развёрнуты отдельные jobs `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`.
+- [x] Cars24 и CarSwitch прошли production smoke test; DubiCars адаптирован к USD JSON-LD, пересчитывает по конфигурации AED/USD и снова прошёл job.
+- [x] Нормализация Firestore переведена на batch-записи; `/status` показывает здоровье каждого источника.
+- [x] Добавлен валидный Terraform production-контура и отдельная Terraform-проверка в GitHub Actions.
+- [x] Исправлён критический приоритет решения: warning больше не превращает убыточный автомобиль в `INSPECT`; `INSPECT` допустим только после прохождения прибыли, ROI и максимальной цены покупки.
+- [x] Добавлен второй защитный фильтр перед `/deals`, личной и канальной доставкой, включая старые решения; regression-набор расширен до 14 тестов.
+- [x] Версия Decision Engine включена в ID processing task; обновление правил гарантированно пересчитывает прежний snapshot и не конфликтует с retention имён Cloud Tasks.
+- [x] Production-пересчёт Engine 2.1 обработал 231 объявление: 212 `INSUFFICIENT_DATA`, 18 `REJECT`, 1 экономически валидный `INSPECT`; нарушений profit/ROI/max purchase — 0.
+- [x] Старое общее расписание остановлено; три отдельных Scheduler job включены каждые 10 минут в `Asia/Dubai`.

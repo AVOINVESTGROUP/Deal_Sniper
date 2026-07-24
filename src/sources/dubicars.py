@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 from pydantic import HttpUrl
 
 from src.domain.models import ListingSnapshot, SellerType
+from src.raw_storage import RawSnapshotArchive
 
 logger = logging.getLogger(__name__)
 LISTING_ID_PATTERN = re.compile(r"-(\d+)\.html$")
@@ -26,10 +27,19 @@ class SourceError(RuntimeError):
 class DubiCarsSource:
     """Асинхронный адаптер страниц поиска DubiCars."""
 
-    def __init__(self, url_template: str, pages: int = 3, timeout_seconds: float = 30) -> None:
+    def __init__(
+        self,
+        url_template: str,
+        pages: int = 3,
+        timeout_seconds: float = 30,
+        archive: RawSnapshotArchive | None = None,
+        aed_to_usd_rate: Decimal = Decimal("3.6725"),
+    ) -> None:
         self.url_template = url_template
         self.pages = pages
         self.timeout_seconds = timeout_seconds
+        self.archive = archive
+        self.aed_to_usd_rate = aed_to_usd_rate
 
     async def fetch(self) -> list[ListingSnapshot]:
         """Загружает несколько страниц с ограниченными повторами."""
@@ -47,7 +57,7 @@ class DubiCarsSource:
         ) as client:
             for page in range(1, self.pages + 1):
                 html = await self._get_with_retry(client, self.url_template.format(page=page))
-                for item in parse_search_page(html):
+                for item in parse_search_page(html, self.aed_to_usd_rate):
                     listings[item.source_listing_id] = item
         if not listings:
             raise SourceError("DubiCars не вернул распознаваемых объявлений")
@@ -60,6 +70,13 @@ class DubiCarsSource:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
+                if self.archive is not None:
+                    await self.archive.save(
+                        "dubicars",
+                        str(response.url),
+                        response.headers.get("content-type", "text/html"),
+                        response.content,
+                    )
                 return response.text
             except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as exc:
                 last_error = exc
@@ -72,7 +89,10 @@ class DubiCarsSource:
         raise SourceError(f"Не удалось получить {url}: {last_error}") from last_error
 
 
-def parse_search_page(html: str) -> list[ListingSnapshot]:
+def parse_search_page(
+    html: str,
+    aed_to_usd_rate: Decimal = Decimal("3.6725"),
+) -> list[ListingSnapshot]:
     """Преобразует ItemList JSON-LD в доменные снимки."""
     soup = BeautifulSoup(html, "html.parser")
     for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
@@ -84,21 +104,28 @@ def parse_search_page(html: str) -> list[ListingSnapshot]:
         graph = document.get("@graph", []) if isinstance(document, dict) else []
         for node in graph:
             if isinstance(node, dict) and node.get("@type") == "ItemList":
-                return _parse_item_list(node.get("itemListElement", []))
+                return _parse_item_list(node.get("itemListElement", []), aed_to_usd_rate)
     raise SourceError("В странице отсутствует ItemList JSON-LD")
 
 
-def _parse_item_list(elements: Any) -> list[ListingSnapshot]:
+def _parse_item_list(elements: Any, aed_to_usd_rate: Decimal) -> list[ListingSnapshot]:
     results: list[ListingSnapshot] = []
     if not isinstance(elements, list):
         return results
     for element in elements:
         try:
             item = element["item"]
+            if str(item.get("itemCondition", "")).endswith("NewCondition"):
+                continue
             offer = item["offers"]
             url = str(item["url"])
             price = Decimal(str(offer["price"]))
-            if offer.get("priceCurrency") != "AED" or price <= 0:
+            currency = offer.get("priceCurrency")
+            if currency == "USD":
+                price *= aed_to_usd_rate
+            elif currency != "AED":
+                continue
+            if price <= 0:
                 continue
             listing_id = _source_listing_id(url)
             make = _name_from_schema_id(item.get("brand"))
@@ -115,8 +142,12 @@ def _parse_item_list(elements: Any) -> list[ListingSnapshot]:
                     observed_at=datetime.now(UTC),
                     make=make,
                     model=model,
+                    trim=str(item.get("vehicleConfiguration") or "").strip() or None,
                     year=int(item["vehicleModelDate"]),
                     mileage_km=int(mileage) if mileage is not None else None,
+                    body_type=str(item.get("bodyType") or "").strip() or None,
+                    transmission=str(item.get("vehicleTransmission") or "").strip() or None,
+                    fuel_type=str(item.get("fuelType") or "").strip() or None,
                     seller_type=SellerType.DEALER,
                     image_urls=[HttpUrl(str(image))] if image else [],
                 )

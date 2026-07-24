@@ -9,12 +9,14 @@ from src.domain.models import (
     CostEstimate,
     DealDecision,
     DecisionAction,
+    ListingSnapshot,
     MarketEstimate,
     RiskAssessment,
 )
 
 MONEY_STEP = Decimal("1")
 PERCENT_STEP = Decimal("0.1")
+DECISION_ENGINE_VERSION = "2.1.0"
 
 
 def money(value: Decimal) -> Decimal:
@@ -32,6 +34,86 @@ class DecisionPolicy:
     liquidity_discount_percent: Decimal = Decimal("5")
 
 
+@dataclass(frozen=True, slots=True)
+class CostPolicy:
+    """Проверяемые допущения полной непокупной себестоимости."""
+
+    inspection_aed: Decimal = Decimal("500")
+    preparation_aed: Decimal = Decimal("1500")
+    base_repair_reserve_aed: Decimal = Decimal("2500")
+    holding_cost_per_day_aed: Decimal = Decimal("50")
+    expected_hold_days: int = 45
+    annual_capital_percent: Decimal = Decimal("8")
+    selling_cost_percent: Decimal = Decimal("2")
+    risk_reserve_percent: Decimal = Decimal("5")
+
+
+class RiskEngine:
+    """Извлекает только объяснимые технические предупреждения из данных объявления."""
+
+    STOP_TERMS = ("flood", "salvage", "non running", "not running", "major accident")
+    WARNING_TERMS = ("accident", "repaint", "repair", "imported", "warning light")
+
+    def assess(self, listing: ListingSnapshot) -> RiskAssessment:
+        text = f"{listing.title} {listing.description}".casefold()
+        stop_flags = [term for term in self.STOP_TERMS if term in text]
+        warnings = [term for term in self.WARNING_TERMS if term in text]
+        missing = 0
+        if not listing.specification:
+            warnings.append("Не указана региональная спецификация")
+            missing += 1
+        if not listing.trim:
+            warnings.append("Не указана комплектация")
+            missing += 1
+        if listing.mileage_km is None:
+            warnings.append("Не указан пробег")
+            missing += 1
+        elif listing.mileage_km > 200_000:
+            warnings.append("Пробег выше 200 000 км")
+        if listing.year is None:
+            missing += 1
+        quality = max(Decimal("0"), Decimal("1") - Decimal(missing) * Decimal("0.15"))
+        return RiskAssessment(
+            stop_flags=stop_flags,
+            warnings=list(dict.fromkeys(warnings)),
+            data_quality_score=quality,
+        )
+
+
+class CostEngine:
+    """Рассчитывает инспекцию, ремонт, хранение, капитал, продажу и риск."""
+
+    def __init__(self, policy: CostPolicy | None = None) -> None:
+        self.policy = policy or CostPolicy()
+
+    def estimate(
+        self,
+        asking_price_aed: Decimal,
+        risks: RiskAssessment,
+    ) -> CostEstimate:
+        repair_multiplier = Decimal(len(risks.warnings)) * Decimal("0.25")
+        repair = self.policy.base_repair_reserve_aed * (Decimal("1") + repair_multiplier)
+        holding = self.policy.holding_cost_per_day_aed * self.policy.expected_hold_days
+        capital = (
+            asking_price_aed
+            * self.policy.annual_capital_percent
+            / Decimal("100")
+            * Decimal(self.policy.expected_hold_days)
+            / Decimal("365")
+        )
+        selling = asking_price_aed * self.policy.selling_cost_percent / Decimal("100")
+        risk_reserve = asking_price_aed * self.policy.risk_reserve_percent / Decimal("100")
+        return CostEstimate(
+            inspection_aed=money(self.policy.inspection_aed),
+            repair_aed=money(repair),
+            preparation_aed=money(self.policy.preparation_aed),
+            holding_aed=money(holding),
+            capital_aed=money(capital),
+            selling_aed=money(selling),
+            risk_reserve_aed=money(risk_reserve),
+        )
+
+
 class ComparablePriceEngine:
     """Строит устойчивый рыночный диапазон без LLM."""
 
@@ -43,8 +125,11 @@ class ComparablePriceEngine:
         if len(unique) < min_comparables:
             return None
 
-        ordered = sorted(unique.values(), key=lambda item: item.price_aed)
-        prices = [item.price_aed for item in ordered]
+        ordered = sorted(
+            unique.values(),
+            key=lambda item: item.adjusted_price_aed or item.price_aed,
+        )
+        prices = [item.adjusted_price_aed or item.price_aed for item in ordered]
         center = Decimal(str(median(prices)))
         deviations = [abs(value - center) for value in prices]
         mad = Decimal(str(median(deviations)))
@@ -52,14 +137,18 @@ class ComparablePriceEngine:
         accepted = (
             ordered
             if mad == 0
-            else [item for item in ordered if abs(item.price_aed - center) <= limit]
+            else [
+                item
+                for item in ordered
+                if abs((item.adjusted_price_aed or item.price_aed) - center) <= limit
+            ]
         )
         rejected = [item for item in ordered if item not in accepted]
 
         if len(accepted) < min_comparables:
             return None
 
-        accepted_prices = [item.price_aed for item in accepted]
+        accepted_prices = [item.adjusted_price_aed or item.price_aed for item in accepted]
         count = len(accepted_prices)
         low = accepted_prices[max(0, round((count - 1) * 0.25))]
         high = accepted_prices[min(count - 1, round((count - 1) * 0.75))]
@@ -79,6 +168,7 @@ class DecisionEngine:
 
     def __init__(self, policy: DecisionPolicy | None = None) -> None:
         self.policy = policy or DecisionPolicy()
+        self.version = DECISION_ENGINE_VERSION
 
     def decide(
         self,
@@ -101,6 +191,7 @@ class DecisionEngine:
                 roi_percent=None,
                 confidence=Decimal("0"),
                 reasons=["Недостаточно сопоставимых объявлений"],
+                engine_version=self.version,
             )
 
         resale = money(
@@ -121,18 +212,23 @@ class DecisionEngine:
             action = DecisionAction.REJECT
             reasons.append("Обнаружены стоп-факторы")
         elif asking_price_aed <= max_purchase and roi >= self.policy.min_roi_percent:
-            action = DecisionAction.CONTACT
-            reasons.append("Цена не выше максимальной цены покупки")
-        elif asking_price_aed <= resale and not risk_result.warnings:
+            if risk_result.warnings:
+                action = DecisionAction.INSPECT
+                reasons.append("Экономика проходит пороги, но требуется проверка рисков")
+            else:
+                action = DecisionAction.CONTACT
+                reasons.append("Цена не выше максимальной цены покупки")
+        elif profit > 0 and roi > 0 and asking_price_aed <= resale:
             action = DecisionAction.WATCH
-            reasons.append("Есть запас до цены перепродажи, но не выполнены целевые пороги")
-        elif risk_result.warnings:
-            action = DecisionAction.INSPECT
-            reasons.append("Перед решением требуется проверка предупреждений")
+            reasons.append("Сделка положительная, но не выполнены целевые пороги")
         else:
             action = DecisionAction.REJECT
             reasons.append("Цена не обеспечивает целевую прибыль и ROI")
 
+        confidence = (market.coverage_score * risk_result.data_quality_score).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        reasons.append(f"Полные непокупные расходы: {costs.total_aed:,.0f} AED")
         return DealDecision(
             action=action,
             asking_price_aed=money(asking_price_aed),
@@ -142,6 +238,7 @@ class DecisionEngine:
             max_purchase_price_aed=max_purchase,
             expected_profit_aed=profit,
             roi_percent=roi,
-            confidence=market.coverage_score,
+            confidence=confidence,
             reasons=reasons,
+            engine_version=self.version,
         )

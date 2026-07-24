@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.domain.models import ListingSnapshot
+from src.domain.normalization import normalize_listing, resolve_vehicle_identities
 from src.sources.cars24 import parse_cars24_page
 from src.sources.carswitch import parse_carswitch_page
 from src.sources.dubicars import parse_search_page
@@ -151,3 +152,9 @@ def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:
     assert repository.claim_telegram_update(12345)
     assert not repository.claim_telegram_update(12345)
     assert repository.claim_telegram_update(12346)
+
+    normalized = normalize_listing(listing("75000"))
+    assert normalized is not None
+    repository.save_normalized_vehicle(normalized)
+    identities, _mapping = resolve_vehicle_identities([normalized])
+    repository.save_vehicle_identity(identities[0])

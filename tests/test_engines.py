@@ -3,8 +3,22 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from src.domain.engines import ComparablePriceEngine, DecisionEngine, DecisionPolicy
-from src.domain.models import ComparableVehicle, CostEstimate, DecisionAction, SellerType
+from src.domain.engines import (
+    ComparablePriceEngine,
+    CostEngine,
+    CostPolicy,
+    DecisionEngine,
+    DecisionPolicy,
+    RiskEngine,
+)
+from src.domain.models import (
+    ComparableVehicle,
+    CostEstimate,
+    DecisionAction,
+    ListingSnapshot,
+    RiskAssessment,
+    SellerType,
+)
 
 
 def comparable(index: int, price: str) -> ComparableVehicle:
@@ -64,3 +78,59 @@ def test_missing_market_never_invents_price() -> None:
     )
     assert decision.action is DecisionAction.INSUFFICIENT_DATA
     assert decision.max_purchase_price_aed is None
+
+
+def test_cost_and_risk_engines_cover_full_cost_structure() -> None:
+    listing = ListingSnapshot(
+        source="test",
+        source_listing_id="risk-1",
+        url="https://example.com/risk-1",
+        title="Toyota Camry repaired after accident",
+        price_aed=Decimal("80000"),
+        make="Toyota",
+        model="Camry",
+        year=2022,
+        mileage_km=80_000,
+    )
+    risks = RiskEngine().assess(listing)
+    costs = CostEngine(CostPolicy()).estimate(listing.price_aed, risks)
+    assert risks.warnings
+    assert risks.data_quality_score < Decimal("1")
+    assert costs.inspection_aed > 0
+    assert costs.repair_aed > 0
+    assert costs.holding_aed > 0
+    assert costs.capital_aed > 0
+    assert costs.selling_aed > 0
+    assert costs.risk_reserve_aed > 0
+
+
+def test_warning_never_promotes_unprofitable_listing_to_inspect() -> None:
+    market = ComparablePriceEngine().estimate(
+        [comparable(index, str(135000 + index * 500)) for index in range(6)],
+        min_comparables=5,
+    )
+    decision = DecisionEngine().decide(
+        asking_price_aed=Decimal("145097"),
+        market=market,
+        costs=CostEstimate(repair_aed=Decimal("15000")),
+        risks=RiskAssessment(warnings=["Требуется проверка"]),
+    )
+    assert decision.expected_profit_aed is not None
+    assert decision.expected_profit_aed < 0
+    assert decision.action is DecisionAction.REJECT
+
+
+def test_warning_returns_inspect_only_for_profitable_listing() -> None:
+    market = ComparablePriceEngine().estimate(
+        [comparable(index, str(110000 + index * 1000)) for index in range(6)],
+        min_comparables=5,
+    )
+    decision = DecisionEngine().decide(
+        asking_price_aed=Decimal("70000"),
+        market=market,
+        costs=CostEstimate(repair_aed=Decimal("3000")),
+        risks=RiskAssessment(warnings=["Требуется проверка"]),
+    )
+    assert decision.expected_profit_aed is not None
+    assert decision.expected_profit_aed > 0
+    assert decision.action is DecisionAction.INSPECT

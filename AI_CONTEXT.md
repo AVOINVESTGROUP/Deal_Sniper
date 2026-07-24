@@ -77,3 +77,14 @@ C:\Dev\Deal_Sniper
 - Telegram webhook использует атомарную дедупликацию `update_id`; повторная доставка долгой команды не запускает второй расчёт.
 - Cars24 smoke test от 24 июля 2026 года: 75 уникальных машин на трёх страницах, у всех распознаны цена и пробег.
 - Production-релиз `0.2.2` развёрнут в Cloud Run; Scheduler снова включён с периодом 10 минут, Telegram command menu обновлено.
+- В рабочей ветке подготовлено расчётное ядро 2.0: нормализация, строгий cross-source identity resolution, отбор аналогов по году/пробегу/trim/specification и полная структура расходов.
+- Решения имеют `engine_version`; повторный запуск не пересчитывает ту же версию snapshot тем же алгоритмом, но позволяет контролируемо пересчитать данные после обновления движка.
+- Raw-ответы источников архивируются до parsing; production URI имеет вид `gs://.../raw/{source}/...`.
+- Production pipeline разделён на collector Jobs, очередь `listing-processing` и очередь `telegram-delivery`.
+- Telegram webhook не выполняет долгий сбор: `/scan` только запускает фоновые collector Jobs.
+- Пользовательские фильтры и действия хранятся в Firestore независимо для каждого Telegram user ID.
+- Production image `0.3.5` содержит Cloud Tasks pipeline, исправленный DubiCars currency parser, Firestore batch normalization, запрет убыточных `INSPECT` и engine-version task identity.
+- Рабочие production jobs: `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`.
+- Raw bucket: `avo-deal-sniper-raw-snapshots`; очереди: `listing-processing`, `telegram-delivery`.
+- Terraform в `infra/terraform` прошёл `terraform validate`; существующие ручные ресурсы требуют import до apply.
+- Decision Engine `2.1.0`: `INSPECT` означает экономически подходящую сделку с warning; отрицательная прибыль всегда `REJECT`. Доставка дополнительно проверяет прибыль, ROI и max purchase price.

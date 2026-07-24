@@ -15,6 +15,19 @@ from src.service import DealService
 logger = logging.getLogger(__name__)
 
 
+def is_publishable(decision: DealDecision, settings: Settings) -> bool:
+    """Защитный фильтр: убыточное решение никогда не уходит как кандидат."""
+    return bool(
+        decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        and decision.expected_profit_aed is not None
+        and decision.expected_profit_aed >= settings.target_profit_aed
+        and decision.roi_percent is not None
+        and decision.roi_percent >= settings.min_roi_percent
+        and decision.max_purchase_price_aed is not None
+        and decision.asking_price_aed <= decision.max_purchase_price_aed
+    )
+
+
 class DealBot:
     """Команды Telegram поверх независимого DealService."""
 
@@ -80,7 +93,7 @@ class DealBot:
         candidates = [
             item
             for item in report.decisions
-            if item.decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+            if is_publishable(item.decision, self.settings)
         ][:5]
         for item in candidates:
             await update.effective_message.reply_text(
@@ -106,7 +119,7 @@ class DealBot:
         candidates = [
             item
             for item in decisions
-            if item[1].action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+            if is_publishable(item[1], self.settings)
         ][:5]
         if not candidates:
             await update.effective_message.reply_text(
@@ -195,6 +208,7 @@ def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
         else "—"
     )
     roi = f"{decision.roi_percent}%" if decision.roi_percent is not None else "—"
+    listing_id = f"{listing.source}:{listing.source_listing_id}"
     return (
         f"<b>{html.escape(decision.action.value)}</b>\n"
         f"<b>{html.escape(listing.title)}</b>\n"
@@ -203,7 +217,9 @@ def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
         f"Ожидаемая прибыль: {profit}\n"
         f"ROI: {roi}\n"
         f"Уверенность: {decision.confidence:.0%}\n"
-        f'<a href="{html.escape(str(listing.url), quote=True)}">Открыть объявление</a>'
+        f'<a href="{html.escape(str(listing.url), quote=True)}">Открыть объявление</a>\n'
+        f"ID: <code>{html.escape(listing_id)}</code>\n"
+        f"/watch {html.escape(listing_id)}"
     )
 
 
@@ -256,7 +272,7 @@ async def scan_and_publish(settings: Settings) -> int:
     candidates = [
         item
         for item in report.decisions
-        if item.decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        if is_publishable(item.decision, settings)
     ]
     candidates.sort(
         key=lambda item: (

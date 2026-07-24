@@ -10,8 +10,10 @@ Telegram-бот; TMA будет добавлена после пилота. Prod
 - несколько страниц источника за один запуск;
 - SQLite-хранилище для локального запуска с `listing_id` и `content_hash`;
 - сохранение новых версий и обнаружение изменения цены;
-- детерминированные Comparable Price и Decision Engines без LLM;
-- команды Telegram `/start`, `/id`, `/status`, `/scan` и `/deals`;
+- raw HTML/JSON в Cloud Storage до parsing;
+- cross-source identity resolution и исключение дублей из аналогов;
+- детерминированные Comparable, Cost, Risk и Decision Engines без LLM;
+- команды Telegram `/start`, `/status`, `/scan`, `/deals`, `/settings` и `/watchlist`;
 - публикация новых кандидатов в Telegram-канал без повторной отправки;
 - тесты, Ruff, mypy, GitHub Actions и Dockerfile.
 
@@ -21,9 +23,10 @@ SQLite используется только локально. Production-кон
 ## Рабочий production-контур
 
 - Cloud Run API принимает Telegram webhook через API Gateway;
-- Cloud Run Job `deal-sniper-publisher` выполняет сбор, расчёт и публикацию;
-- Cloud Scheduler запускает задачу каждые 10 минут по времени Дубая;
-- токен Telegram хранится в Secret Manager, а данные — в Firestore;
+- отдельные Cloud Run Jobs собирают DubiCars, CarSwitch и Cars24;
+- Cloud Scheduler запускает каждый источник каждые 10 минут по времени Дубая;
+- `listing-processing` выполняет расчёты, `telegram-delivery` доставляет карточки;
+- токены хранятся в Secret Manager, данные — в Firestore, raw — в Cloud Storage;
 - повторная публикация одной версии объявления блокируется отметкой доставки.
 
 Проверка для владельца: откройте `@DubaiDealSniper111_bot` и выполните `/status`, `/scan`
@@ -75,6 +78,11 @@ python main.py bot
 - `/source_on cars24` или `/source_add cars24` — включить источник;
 - `/source_off cars24` или `/source_remove cars24` — отключить без удаления истории;
 - `/source_scan cars24` — проверить только выбранный источник.
+- `/settings` — показать персональные фильтры;
+- `/set_budget 150000`, `/set_profit 7000`, `/set_roi 12` — изменить пороги;
+- `/set_makes Toyota,Lexus` — ограничить марки;
+- `/watch <listing_id>` и `/watchlist` — вести список наблюдения;
+- `/contacted`, `/inspect`, `/reject` с ID — вести сделку по воронке.
 
 ## Публикация в Telegram-канал
 
@@ -91,9 +99,8 @@ python main.py publish
 `CONTACT` и `INSPECT`. Успешная отправка записывается в локальную базу, поэтому
 повторный запуск не дублирует публикацию.
 
-Для автоматического запуска команду `python main.py publish` можно добавить в
-Планировщик заданий Windows. Целевой production-вариант — Cloud Run Job и Cloud
-Scheduler после перехода хранилища на Firestore.
+В production публикацию выполняют Cloud Tasks; локальная команда `publish` оставлена
+для smoke test. Компьютер владельца для расписания не требуется.
 
 ## Настройка подбора
 
@@ -104,6 +111,8 @@ Scheduler после перехода хранилища на Firestore.
 - `TARGET_PROFIT_AED` — целевая прибыль;
 - `MIN_ROI_PERCENT` — минимальный ROI;
 - `DEFAULT_NON_PURCHASE_COST_AED` — базовые расходы помимо покупки;
+- `INSPECTION_COST_AED`, `PREPARATION_COST_AED`, `BASE_REPAIR_RESERVE_AED` — расходы;
+- `HOLDING_COST_PER_DAY_AED`, `ANNUAL_CAPITAL_PERCENT`, `SELLING_COST_PERCENT` — экономика;
 - `CHANNEL_MAX_POSTS_PER_RUN` — максимальное количество лучших новых карточек за один проход;
 - `DUBICARS_URL_TEMPLATE` — страница поиска; можно использовать уже отфильтрованный
   URL, сохранив `{page}` для номера страницы.
@@ -117,6 +126,10 @@ python -m pytest
 python -m ruff check .
 python -m mypy src
 ```
+
+Terraform production-контура находится в `infra/terraform`; конфигурация проходит
+`terraform validate` в CI. Для существующего проекта перед `apply` требуется import,
+описанный в `infra/terraform/README.md`.
 
 ## Docker
 

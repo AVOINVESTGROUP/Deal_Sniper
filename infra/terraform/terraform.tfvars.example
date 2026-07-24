@@ -1,0 +1,7 @@
+project_id                = "your-project-id"
+region                    = "me-central1"
+image                     = "me-central1-docker.pkg.dev/your-project/deal-sniper/app:VERSION"
+api_base_url              = "https://deal-sniper-api-PROJECT_NUMBER.me-central1.run.app"
+telegram_allowed_user_ids = "123456789"
+telegram_channel_id       = "@your_channel"
+raw_bucket_name           = "your-project-raw-snapshots"

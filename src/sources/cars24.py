@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 from pydantic import HttpUrl
 
 from src.domain.models import ListingSnapshot, SellerType
+from src.raw_storage import RawSnapshotArchive
 from src.sources.dubicars import SourceError
 
 logger = logging.getLogger(__name__)
@@ -22,10 +23,17 @@ IMAGE_BASE_URL = "https://media-ae.cars24.com/"
 class Cars24Source:
     """Асинхронный адаптер каталога сертифицированных автомобилей Cars24 UAE."""
 
-    def __init__(self, url_template: str, pages: int = 3, timeout_seconds: float = 30) -> None:
+    def __init__(
+        self,
+        url_template: str,
+        pages: int = 3,
+        timeout_seconds: float = 30,
+        archive: RawSnapshotArchive | None = None,
+    ) -> None:
         self.url_template = url_template
         self.pages = pages
         self.timeout_seconds = timeout_seconds
+        self.archive = archive
 
     async def fetch(self) -> list[ListingSnapshot]:
         headers = {
@@ -54,6 +62,13 @@ class Cars24Source:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
+                if self.archive is not None:
+                    await self.archive.save(
+                        "cars24",
+                        str(response.url),
+                        response.headers.get("content-type", "text/html"),
+                        response.content,
+                    )
                 return response.text
             except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as error:
                 last_error = error
@@ -111,8 +126,13 @@ def _parse_cars(items: Any) -> list[ListingSnapshot]:
                     observed_at=datetime.now(UTC),
                     make=make,
                     model=model,
+                    trim=variant or None,
                     year=year,
                     mileage_km=int(item["odometerReading"]),
+                    specification=str(item.get("specs") or "").strip() or None,
+                    body_type=str(item.get("bodyType") or "").strip() or None,
+                    transmission=str(item.get("transmissionType") or "").strip() or None,
+                    fuel_type=str(item.get("fuelType") or "").strip() or None,
                     location=str(item.get("city") or "Dubai"),
                     seller_type=SellerType.CERTIFIED,
                     description="Сертифицированный автомобиль Cars24 UAE",

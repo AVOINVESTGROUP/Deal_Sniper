@@ -1,11 +1,25 @@
 """Оркестрация сбора, истории и детерминированного решения."""
 
 from dataclasses import dataclass, field
-from decimal import Decimal
+from time import perf_counter
 
 from src.config import Settings
-from src.domain.engines import ComparablePriceEngine, DecisionEngine, DecisionPolicy
-from src.domain.models import ComparableVehicle, CostEstimate, DealDecision, ListingSnapshot
+from src.domain.comparables import select_comparables
+from src.domain.engines import (
+    ComparablePriceEngine,
+    CostEngine,
+    CostPolicy,
+    DecisionEngine,
+    DecisionPolicy,
+    RiskEngine,
+)
+from src.domain.models import DealDecision, ListingSnapshot, NormalizedVehicle
+from src.domain.normalization import normalize_listing, resolve_vehicle_identities
+from src.raw_storage import (
+    GcsRawSnapshotArchive,
+    LocalRawSnapshotArchive,
+    RawSnapshotArchive,
+)
 from src.sources.base import CompositeSource, SourceAdapter
 from src.sources.cars24 import Cars24Source
 from src.sources.carswitch import CarSwitchSource
@@ -30,6 +44,7 @@ class ScanReport:
     new: int = 0
     changed: int = 0
     decisions: list[EvaluatedListing] = field(default_factory=list)
+    pending: list[tuple[str, str]] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
@@ -51,6 +66,19 @@ class DealService:
         self.repository = repository
         self.sources = sources
         self.market_engine = ComparablePriceEngine()
+        self.risk_engine = RiskEngine()
+        self.cost_engine = CostEngine(
+            CostPolicy(
+                inspection_aed=settings.inspection_cost_aed,
+                preparation_aed=settings.preparation_cost_aed,
+                base_repair_reserve_aed=settings.base_repair_reserve_aed,
+                holding_cost_per_day_aed=settings.holding_cost_per_day_aed,
+                expected_hold_days=settings.expected_hold_days,
+                annual_capital_percent=settings.annual_capital_percent,
+                selling_cost_percent=settings.selling_cost_percent,
+                risk_reserve_percent=settings.risk_reserve_percent,
+            )
+        )
         self.decision_engine = DecisionEngine(
             DecisionPolicy(
                 target_profit_aed=settings.target_profit_aed,
@@ -61,27 +89,38 @@ class DealService:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "DealService":
+        archive: RawSnapshotArchive
         if settings.storage_backend == "firestore":
             from src.firestore_storage import FirestoreRepository
 
             repository: Repository = FirestoreRepository(settings.google_cloud_project)
+            archive = GcsRawSnapshotArchive(
+                settings.google_cloud_project,
+                settings.raw_snapshots_bucket,
+                repository,
+            )
         else:
             repository = LocalRepository(settings.database_path)
+            archive = LocalRawSnapshotArchive(settings.local_raw_snapshots_path, repository)
         sources: dict[str, SourceAdapter] = {
             "dubicars": DubiCarsSource(
                 settings.source_url_template,
                 pages=settings.source_pages,
                 timeout_seconds=settings.request_timeout_seconds,
+                archive=archive,
+                aed_to_usd_rate=settings.aed_to_usd_rate,
             ),
             "carswitch": CarSwitchSource(
                 settings.carswitch_url_template,
                 pages=settings.carswitch_pages,
                 timeout_seconds=settings.request_timeout_seconds,
+                archive=archive,
             ),
             "cars24": Cars24Source(
                 settings.cars24_url_template,
                 pages=settings.cars24_pages,
                 timeout_seconds=settings.request_timeout_seconds,
+                archive=archive,
             ),
         }
         return cls(settings=settings, repository=repository, sources=sources)
@@ -101,12 +140,21 @@ class DealService:
         self.repository.set_source_enabled(normalized, enabled)
 
     async def scan(self, source_name: str | None = None) -> ScanReport:
-        """Собирает источник, сохраняет версии и рассчитывает доступные группы."""
+        """Локальный вертикальный запуск: сбор и обработка изменившихся версий."""
+        report = await self.collect(source_name)
+        for listing_id, content_hash in report.pending:
+            evaluated = await self.process_listing(listing_id, content_hash)
+            if evaluated is not None:
+                report.decisions.append(evaluated)
+        return report
+
+    async def collect(self, source_name: str | None = None) -> ScanReport:
+        """Собирает источники и возвращает только новые версии для очереди обработки."""
         if source_name is not None:
-            normalized = source_name.strip().casefold()
-            if normalized not in self.sources:
+            source_key = source_name.strip().casefold()
+            if source_key not in self.sources:
                 raise ValueError(f"Неизвестный источник: {source_name}")
-            source: SourceAdapter = self.sources[normalized]
+            source: SourceAdapter = self.sources[source_key]
         else:
             enabled = [
                 adapter
@@ -116,69 +164,97 @@ class DealService:
             if not enabled:
                 raise RuntimeError("Все источники отключены")
             source = CompositeSource(enabled)
-        fetched = await source.fetch()
+        metric_name = source_name or "composite"
+        started = perf_counter()
+        try:
+            fetched = await source.fetch()
+        except Exception as error:
+            self.repository.record_source_run(
+                metric_name,
+                {
+                    "success": False,
+                    "duration_seconds": round(perf_counter() - started, 3),
+                    "error": f"{type(error).__name__}: {error}",
+                },
+            )
+            raise
         report = ScanReport(fetched=len(fetched))
-        version_hashes: dict[str, str] = {}
         for listing in fetched:
             is_new, price_changed, content_hash = self.repository.save_snapshot(listing)
             report.new += int(is_new)
             report.changed += int(price_changed)
-            version_hashes[f"{listing.source}:{listing.source_listing_id}"] = content_hash
+            listing_id = f"{listing.source}:{listing.source_listing_id}"
+            if not self.repository.decision_exists(
+                listing_id,
+                content_hash,
+                self.decision_engine.version,
+            ):
+                report.pending.append((listing_id, content_hash))
 
-        current = self.repository.latest_snapshots()
-        groups: dict[tuple[str, str], list[ListingSnapshot]] = {}
-        for listing in current:
-            if listing.make and listing.model and listing.year and listing.mileage_km is not None:
-                groups.setdefault((listing.make.casefold(), listing.model.casefold()), []).append(
-                    listing
-                )
+        if report.pending:
+            self._refresh_normalized_market()
 
-        for listings in groups.values():
-            comparables = [self._as_comparable(item) for item in listings]
-            for listing in listings:
-                peers = [
-                    item for item in comparables if item.listing_id != listing.source_listing_id
-                ]
-                market = self.market_engine.estimate(
-                    peers,
-                    min_comparables=self.settings.min_comparables_count,
-                )
-                decision = self.decision_engine.decide(
-                    asking_price_aed=listing.price_aed,
-                    market=market,
-                    costs=CostEstimate(
-                        preparation_aed=self.settings.default_cost_aed,
-                        risk_reserve_aed=money_percent(listing.price_aed, Decimal("5")),
-                    ),
-                )
-                listing_id = f"{listing.source}:{listing.source_listing_id}"
-                decision_hash = version_hashes.get(listing_id)
-                if decision_hash is not None:
-                    self.repository.save_decision(listing_id, decision_hash, decision)
-                if decision_hash is not None:
-                    report.decisions.append(
-                        EvaluatedListing(
-                            listing=listing,
-                            content_hash=decision_hash,
-                            decision=decision,
-                        )
-                    )
-        return report
-
-    @staticmethod
-    def _as_comparable(listing: ListingSnapshot) -> ComparableVehicle:
-        assert listing.year is not None
-        assert listing.mileage_km is not None
-        return ComparableVehicle(
-            listing_id=listing.source_listing_id,
-            price_aed=listing.price_aed,
-            year=listing.year,
-            mileage_km=listing.mileage_km,
-            seller_type=listing.seller_type,
-            observed_at=listing.observed_at,
+        self.repository.record_source_run(
+            metric_name,
+            {
+                "success": True,
+                "fetched": report.fetched,
+                "new": report.new,
+                "changed": report.changed,
+                "pending": len(report.pending),
+                "duration_seconds": round(perf_counter() - started, 3),
+            },
         )
 
+        return report
 
-def money_percent(value: Decimal, percent: Decimal) -> Decimal:
-    """Возвращает процент от денежного значения."""
-    return (value * percent / Decimal("100")).quantize(Decimal("1"))
+    def _refresh_normalized_market(self) -> None:
+        """Один раз готовит общий рынок перед fan-out задач обработки."""
+        normalized_vehicles: list[NormalizedVehicle] = []
+        for listing in self.repository.latest_snapshots():
+            vehicle = normalize_listing(listing)
+            if vehicle is not None:
+                normalized_vehicles.append(vehicle)
+        identities, _ = resolve_vehicle_identities(normalized_vehicles)
+        self.repository.save_normalized_market(normalized_vehicles, identities)
+
+    async def process_listing(
+        self,
+        listing_id: str,
+        content_hash: str,
+    ) -> EvaluatedListing | None:
+        """Идемпотентно рассчитывает одну версию объявления на актуальном рынке."""
+        if self.repository.decision_exists(
+            listing_id,
+            content_hash,
+            self.decision_engine.version,
+        ):
+            return None
+
+        target_listing = self.repository.latest_snapshot(listing_id)
+        normalized_vehicles = self.repository.normalized_vehicles()
+        _, listing_to_vehicle = resolve_vehicle_identities(normalized_vehicles)
+        normalized_by_id = {vehicle.listing_id: vehicle for vehicle in normalized_vehicles}
+
+        target = normalized_by_id.get(listing_id)
+        if target_listing is None or target is None:
+            return None
+        peers = select_comparables(target, normalized_vehicles, listing_to_vehicle)
+        market = self.market_engine.estimate(
+            peers,
+            min_comparables=self.settings.min_comparables_count,
+        )
+        risks = self.risk_engine.assess(target_listing)
+        costs = self.cost_engine.estimate(target_listing.price_aed, risks)
+        decision = self.decision_engine.decide(
+            asking_price_aed=target_listing.price_aed,
+            market=market,
+            costs=costs,
+            risks=risks,
+        )
+        self.repository.save_decision(listing_id, content_hash, decision)
+        return EvaluatedListing(
+            listing=target_listing,
+            content_hash=content_hash,
+            decision=decision,
+        )

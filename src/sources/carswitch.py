@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from pydantic import HttpUrl
 
 from src.domain.models import ListingSnapshot, SellerType
+from src.raw_storage import RawSnapshotArchive
 from src.sources.dubicars import SourceError
 
 logger = logging.getLogger(__name__)
@@ -21,10 +22,17 @@ logger = logging.getLogger(__name__)
 class CarSwitchSource:
     """Асинхронный адаптер страниц поиска CarSwitch."""
 
-    def __init__(self, url_template: str, pages: int = 3, timeout_seconds: float = 30) -> None:
+    def __init__(
+        self,
+        url_template: str,
+        pages: int = 3,
+        timeout_seconds: float = 30,
+        archive: RawSnapshotArchive | None = None,
+    ) -> None:
         self.url_template = url_template
         self.pages = pages
         self.timeout_seconds = timeout_seconds
+        self.archive = archive
 
     async def fetch(self) -> list[ListingSnapshot]:
         headers = {
@@ -53,6 +61,13 @@ class CarSwitchSource:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
+                if self.archive is not None:
+                    await self.archive.save(
+                        "carswitch",
+                        str(response.url),
+                        response.headers.get("content-type", "text/html"),
+                        response.content,
+                    )
                 return response.text
             except (httpx.TimeoutException, httpx.NetworkError, httpx.HTTPStatusError) as error:
                 last_error = error
@@ -104,8 +119,12 @@ def _parse_elements(elements: Any) -> list[ListingSnapshot]:
                     observed_at=datetime.now(UTC),
                     make=str(item.get("brand", {}).get("name") or "") or None,
                     model=str(item.get("model") or "") or None,
+                    trim=str(item.get("vehicleConfiguration") or "").strip() or None,
                     year=int(item["vehicleModelDate"]),
                     mileage_km=int(mileage) if mileage is not None else None,
+                    body_type=str(item.get("bodyType") or "").strip() or None,
+                    transmission=str(item.get("vehicleTransmission") or "").strip() or None,
+                    fuel_type=str(item.get("fuelType") or "").strip() or None,
                     location="Dubai",
                     seller_type=SellerType.CERTIFIED,
                     description=str(item.get("description", "")),

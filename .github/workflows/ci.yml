@@ -23,3 +23,17 @@ jobs:
         run: python -m mypy src
       - name: Pytest
         run: python -m pytest
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить код
+        uses: actions/checkout@v4
+      - name: Установить Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Проверить формат Terraform
+        run: terraform -chdir=infra/terraform fmt -check
+      - name: Проверить Terraform
+        run: |
+          terraform -chdir=infra/terraform init -backend=false
+          terraform -chdir=infra/terraform validate
