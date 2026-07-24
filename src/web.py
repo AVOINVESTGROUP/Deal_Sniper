@@ -11,7 +11,12 @@ from pydantic import BaseModel
 from telegram import Bot
 from telegram.constants import ParseMode
 
-from src.bot import format_card, format_sources, is_publishable
+from src.bot import (
+    format_card,
+    format_sources,
+    is_publishable,
+    select_publishable_decisions,
+)
 from src.cloud_jobs import CloudJobLauncher
 from src.config import Settings
 from src.domain.models import UserAction, UserSettings
@@ -24,7 +29,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-app = FastAPI(title="Dubai Deal Sniper", version="0.3.5")
+app = FastAPI(title="Dubai Deal Sniper", version="0.3.7")
 
 
 class ProcessingTask(BaseModel):
@@ -115,7 +120,7 @@ async def ready() -> dict[str, str]:
 @app.get("/version")
 async def version() -> dict[str, str]:
     """Версия API и детерминированного движка для smoke checks."""
-    return {"api": "0.3.5", "decision_engine": service.decision_engine.version}
+    return {"api": "0.3.7", "decision_engine": service.decision_engine.version}
 
 
 @app.post("/telegram/webhook")
@@ -186,12 +191,8 @@ async def telegram_webhook(
                 text=f"Сбор запущен в фоне: {', '.join(names)}. Результаты придут отдельно.",
             )
         elif text == "/deals":
-            decisions = await asyncio.to_thread(service.repository.latest_decisions, 20)
-            recent_candidates = [
-                item
-                for item in decisions
-                if is_publishable(item[1], settings)
-            ][:5]
+            decisions = await asyncio.to_thread(service.repository.latest_decisions, 500)
+            recent_candidates = select_publishable_decisions(decisions, settings)
             if not recent_candidates:
                 await bot.send_message(chat_id=chat_id, text="Подходящих вариантов пока нет.")
             for listing, decision in recent_candidates:

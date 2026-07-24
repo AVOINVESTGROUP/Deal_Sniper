@@ -83,7 +83,7 @@ C:\Dev\Deal_Sniper
 - Production pipeline разделён на collector Jobs, очередь `listing-processing` и очередь `telegram-delivery`.
 - Telegram webhook не выполняет долгий сбор: `/scan` только запускает фоновые collector Jobs.
 - Пользовательские фильтры и действия хранятся в Firestore независимо для каждого Telegram user ID.
-- Production image `0.3.5` содержит Cloud Tasks pipeline, исправленный DubiCars currency parser, Firestore batch normalization, запрет убыточных `INSPECT` и engine-version task identity.
+- Production image `0.3.7` содержит Cloud Tasks pipeline, исправленный DubiCars currency parser, Firestore batch normalization, запрет убыточных `INSPECT`, engine-version task identity и корректную быструю выдачу `/deals`.
 - Рабочие production jobs: `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`.
 - Raw bucket: `avo-deal-sniper-raw-snapshots`; очереди: `listing-processing`, `telegram-delivery`.
 - Terraform в `infra/terraform` прошёл `terraform validate`; существующие ручные ресурсы требуют import до apply.

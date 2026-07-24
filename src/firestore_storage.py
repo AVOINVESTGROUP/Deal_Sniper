@@ -200,27 +200,39 @@ class FirestoreRepository:
             return value if isinstance(value, datetime) else datetime.min.replace(tzinfo=UTC)
 
         documents.sort(key=created_at, reverse=True)
-        results: list[tuple[ListingSnapshot, DealDecision]] = []
+        ordered_decisions: list[tuple[str, DealDecision]] = []
+        snapshot_references: dict[str, Any] = {}
         for document in documents[:limit]:
             data = document.to_dict() or {}
             if "listing_id" not in data or "payload" not in data:
                 continue
-            listing = (
+            snapshot_reference = (
                 self.client.collection("listings")
                 .document(data["listing_id"])
                 .collection("snapshots")
                 .document(data["content_hash"])
-                .get()
             )
-            listing_data = listing.to_dict()
-            if listing_data:
-                results.append(
-                    (
-                        ListingSnapshot.model_validate(listing_data["payload"]),
-                        DealDecision.model_validate(data["payload"]),
-                    )
+            snapshot_references[snapshot_reference.path] = snapshot_reference
+            ordered_decisions.append(
+                (
+                    snapshot_reference.path,
+                    DealDecision.model_validate(data["payload"]),
                 )
-        return results
+            )
+
+        snapshots: dict[str, ListingSnapshot] = {}
+        for snapshot in self.client.get_all(list(snapshot_references.values())):
+            snapshot_data = snapshot.to_dict()
+            if snapshot_data:
+                snapshots[snapshot.reference.path] = ListingSnapshot.model_validate(
+                    snapshot_data["payload"]
+                )
+
+        return [
+            (snapshots[path], decision)
+            for path, decision in ordered_decisions
+            if path in snapshots
+        ]
 
     def count_snapshots(self) -> int:
         return sum(1 for _document in self.client.collection_group("snapshots").stream())

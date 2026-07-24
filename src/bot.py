@@ -28,6 +28,34 @@ def is_publishable(decision: DealDecision, settings: Settings) -> bool:
     )
 
 
+def select_publishable_decisions(
+    decisions: list[tuple[ListingSnapshot, DealDecision]],
+    settings: Settings,
+    limit: int = 5,
+) -> list[tuple[ListingSnapshot, DealDecision]]:
+    """Выбирает лучшие актуальные решения без повторов одного объявления."""
+    candidates = [item for item in decisions if is_publishable(item[1], settings)]
+    candidates.sort(
+        key=lambda item: (
+            item[1].expected_profit_aed or 0,
+            item[1].roi_percent or 0,
+            item[1].confidence,
+        ),
+        reverse=True,
+    )
+    selected: list[tuple[ListingSnapshot, DealDecision]] = []
+    seen_listing_ids: set[str] = set()
+    for listing, decision in candidates:
+        listing_id = f"{listing.source}:{listing.source_listing_id}"
+        if listing_id in seen_listing_ids:
+            continue
+        seen_listing_ids.add(listing_id)
+        selected.append((listing, decision))
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 class DealBot:
     """Команды Telegram поверх независимого DealService."""
 
@@ -115,16 +143,10 @@ class DealBot:
             await self.deny(update)
             return
         assert update.effective_message
-        decisions = self.service.repository.latest_decisions(limit=20)
-        candidates = [
-            item
-            for item in decisions
-            if is_publishable(item[1], self.settings)
-        ][:5]
+        decisions = self.service.repository.latest_decisions(limit=500)
+        candidates = select_publishable_decisions(decisions, self.settings)
         if not candidates:
-            await update.effective_message.reply_text(
-                "Подходящих вариантов пока нет. Выполните /scan."
-            )
+            await update.effective_message.reply_text("Подходящих вариантов пока нет.")
             return
         for listing, decision in candidates:
             await update.effective_message.reply_text(
