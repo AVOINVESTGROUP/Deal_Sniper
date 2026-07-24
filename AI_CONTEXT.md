@@ -83,8 +83,9 @@ C:\Dev\Deal_Sniper
 - Production pipeline разделён на collector Jobs, очередь `listing-processing` и очередь `telegram-delivery`.
 - Telegram webhook не выполняет долгий сбор: `/scan` только запускает фоновые collector Jobs.
 - Пользовательские фильтры и действия хранятся в Firestore независимо для каждого Telegram user ID.
-- Production image `0.4.1` добавляет OpenSooq, пакетную запись объявлений, ограниченный запрос аналогов по марке/модели, параллельную постановку backfill в Cloud Tasks и понятный статус `/sources`.
+- Production image `0.4.2` добавляет OpenSooq, пакетную запись объявлений, ограниченный запрос аналогов по марке/модели, параллельную постановку backfill в Cloud Tasks, понятный статус `/sources` и полную выборку кандидатов для `/deals` без потери результатов из-за большого числа отклонённых объявлений.
 - Рабочие production jobs: `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`, `deal-sniper-collector-opensooq`.
 - Raw bucket: `avo-deal-sniper-raw-snapshots`; очереди: `listing-processing`, `telegram-delivery`.
 - Terraform в `infra/terraform` прошёл `terraform validate`; существующие ручные ресурсы требуют import до apply.
 - Decision Engine `2.2.1`: расширенный рынок пересчитывается только после завершения общего backfill; `INSPECT` означает экономически подходящую сделку с warning, отрицательная прибыль всегда `REJECT`.
+- Production backfill 24.07.2026: 2 042 объявления, 2 042 решения (`CONTACT` 1, `INSPECT` 6, `WATCH` 4, `REJECT` 427, `INSUFFICIENT_DATA` 1 604), экономических нарушений в публикуемой выборке — 0.

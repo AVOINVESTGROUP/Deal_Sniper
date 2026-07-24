@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from src.domain.models import (
     DealDecision,
+    DecisionAction,
     ListingSnapshot,
     NormalizedVehicle,
     RawSnapshotMetadata,
@@ -372,17 +373,20 @@ class LocalRepository:
                 FROM decisions_v2 d
                 JOIN snapshots s
                   ON s.listing_id = d.listing_id AND s.content_hash = d.content_hash
-                ORDER BY d.created_at DESC LIMIT ?
+                ORDER BY d.created_at DESC
                 """,
-                (limit,),
             ).fetchall()
-        return [
-            (
-                ListingSnapshot.model_validate_json(row["listing_json"]),
-                DealDecision.model_validate_json(row["decision_json"]),
+        decisions: list[tuple[ListingSnapshot, DealDecision]] = []
+        for row in rows:
+            decision = DealDecision.model_validate_json(row["decision_json"])
+            if decision.action not in {DecisionAction.CONTACT, DecisionAction.INSPECT}:
+                continue
+            decisions.append(
+                (ListingSnapshot.model_validate_json(row["listing_json"]), decision)
             )
-            for row in rows
-        ]
+            if len(decisions) >= limit:
+                break
+        return decisions
 
     def count_snapshots(self) -> int:
         """Количество сохранённых версий для статуса бота."""

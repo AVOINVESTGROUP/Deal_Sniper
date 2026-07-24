@@ -9,6 +9,7 @@ from google.cloud import firestore
 
 from src.domain.models import (
     DealDecision,
+    DecisionAction,
     ListingSnapshot,
     NormalizedVehicle,
     RawSnapshotMetadata,
@@ -282,9 +283,12 @@ class FirestoreRepository:
         documents.sort(key=created_at, reverse=True)
         ordered_decisions: list[tuple[str, DealDecision]] = []
         snapshot_references: dict[str, Any] = {}
-        for document in documents[:limit]:
+        for document in documents:
             data = document.to_dict() or {}
             if "listing_id" not in data or "payload" not in data:
+                continue
+            decision = DealDecision.model_validate(data["payload"])
+            if decision.action not in {DecisionAction.CONTACT, DecisionAction.INSPECT}:
                 continue
             snapshot_reference = (
                 self.client.collection("listings")
@@ -296,9 +300,11 @@ class FirestoreRepository:
             ordered_decisions.append(
                 (
                     snapshot_reference.path,
-                    DealDecision.model_validate(data["payload"]),
+                    decision,
                 )
             )
+            if len(ordered_decisions) >= limit:
+                break
 
         snapshots: dict[str, ListingSnapshot] = {}
         for snapshot in self.client.get_all(list(snapshot_references.values())):

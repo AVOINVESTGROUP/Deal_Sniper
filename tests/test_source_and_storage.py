@@ -4,7 +4,13 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from src.domain.models import ListingSnapshot
+from src.domain.models import (
+    CostEstimate,
+    DealDecision,
+    DecisionAction,
+    ListingSnapshot,
+    RiskAssessment,
+)
 from src.domain.normalization import normalize_listing, resolve_vehicle_identities
 from src.sources.cars24 import parse_cars24_page
 from src.sources.carswitch import parse_carswitch_page
@@ -193,3 +199,46 @@ def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:
     repository.save_normalized_vehicle(normalized)
     identities, _mapping = resolve_vehicle_identities([normalized])
     repository.save_vehicle_identity(identities[0])
+
+
+def test_latest_decisions_skips_non_candidates_before_limit(tmp_path: Path) -> None:
+    repository = LocalRepository(tmp_path / "deal_sniper.db")
+    candidate = listing("70000")
+    candidate_result = repository.save_snapshot(candidate)
+    repository.save_decision(
+        "test:42",
+        candidate_result[2],
+        DealDecision(
+            action=DecisionAction.CONTACT,
+            asking_price_aed=Decimal("70000"),
+            market=None,
+            costs=CostEstimate(),
+            risks=RiskAssessment(),
+            max_purchase_price_aed=Decimal("75000"),
+            expected_profit_aed=Decimal("8000"),
+            roi_percent=Decimal("11"),
+            confidence=Decimal("0.8"),
+        ),
+    )
+    rejected = listing("145000").model_copy(update={"source_listing_id": "43"})
+    rejected_result = repository.save_snapshot(rejected)
+    repository.save_decision(
+        "test:43",
+        rejected_result[2],
+        DealDecision(
+            action=DecisionAction.REJECT,
+            asking_price_aed=Decimal("145000"),
+            market=None,
+            costs=CostEstimate(),
+            risks=RiskAssessment(),
+            max_purchase_price_aed=Decimal("100000"),
+            expected_profit_aed=Decimal("-45000"),
+            roi_percent=Decimal("-31"),
+            confidence=Decimal("0.8"),
+        ),
+    )
+
+    decisions = repository.latest_decisions(limit=1)
+
+    assert len(decisions) == 1
+    assert decisions[0][1].action is DecisionAction.CONTACT
