@@ -89,3 +89,4 @@ C:\Dev\Deal_Sniper
 - Terraform в `infra/terraform` прошёл `terraform validate`; существующие ручные ресурсы требуют import до apply.
 - Decision Engine `2.2.1`: расширенный рынок пересчитывается только после завершения общего backfill; `INSPECT` означает экономически подходящую сделку с warning, отрицательная прибыль всегда `REJECT`.
 - Production backfill 24.07.2026: 2 042 объявления, 2 042 решения (`CONTACT` 1, `INSPECT` 6, `WATCH` 4, `REJECT` 427, `INSUFFICIENT_DATA` 1 604), экономических нарушений в публикуемой выборке — 0.
+- Cloud Run Job `deal-sniper-publisher` описана в Terraform и получает обязательные `RAW_SNAPSHOTS_BUCKET`, Firestore и Telegram параметры; ручное исправление production не должно теряться при следующем развёртывании.

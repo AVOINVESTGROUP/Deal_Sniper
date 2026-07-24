@@ -201,6 +201,47 @@ resource "google_cloud_run_v2_job" "collector" {
   }
 }
 
+resource "google_cloud_run_v2_job" "publisher" {
+  name     = "deal-sniper-publisher"
+  location = var.region
+  template {
+    template {
+      service_account = google_service_account.runtime.email
+      timeout         = "600s"
+      max_retries     = 2
+      containers {
+        image   = var.image
+        command = ["python"]
+        args    = ["main.py", "publish"]
+        dynamic "env" {
+          for_each = {
+            GOOGLE_CLOUD_PROJECT      = var.project_id
+            GOOGLE_CLOUD_REGION       = var.region
+            STORAGE_BACKEND           = "firestore"
+            RAW_SNAPSHOTS_BUCKET      = google_storage_bucket.raw.name
+            TELEGRAM_CHANNEL_ID       = var.telegram_channel_id
+            CHANNEL_MAX_POSTS_PER_RUN = "10"
+            MIN_COMPARABLES_COUNT     = "5"
+          }
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        env {
+          name = "TELEGRAM_BOT_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.telegram_token.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 resource "google_cloud_scheduler_job" "collector" {
   for_each         = local.sources
   name             = "deal-sniper-${each.key}-every-10m"
