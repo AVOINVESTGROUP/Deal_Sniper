@@ -155,7 +155,7 @@ flowchart TD
 
 Результат содержит нижнюю, медианную и верхнюю оценку, количество уникальных аналогов, свежесть данных и уровень покрытия.
 
-В Comparable Engine допускаются только объявления с неистёкшей detail-page проверкой. `verification_key = source + listing_id + content_hash + extractor_version`; состояния: `pending`, `verified`, `temporary_error`, `permanent_invalid`, `expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
+В Comparable Engine допускаются только объявления с неистёкшей detail-page проверкой. `verification_key` является SHA-256 canonical JSON объекта `verification-key/v1` с полями `source`, `listing_id`, `content_hash` и `extractor_version`; состояния: `pending`, `verified`, `temporary_error`, `permanent_invalid`, `expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
 
 `market_fingerprint` включает ID, подтверждённые цены и время проверки аналогов, source roles, применённые adjustments и их версии, а также accepted/rejected status. Изменение verified market bucket ставит affected targets на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
 
@@ -164,7 +164,7 @@ flowchart TD
 Расходы хранятся диапазонами `low/expected/high`. Для решения используется явно версионированный консервативный `repair_basis`, по умолчанию `repair_high`. Канонические обозначения:
 
 ```text
-R = market_low - liquidity_discount
+R = market_low × (1 - liquidity_discount_rate)
 P = цена покупки: asking для оценки либо неизвестная величина для max purchase
 repair_basis = repair_high
 c = annual_capital_rate × hold_days / 365
@@ -195,7 +195,7 @@ constant = base_fixed
 max_purchase_price = (R - target_profit - constant) / (1 + c + r)
 ```
 
-Формула `max_purchase_price` является алгебраическим решением зависимости расходов от цены покупки; детерминированная итерация не требуется. Финансовая арифметика выполняется приложением, а не LLM. Версия коэффициентов, repair basis, rounding policy и формулы входит в `financial_config_version`.
+Формула `max_purchase_price` является алгебраическим решением зависимости расходов от цены покупки; детерминированная итерация не требуется. Все rate-поля хранятся Decimal-долями `0..1`; процентное представление допускается только в UI. Денежные значения сериализуются десятичными строками AED, binary float запрещён. Промежуточная точность — не менее `0.0001 AED`, итоговые денежные поля округляются `ROUND_HALF_UP` до `0.01 AED`, а максимальная цена покупки — вниз до целого AED. При необрезанном значении `max_purchase_price <= 0` публикуемая максимальная цена равна нулю и решение не может быть `CONTACT/INSPECT`. Финансовая арифметика выполняется приложением, а не LLM. Версия коэффициентов, repair basis, единиц rate, rounding policy и формулы входит в `financial_config_version`.
 
 ### 3.9. LLM Enrichment
 
@@ -254,11 +254,11 @@ TMA добавляется только после подтверждения к
 
 Публичный канал получает короткий англоязычный тизер:
 
-- марка, модель, год и одна фотография;
+- марка, модель, год и защищённое изображение: crop/blur/watermark, нейтральное изображение модели либо тизер с задержкой;
 - тип сигнала без точной финансовой модели;
 - ориентировочная величина скидки только при достаточной уверенности;
 - призыв открыть Telegram-бота или присоединиться к Pro;
-- без ID объявления, прямой ссылки продавца, полного диапазона рынка, прибыли, ROI, максимальной цены покупки и списка аналогов.
+- без ID объявления, прямой ссылки продавца, полного диапазона рынка, прибыли, ROI, максимальной цены покупки и списка аналогов; остаточная discoverability через внешний поиск признаётся и измеряется.
 
 Pro-канал получает полную проверенную карточку: цену и ссылку продавца, рынок, максимальную цену покупки, детализацию расходов, прибыль, ROI, confidence, risk flags, причины решения, размер выборки, использованные и отклонённые аналоги, версию Engine и дату рыночного среза. Одна версия объявления имеет независимые notification ID для публичного, Pro и персонального получателя.
 
@@ -368,6 +368,7 @@ listings/{listing_id}/snapshots/{content_hash}
 listings/{listing_id}/verifications/{verification_key}
 vehicles/{vehicle_id}
 decisions/{decision_id}
+current_decisions/{target_id}
 users/{telegram_user_id}/settings/current
 users/{telegram_user_id}/favorites/{vehicle_id}
 notifications/{notification_id}
@@ -380,7 +381,35 @@ admin_audit/{event_id}
 migrations/{migration_id}
 ```
 
-`listing_id`, `content_hash`, `decision_id` и `delivery_id` детерминированы. `decision_id = listing_id + content_hash + engine_version + financial_config_version + verification_version + market_fingerprint`; `delivery_id = decision_id + target_id + template_version + format`. Согласованные изменения состояния выполняются Firestore transaction либо preconditioned batched write.
+### Канонический контракт идентификаторов
+
+Составные идентификаторы не создаются конкатенацией строк. Исходный объект содержит поле `schema`, сериализуется в UTF-8 canonical JSON и хешируется SHA-256; Firestore document ID — lowercase hexadecimal из 64 символов. Для Cloud Task используется допустимый префикс типа и тот же hex hash.
+
+Canonical JSON contract:
+
+- ключи объектов сортируются лексикографически, whitespace отсутствует, строки нормализуются Unicode NFC;
+- денежные Decimal сериализуются строкой с двумя знаками, rate — строкой с шестью знаками, exponent и binary float запрещены;
+- timestamps сериализуются в UTC RFC 3339 с миллисекундами: `YYYY-MM-DDTHH:mm:ss.SSSZ`;
+- null/отсутствующее поле различаются по версии schema; произвольное удаление пустых полей запрещено;
+- массив-множество сортируется по явно заданному schema key, а массив с доменно значимым порядком сохраняет порядок;
+- изменение правил требует нового schema tag и поэтому нового hash.
+
+Доменные объекты идентичности:
+
+```text
+verification_key   = sha256(canonical_json({schema: verification-key/v1, ...}))
+market_fingerprint = sha256(canonical_json({schema: market-fingerprint/v1, ...}))
+decision_id        = sha256(canonical_json({schema: decision-id/v1,
+                         listing_id, content_hash, engine_version,
+                         financial_config_version, verification_version,
+                         market_fingerprint}))
+delivery_id        = sha256(canonical_json({schema: delivery-id/v1,
+                         decision_id, target_id, template_version, format}))
+```
+
+Тот же контракт применяется к operation ID, migration ID, publication event ID и Cloud Task name. Golden fixtures обязаны давать одинаковые hashes в Python, migration tooling и любом будущем runtime.
+
+Согласованные изменения состояния выполняются Firestore transaction либо compare-and-set с precondition. Новое решение и переключение `current_decisions/{target_id}` записываются одной транзакцией: pointer указывает ровно на одно решение, а прежнее получает `superseded_by`. Выдача читает pointer индексируемым запросом и не определяет current полным scan или клиентской сортировкой.
 
 ### ListingSnapshot
 
@@ -478,12 +507,13 @@ migrations/{migration_id}
 Обязательный текущий gate:
 
 1. `0.11-STOP` — после отдельного подтверждения владельца ограничить небезопасный production и сохранить backup/deployment manifest.
-2. `0.11A` — исправить provenance, owner scope, роли, retry и outbox.
-3. `0.11B` — исправить verified market, decision identity, финансовую модель, риски и identity resolution.
-4. `0.11C` — исправить lifecycle, запросы, конфигурацию, IAM, IaC и CI.
-5. `0.11M` — выполнить версионированную миграцию production-данных и reconciliation.
-6. `0.11D` — сформировать проверяемый baseline в `main`, staging и deployment того же image digest.
-7. Заново провести официальный пилот; прежние результаты считать диагностическими.
-8. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
+2. `0.11R` — до разработки создать issues/replacement PR strategy, защитить `main` и назначить независимого reviewer.
+3. `0.11A` — исправить provenance, owner scope, роли, retry и outbox.
+4. `0.11B` — исправить verified market, decision identity, финансовую модель, риски и identity resolution.
+5. `0.11C` — исправить lifecycle, запросы, конфигурацию, IAM, IaC и CI.
+6. `0.11M` — выполнить restore rehearsal, версионированную миграцию, raw catch-up и reconciliation.
+7. `0.11D` — сформировать проверяемый baseline в `main`, staging и deployment того же image digest.
+8. `0.11P` — заново провести официальный пилот; прежние результаты считать диагностическими.
+9. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
 
 Подробные этапы и границы релизов описаны в `docs/IMPLEMENTATION_PLAN.md`, а схема ресурсов, потоков, IAM и идемпотентности — в `docs/CLOUD_ARCHITECTURE.md`.

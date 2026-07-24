@@ -66,6 +66,7 @@ listings/{listing_id}/snapshots/{content_hash}
 listings/{listing_id}/verifications/{verification_key}
 vehicles/{vehicle_id}
 decisions/{decision_id}
+current_decisions/{target_id}
 users/{telegram_user_id}/settings/current
 users/{telegram_user_id}/favorites/{vehicle_id}
 notifications/{notification_id}
@@ -80,7 +81,7 @@ migrations/{migration_id}
 
 Сырые ответы не дублируются в документах Firestore: хранится `gs://` URI, checksum, тип содержимого и время получения. Поля для поиска аналогов денормализуются и индексируются: `make`, `model`, `generation`, `year`, `trim`, `specification`, `mileage_bucket`, `seller_type`, `asking_price_aed`, `observed_at`, `comparison_key`.
 
-Каждый тип production-документа содержит `schema_version`. Decision считается текущим только при совпадении current content hash, Engine, financial config, verification version и market fingerprint; новое решение supersedes предыдущее. `stale`, `removed`, `quarantined` и истёкшая verification исключаются из выдачи и публикации.
+Каждый тип production-документа содержит `schema_version`. Decision считается текущим только при совпадении current content hash, Engine, financial config, verification version и market fingerprint. Новое решение, `current_decisions/{target_id}` и `superseded_by` предыдущего решения обновляются одной Firestore transaction с precondition; concurrency test должен оставлять ровно один current. `stale`, `removed`, `quarantined` и истёкшая verification исключаются из выдачи и публикации. Выдача читает current pointer индексируемым запросом, а не полным scan.
 
 `market_fingerprint` включает verified prices/timestamps, source roles, accepted/rejected аналоги и версии adjustments. Изменение verified market bucket ставит affected targets на пересчёт; delivery дополнительно проверяет fingerprint перед внешним вызовом.
 
@@ -90,14 +91,17 @@ migrations/{migration_id}
 - snapshot document ID равен `content_hash`;
 - Cloud Task name включает listing ID, content hash и тип обработки;
 - enrichment key включает snapshot, prompt version, schema version и model;
-- `decision_id` включает listing ID, content hash, Engine, financial config, verification version и market fingerprint;
-- `delivery_id = decision_id + target_id + template_version + format`;
+- все составные ID используют UTF-8 canonical JSON с schema tag, NFC, нормализованными Decimal/UTC timestamps, детерминированным порядком и lowercase SHA-256;
+- `decision_id` хеширует объект `decision-id/v1` с listing ID, content hash, Engine, financial config, verification version и market fingerprint;
+- `delivery_id` хеширует объект `delivery-id/v1` с decision ID, target ID, template version и format;
 - publication event ID включает тип материала, период данных, версию шаблона и целевой формат;
 - обработчик сначала проверяет сохранённый статус, затем выполняет внешний вызов;
 - повтор Tasks не создаёт повторный Vertex AI вызов;
 - повтор delivery task не отправляет сообщение после подтверждённого `sent`, а неоднозначный результат переводит в `unknown`.
 
 Внешний `sendMessage` и запись Firestore не образуют одну транзакцию, поэтому архитектура не обещает строгую exactly-once доставку. Outbox использует `attempt_id`, lease, timestamps, error и состояния `pending/sending/sent/failed/unknown`; неоднозначный timeout не повторяется автоматически до сверки. Запись `unknown` старше SLA создаёт alert и требует операторского `mark_sent`, `mark_failed` либо одноразового `retry_once` с audit event.
+
+Containment сначала включает delivery kill switch, останавливает publisher/collectors/schedulers, pause processing/delivery queues и фиксирует in-flight операции. Только затем устанавливается единый `cutover_at`/`export_watermark`, выполняются Firestore export, queue inventory и deployment manifest. Миграция обязана восстановить export в отдельной staging database/project, затем replay raw snapshots после watermark, выполнить catch-up без delivery и повторный reconciliation до возобновления production.
 
 ## Авторизация и секреты
 
