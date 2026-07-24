@@ -4,6 +4,12 @@
 Telegram-бот; TMA будет добавлена после пилота. Production-версия работает в Google Cloud,
 а новые кандидаты публикуются в канале `@Dubai_Auto_Invest`.
 
+> **Статус репозитория на 24.07.2026:** default-ветка `main` пока содержит legacy-прототип
+> с mock/SQLite/Gemini и не воспроизводит развёрнутый Google Cloud контур. Новая реализация
+> находится в draft PR #1 и требует стабилизационных релизов `0.11A–0.11D` из
+> `docs/IMPLEMENTATION_PLAN.md` до слияния. Production временно развёрнут из этой неслитой
+> рабочей ветки; считать `main` утверждённым production-baseline нельзя.
+
 ## Что уже работает
 
 - реальный сбор объявлений DubiCars, CarSwitch, Cars24 UAE и OpenSooq UAE;
