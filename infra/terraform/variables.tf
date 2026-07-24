@@ -21,25 +21,25 @@ variable "monthly_budget_aed" {
 }
 
 locals {
-  runtime_sa   = "deal-sniper-runtime"
-  scheduler_sa = "deal-sniper-scheduler"
-  sources      = toset(["dubicars", "carswitch", "cars24", "opensooq"])
-  source_pages = {
-    dubicars = 5
+  runtime_sa       = "deal-sniper-runtime"
+  scheduler_sa     = "deal-sniper-scheduler"
+  sources          = toset(["dubicars", "carswitch", "cars24", "opensooq"])
+  source_pages     = {
+    dubicars  = 5
     carswitch = 5
-    cars24 = 5
-    opensooq = 5
+    cars24    = 5
+    opensooq  = 5
   }
-  source_page_env = {
-    dubicars = "DUBICARS_MAX_PAGES"
+  source_page_env  = {
+    dubicars  = "DUBICARS_MAX_PAGES"
     carswitch = "CARSWITCH_MAX_PAGES"
-    cars24 = "CARS24_MAX_PAGES"
-    opensooq = "OPENSOOQ_MAX_PAGES"
+    cars24    = "CARS24_MAX_PAGES"
+    opensooq  = "OPENSOOQ_MAX_PAGES"
   }
   source_schedules = {
-    dubicars = "0/10 * * * *"
+    dubicars  = "0/10 * * * *"
     carswitch = "2/10 * * * *"
-    cars24 = "4/10 * * * *"
-    opensooq = "6/10 * * * *"
+    cars24    = "4/10 * * * *"
+    opensooq  = "6/10 * * * *"
   }
 }
