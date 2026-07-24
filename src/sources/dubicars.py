@@ -13,7 +13,7 @@ import httpx
 from bs4 import BeautifulSoup
 from pydantic import HttpUrl
 
-from src.domain.models import ListingSnapshot, SellerType
+from src.domain.models import MIN_VALID_LISTING_PRICE_AED, ListingSnapshot, SellerType
 from src.raw_storage import RawSnapshotArchive
 
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def _parse_item_list(elements: Any, aed_to_usd_rate: Decimal) -> list[ListingSna
                 price *= aed_to_usd_rate
             elif currency != "AED":
                 continue
-            if price <= 0:
+            if price < MIN_VALID_LISTING_PRICE_AED:
                 continue
             listing_id = _source_listing_id(url)
             make = _name_from_schema_id(item.get("brand"))

@@ -23,7 +23,9 @@ from src.cloud_jobs import CloudJobLauncher
 from src.config import Settings
 from src.domain.models import UserAction, UserSettings
 from src.service import DealService, EvaluatedListing
+from src.storage import snapshot_hash
 from src.tasks import CloudTaskDispatcher
+from src.verification import verify_listing_price
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-app = FastAPI(title="Dubai Deal Sniper", version="0.5.1")
+app = FastAPI(title="Dubai Deal Sniper", version="0.6.0")
 
 
 class ProcessingTask(BaseModel):
@@ -45,6 +47,7 @@ class DeliveryTask(BaseModel):
     listing_id: str
     content_hash: str
     text: str
+    engine_version: str | None = None
 
 
 def require_internal_task(secret: str | None, task_name: str | None) -> None:
@@ -134,7 +137,7 @@ async def ready() -> dict[str, str]:
 @app.get("/version")
 async def version() -> dict[str, str]:
     """Версия API и детерминированного движка для smoke checks."""
-    return {"api": "0.5.1", "decision_engine": service.decision_engine.version}
+    return {"api": "0.6.0", "decision_engine": service.decision_engine.version}
 
 
 @app.post("/telegram/webhook")
@@ -251,6 +254,9 @@ async def telegram_webhook(
                     text=tr("Подходящих вариантов пока нет.", "No suitable cars yet."),
                 )
             for listing, decision in recent_candidates:
+                verification = await verify_listing_price(listing)
+                if not verification.verified:
+                    continue
                 await bot.send_message(
                     chat_id=chat_id,
                     text=format_card(listing, decision, language),
@@ -412,6 +418,14 @@ async def process_listing_task(
     evaluated = await service.process_listing(task.listing_id, task.content_hash)
     if evaluated is None or not is_publishable(evaluated.decision, settings):
         return {"ok": True}
+    verification = await verify_listing_price(evaluated.listing)
+    if not verification.verified:
+        logger.warning(
+            "Кандидат %s не прошёл проверку detail page: %s",
+            task.listing_id,
+            verification.reason,
+        )
+        return {"ok": True}
     targets: dict[str, str] = {}
     for user_id in settings.telegram_allowed_user_ids:
         user_settings = await asyncio.to_thread(
@@ -434,6 +448,7 @@ async def process_listing_task(
                 "listing_id": task.listing_id,
                 "content_hash": task.content_hash,
                 "text": card,
+                "engine_version": evaluated.decision.engine_version,
             }
         )
     return {"ok": True}
@@ -447,6 +462,14 @@ async def deliver_telegram_task(
 ) -> dict[str, bool]:
     """Доставляет Telegram-карточку ровно один раз на получателя и версию."""
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
+    if task.engine_version != service.decision_engine.version:
+        return {"ok": True}
+    latest = await asyncio.to_thread(service.repository.latest_snapshot, task.listing_id)
+    if latest is None or snapshot_hash(latest) != task.content_hash:
+        return {"ok": True}
+    verification = await verify_listing_price(latest)
+    if not verification.verified:
+        return {"ok": True}
     if await asyncio.to_thread(
         service.repository.notification_sent,
         task.target_id,

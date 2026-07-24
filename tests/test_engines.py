@@ -81,6 +81,20 @@ def test_missing_market_never_invents_price() -> None:
     assert decision.max_purchase_price_aed is None
 
 
+def test_placeholder_price_never_becomes_a_deal() -> None:
+    market = ComparablePriceEngine().estimate(
+        [comparable(index, str(36000 + index * 500)) for index in range(6)],
+        min_comparables=5,
+    )
+    decision = DecisionEngine().decide(
+        asking_price_aed=Decimal("999"),
+        market=market,
+        costs=CostEstimate(),
+    )
+    assert decision.action is DecisionAction.INSUFFICIENT_DATA
+    assert decision.expected_profit_aed is None
+
+
 def test_cost_and_risk_engines_cover_full_cost_structure() -> None:
     listing = ListingSnapshot(
         source="test",

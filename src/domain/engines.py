@@ -5,6 +5,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from statistics import median
 
 from src.domain.models import (
+    MIN_VALID_LISTING_PRICE_AED,
     ComparableVehicle,
     CostEstimate,
     DealDecision,
@@ -16,7 +17,7 @@ from src.domain.models import (
 
 MONEY_STEP = Decimal("1")
 PERCENT_STEP = Decimal("0.1")
-DECISION_ENGINE_VERSION = "2.2.1"
+DECISION_ENGINE_VERSION = "2.3.0"
 
 
 def money(value: Decimal) -> Decimal:
@@ -179,6 +180,20 @@ class DecisionEngine:
     ) -> DealDecision:
         """Возвращает решение, не используя внешние сервисы."""
         risk_result = risks or RiskAssessment()
+        if asking_price_aed < MIN_VALID_LISTING_PRICE_AED:
+            return DealDecision(
+                action=DecisionAction.INSUFFICIENT_DATA,
+                asking_price_aed=asking_price_aed,
+                market=market,
+                costs=costs,
+                risks=risk_result,
+                max_purchase_price_aed=None,
+                expected_profit_aed=None,
+                roi_percent=None,
+                confidence=Decimal("0"),
+                reasons=["Цена ниже допустимого порога и может быть заглушкой"],
+                engine_version=self.version,
+            )
         if market is None:
             return DealDecision(
                 action=DecisionAction.INSUFFICIENT_DATA,
@@ -191,6 +206,20 @@ class DecisionEngine:
                 roi_percent=None,
                 confidence=Decimal("0"),
                 reasons=["Недостаточно сопоставимых объявлений"],
+                engine_version=self.version,
+            )
+        if asking_price_aed < market.low_aed * Decimal("0.5"):
+            return DealDecision(
+                action=DecisionAction.INSUFFICIENT_DATA,
+                asking_price_aed=asking_price_aed,
+                market=market,
+                costs=costs,
+                risks=risk_result,
+                max_purchase_price_aed=None,
+                expected_profit_aed=None,
+                roi_percent=None,
+                confidence=Decimal("0"),
+                reasons=["Аномальная скидка требует подтверждения цены у источника"],
                 engine_version=self.version,
             )
 

@@ -2,6 +2,7 @@
 
 import html
 import logging
+from decimal import Decimal
 from typing import Any
 
 from telegram import Bot, Update
@@ -9,9 +10,11 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes
 
 from src.config import Settings
+from src.domain.engines import DECISION_ENGINE_VERSION
 from src.domain.models import DealDecision, DecisionAction, ListingSnapshot
 from src.service import DealService, EvaluatedListing
 from src.storage import snapshot_hash
+from src.verification import verify_listing_price
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,10 @@ def is_publishable(decision: DealDecision, settings: Settings) -> bool:
     """Защитный фильтр: убыточное решение никогда не уходит как кандидат."""
     return bool(
         decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        and decision.engine_version == DECISION_ENGINE_VERSION
+        and decision.asking_price_aed >= 5000
+        and decision.market is not None
+        and decision.asking_price_aed >= decision.market.low_aed * Decimal("0.5")
         and decision.expected_profit_aed is not None
         and decision.expected_profit_aed >= settings.target_profit_aed
         and decision.roi_percent is not None
@@ -133,6 +140,14 @@ class DealBot:
             item for item in report.decisions if is_publishable(item.decision, self.settings)
         ][:5]
         for item in candidates:
+            verification = await verify_listing_price(item.listing)
+            if not verification.verified:
+                logger.warning(
+                    "Кандидат %s не прошёл проверку detail page: %s",
+                    item.listing.source_listing_id,
+                    verification.reason,
+                )
+                continue
             await update.effective_message.reply_text(
                 format_card(item.listing, item.decision),
                 parse_mode=ParseMode.HTML,
@@ -161,6 +176,9 @@ class DealBot:
             await update.effective_message.reply_text("Подходящих вариантов пока нет.")
             return
         for listing, decision in candidates:
+            verification = await verify_listing_price(listing)
+            if not verification.verified:
+                continue
             await update.effective_message.reply_text(
                 format_card(listing, decision),
                 parse_mode=ParseMode.HTML,
@@ -377,6 +395,14 @@ async def publish_candidates(
     for item in candidates:
         listing_id = f"{item.listing.source}:{item.listing.source_listing_id}"
         if service.repository.notification_sent(target_id, listing_id, item.content_hash):
+            continue
+        verification = await verify_listing_price(item.listing)
+        if not verification.verified:
+            logger.warning(
+                "Кандидат %s не опубликован: %s",
+                listing_id,
+                verification.reason,
+            )
             continue
         await bot.send_message(
             chat_id=target_id,

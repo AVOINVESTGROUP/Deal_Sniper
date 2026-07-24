@@ -3,7 +3,12 @@
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from src.domain.models import ComparableVehicle, NormalizedVehicle, SellerType
+from src.domain.models import (
+    MIN_VALID_LISTING_PRICE_AED,
+    ComparableVehicle,
+    NormalizedVehicle,
+    SellerType,
+)
 
 MAX_AGE = timedelta(days=14)
 MAX_YEAR_GAP = 2
@@ -23,6 +28,11 @@ def select_comparables(
     selected_by_vehicle: dict[str, ComparableVehicle] = {}
     for candidate in vehicles:
         if candidate.listing_id == target.listing_id:
+            continue
+        if candidate.asking_price_aed < MIN_VALID_LISTING_PRICE_AED:
+            continue
+        price_ratio = candidate.asking_price_aed / target.asking_price_aed
+        if price_ratio < Decimal("0.33") or price_ratio > Decimal("3"):
             continue
         candidate_vehicle_id = listing_to_vehicle.get(candidate.listing_id, candidate.listing_id)
         if target_vehicle_id and candidate_vehicle_id == target_vehicle_id:

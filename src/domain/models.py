@@ -6,6 +6,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
+MIN_VALID_LISTING_PRICE_AED = Decimal("5000")
+
 
 class DecisionAction(StrEnum):
     """Возможное действие по объявлению."""
@@ -179,7 +181,7 @@ class DealDecision(BaseModel):
     roi_percent: Decimal | None
     confidence: Decimal = Field(ge=0, le=1)
     reasons: list[str] = Field(default_factory=list)
-    engine_version: str = "2.2.1"
+    engine_version: str = "2.3.0"
 
 
 class Outcome(BaseModel):

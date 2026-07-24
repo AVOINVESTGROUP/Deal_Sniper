@@ -5,7 +5,12 @@ import re
 from collections import defaultdict
 from decimal import Decimal
 
-from src.domain.models import ListingSnapshot, NormalizedVehicle, VehicleIdentity
+from src.domain.models import (
+    MIN_VALID_LISTING_PRICE_AED,
+    ListingSnapshot,
+    NormalizedVehicle,
+    VehicleIdentity,
+)
 
 SPACE_PATTERN = re.compile(r"[^a-z0-9]+")
 MAKE_ALIASES = {
@@ -27,6 +32,8 @@ def canonical_text(value: str | None) -> str | None:
 
 def normalize_listing(listing: ListingSnapshot) -> NormalizedVehicle | None:
     """Возвращает канонический автомобиль только при наличии обязательных признаков."""
+    if listing.price_aed < MIN_VALID_LISTING_PRICE_AED:
+        return None
     if not listing.make or not listing.model or listing.year is None or listing.mileage_km is None:
         return None
     make_raw = canonical_text(listing.make)

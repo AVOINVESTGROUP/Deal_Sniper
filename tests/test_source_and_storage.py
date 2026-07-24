@@ -17,6 +17,7 @@ from src.sources.carswitch import parse_carswitch_page
 from src.sources.dubicars import parse_search_page
 from src.sources.opensooq import parse_opensooq_page
 from src.storage import LocalRepository
+from src.verification import extract_detail_prices
 
 SEARCH_HTML = """
 <html><head><script type="application/ld+json">
@@ -135,6 +136,23 @@ def test_dubicars_json_ld_parser() -> None:
     assert results[0].make == "Toyota"
     assert results[0].model == "Camry"
     assert results[0].price_aed == Decimal("79000")
+
+
+def test_dubicars_rejects_placeholder_price() -> None:
+    html = SEARCH_HTML.replace('"79000"', '"272"').replace('"AED"', '"USD"')
+    assert parse_search_page(html) == []
+
+
+def test_detail_price_requires_positive_aed_offer() -> None:
+    html = """
+    <script type="application/ld+json">
+    {"@type":"Car","offers":{"price":"0","priceCurrency":"AED"}}
+    </script>
+    <script type="application/ld+json">
+    {"@type":"Vehicle","offers":[{"price":"95000","priceCurrency":"AED"}]}
+    </script>
+    """
+    assert extract_detail_prices(html) == [Decimal("95000")]
 
 
 def test_carswitch_json_ld_parser() -> None:
