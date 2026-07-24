@@ -31,7 +31,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-app = FastAPI(title="Dubai Deal Sniper", version="0.4.4")
+app = FastAPI(title="Dubai Deal Sniper", version="0.5.0")
 
 
 class ProcessingTask(BaseModel):
@@ -134,7 +134,7 @@ async def ready() -> dict[str, str]:
 @app.get("/version")
 async def version() -> dict[str, str]:
     """Версия API и детерминированного движка для smoke checks."""
-    return {"api": "0.4.4", "decision_engine": service.decision_engine.version}
+    return {"api": "0.5.0", "decision_engine": service.decision_engine.version}
 
 
 @app.post("/telegram/webhook")
@@ -422,8 +422,9 @@ async def process_listing_task(
             targets[str(user_id)] = telegram_language(
                 (user_settings or default_user_settings(user_id)).language_code
             )
-    if settings.telegram_channel_id:
-        targets[settings.telegram_channel_id] = "en"
+    delivery_channel_id = settings.telegram_pro_channel_id or settings.telegram_channel_id
+    if delivery_channel_id:
+        targets[delivery_channel_id] = "en"
     dispatcher = CloudTaskDispatcher(settings)
     for target_id, target_language in targets.items():
         card = format_card(evaluated.listing, evaluated.decision, target_language)

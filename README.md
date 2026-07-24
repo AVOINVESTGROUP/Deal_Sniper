@@ -88,7 +88,7 @@ python main.py bot
 ## Публикация в Telegram-канал
 
 1. Добавьте бота администратором канала с правом публикации сообщений.
-2. Укажите в `.env` `TELEGRAM_CHANNEL_ID=@channel_username`. Для приватного канала
+2. Укажите в `.env` `TELEGRAM_CHANNEL_ID=@channel_username`, а для платного закрытого канала — `TELEGRAM_PRO_CHANNEL_ID=-100...`. Для приватного канала
    используется числовой ID вида `-100...`.
 3. Выполните:
 

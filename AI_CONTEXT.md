@@ -92,3 +92,4 @@ C:\Dev\Deal_Sniper
 - Cloud Run Job `deal-sniper-publisher` описана в Terraform и получает обязательные `RAW_SNAPSHOTS_BUCKET`, Firestore и Telegram параметры; ручное исправление production не должно теряться при следующем развёртывании.
 - Telegram channel locale всегда `en`. В личном чате язык берётся из Telegram `from.language_code`, сохраняется в `UserSettings.language_code`; поддерживается русский, остальные локали получают английский fallback.
 - `/id` возвращает Telegram chat ID и user ID раздельно; это используется для подключения закрытого Pro-канала.
+- Монетизация начинается с закрытого канала: `TELEGRAM_PRO_CHANNEL_ID` имеет приоритет над публичным `TELEGRAM_CHANNEL_ID` для полных карточек и publisher job.

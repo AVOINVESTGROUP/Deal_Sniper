@@ -10,6 +10,10 @@ variable "telegram_channel_id" {
   type    = string
   default = ""
 }
+variable "telegram_pro_channel_id" {
+  type    = string
+  default = ""
+}
 variable "raw_bucket_name" { type = string }
 variable "billing_account" {
   type    = string

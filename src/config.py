@@ -17,6 +17,7 @@ class Settings:
     telegram_bot_token: str
     telegram_allowed_user_ids: frozenset[int]
     telegram_channel_id: str | None
+    telegram_pro_channel_id: str | None
     telegram_webhook_secret: str
     google_cloud_project: str
     google_cloud_region: str
@@ -62,6 +63,7 @@ class Settings:
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
             telegram_allowed_user_ids=_integer_set(os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")),
             telegram_channel_id=os.getenv("TELEGRAM_CHANNEL_ID") or None,
+            telegram_pro_channel_id=os.getenv("TELEGRAM_PRO_CHANNEL_ID") or None,
             telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip(),
             google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
             google_cloud_region=os.getenv("GOOGLE_CLOUD_REGION", "me-central1").strip(),

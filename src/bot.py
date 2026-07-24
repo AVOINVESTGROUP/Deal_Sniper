@@ -137,10 +137,13 @@ class DealBot:
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False,
             )
-        if self.settings.telegram_channel_id:
+        delivery_channel_id = (
+            self.settings.telegram_pro_channel_id or self.settings.telegram_channel_id
+        )
+        if delivery_channel_id:
             await publish_candidates(
                 update.get_bot(),
-                self.settings.telegram_channel_id,
+                delivery_channel_id,
                 self.service,
                 candidates,
             )
@@ -339,9 +342,9 @@ def run_bot(settings: Settings) -> None:
 
 async def scan_and_publish(settings: Settings) -> int:
     """Однократно сканирует источник и публикует новые кандидаты в канал."""
-    channel_id = settings.telegram_channel_id
+    channel_id = settings.telegram_pro_channel_id or settings.telegram_channel_id
     if not channel_id:
-        raise RuntimeError("TELEGRAM_CHANNEL_ID не задан в .env")
+        raise RuntimeError("TELEGRAM_PRO_CHANNEL_ID или TELEGRAM_CHANNEL_ID не задан в .env")
     service = DealService.from_settings(settings)
     report = await service.scan()
     candidates = [item for item in report.decisions if is_publishable(item.decision, settings)]

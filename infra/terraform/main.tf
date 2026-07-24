@@ -114,6 +114,7 @@ resource "google_cloud_run_v2_service" "api" {
           COLLECTOR_JOB_PREFIX         = "deal-sniper-collector"
           TELEGRAM_ALLOWED_USER_IDS    = var.telegram_allowed_user_ids
           TELEGRAM_CHANNEL_ID          = var.telegram_channel_id
+          TELEGRAM_PRO_CHANNEL_ID      = var.telegram_pro_channel_id
           MIN_COMPARABLES_COUNT        = "5"
         }
         content {
@@ -220,6 +221,7 @@ resource "google_cloud_run_v2_job" "publisher" {
             STORAGE_BACKEND           = "firestore"
             RAW_SNAPSHOTS_BUCKET      = google_storage_bucket.raw.name
             TELEGRAM_CHANNEL_ID       = var.telegram_channel_id
+            TELEGRAM_PRO_CHANNEL_ID   = var.telegram_pro_channel_id
             CHANNEL_MAX_POSTS_PER_RUN = "10"
             MIN_COMPARABLES_COUNT     = "5"
           }

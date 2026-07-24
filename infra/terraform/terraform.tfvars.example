@@ -4,4 +4,5 @@ image                     = "me-central1-docker.pkg.dev/your-project/deal-sniper
 api_base_url              = "https://deal-sniper-api-PROJECT_NUMBER.me-central1.run.app"
 telegram_allowed_user_ids = "123456789"
 telegram_channel_id       = "@your_channel"
+telegram_pro_channel_id   = "-1001234567890"
 raw_bucket_name           = "your-project-raw-snapshots"
