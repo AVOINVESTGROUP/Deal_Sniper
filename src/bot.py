@@ -10,7 +10,8 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from src.config import Settings
 from src.domain.models import DealDecision, DecisionAction, ListingSnapshot
-from src.service import DealService
+from src.service import DealService, EvaluatedListing
+from src.storage import snapshot_hash
 
 logger = logging.getLogger(__name__)
 
@@ -346,17 +347,21 @@ async def scan_and_publish(settings: Settings) -> int:
     if not channel_id:
         raise RuntimeError("TELEGRAM_PRO_CHANNEL_ID или TELEGRAM_CHANNEL_ID не задан в .env")
     service = DealService.from_settings(settings)
-    report = await service.scan()
-    candidates = [item for item in report.decisions if is_publishable(item.decision, settings)]
-    candidates.sort(
-        key=lambda item: (
-            item.decision.expected_profit_aed or 0,
-            item.decision.roi_percent or 0,
-            item.decision.confidence,
-        ),
-        reverse=True,
+    await service.scan()
+    current = service.repository.latest_decisions(limit=500)
+    selected = select_publishable_decisions(
+        current,
+        settings,
+        limit=settings.channel_max_posts_per_run,
     )
-    candidates = candidates[: settings.channel_max_posts_per_run]
+    candidates = [
+        EvaluatedListing(
+            listing=listing,
+            content_hash=snapshot_hash(listing),
+            decision=decision,
+        )
+        for listing, decision in selected
+    ]
     async with Bot(settings.require_bot_token()) as bot:
         return await publish_candidates(bot, channel_id, service, candidates)
 

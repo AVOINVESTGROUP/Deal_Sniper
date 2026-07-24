@@ -31,7 +31,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-app = FastAPI(title="Dubai Deal Sniper", version="0.5.0")
+app = FastAPI(title="Dubai Deal Sniper", version="0.5.1")
 
 
 class ProcessingTask(BaseModel):
@@ -134,7 +134,7 @@ async def ready() -> dict[str, str]:
 @app.get("/version")
 async def version() -> dict[str, str]:
     """Версия API и детерминированного движка для smoke checks."""
-    return {"api": "0.5.0", "decision_engine": service.decision_engine.version}
+    return {"api": "0.5.1", "decision_engine": service.decision_engine.version}
 
 
 @app.post("/telegram/webhook")

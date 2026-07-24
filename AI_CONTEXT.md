@@ -93,3 +93,4 @@ C:\Dev\Deal_Sniper
 - Telegram channel locale всегда `en`. В личном чате язык берётся из Telegram `from.language_code`, сохраняется в `UserSettings.language_code`; поддерживается русский, остальные локали получают английский fallback.
 - `/id` возвращает Telegram chat ID и user ID раздельно; это используется для подключения закрытого Pro-канала.
 - Монетизация начинается с закрытого канала: `TELEGRAM_PRO_CHANNEL_ID` имеет приоритет над публичным `TELEGRAM_CHANNEL_ID` для полных карточек и publisher job.
+- Publisher читает текущие publishable-решения из Firestore после scan, а не ограничивается изменившимися в одном запуске объявлениями; доставка остаётся идемпотентной по target/listing/content hash.
