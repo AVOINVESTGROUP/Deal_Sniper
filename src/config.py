@@ -37,6 +37,8 @@ class Settings:
     carswitch_pages: int
     cars24_url_template: str
     cars24_pages: int
+    opensooq_url_template: str
+    opensooq_pages: int
     request_timeout_seconds: float
     target_profit_aed: Decimal
     min_roi_percent: Decimal
@@ -99,6 +101,11 @@ class Settings:
                 "https://www.cars24.ae/buy-used-cars-dubai/?page={page}",
             ),
             cars24_pages=max(1, int(os.getenv("CARS24_MAX_PAGES", "3"))),
+            opensooq_url_template=os.getenv(
+                "OPENSOOQ_URL_TEMPLATE",
+                "https://ae.opensooq.com/en/cars/cars-for-sale?sort=recent&page={page}",
+            ),
+            opensooq_pages=max(1, int(os.getenv("OPENSOOQ_MAX_PAGES", "5"))),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
             target_profit_aed=Decimal(os.getenv("TARGET_PROFIT_AED", "5000")),
             min_roi_percent=Decimal(os.getenv("MIN_ROI_PERCENT", "10")),

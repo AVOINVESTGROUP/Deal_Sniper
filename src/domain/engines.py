@@ -16,7 +16,7 @@ from src.domain.models import (
 
 MONEY_STEP = Decimal("1")
 PERCENT_STEP = Decimal("0.1")
-DECISION_ENGINE_VERSION = "2.1.0"
+DECISION_ENGINE_VERSION = "2.2.1"
 
 
 def money(value: Decimal) -> Decimal:

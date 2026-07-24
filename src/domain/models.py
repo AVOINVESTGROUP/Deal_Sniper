@@ -179,7 +179,7 @@ class DealDecision(BaseModel):
     roi_percent: Decimal | None
     confidence: Decimal = Field(ge=0, le=1)
     reasons: list[str] = Field(default_factory=list)
-    engine_version: str = "2.1.0"
+    engine_version: str = "2.2.1"
 
 
 class Outcome(BaseModel):

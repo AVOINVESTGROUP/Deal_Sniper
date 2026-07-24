@@ -72,7 +72,7 @@ C:\Dev\Deal_Sniper
 - Задача `deal-sniper-publisher` выполняет сбор, детерминированный расчёт и идемпотентную публикацию новых кандидатов. Проверочный запуск 24 июля 2026 года завершился успешно.
 - Cloud Scheduler запускает `deal-sniper-publisher` каждые 10 минут по часовому поясу `Asia/Dubai`; проверен запуск именно через Scheduler.
 - Реальные источники объединяются композитным адаптером; ошибка одной площадки не останавливает остальные.
-- Зарегистрированные реальные источники: DubiCars, CarSwitch и Cars24 UAE. Включение и отключение хранится в `source_registry` Firestore и управляется командами Telegram.
+- Зарегистрированные реальные источники: DubiCars, CarSwitch, Cars24 UAE и OpenSooq UAE. Включение и отключение хранится в `source_registry` Firestore и управляется командами Telegram.
 - Команды администратора источников: `/sources`, `/source_on`, `/source_off`, `/source_add`, `/source_remove`, `/source_scan`.
 - Telegram webhook использует атомарную дедупликацию `update_id`; повторная доставка долгой команды не запускает второй расчёт.
 - Cars24 smoke test от 24 июля 2026 года: 75 уникальных машин на трёх страницах, у всех распознаны цена и пробег.
@@ -83,8 +83,8 @@ C:\Dev\Deal_Sniper
 - Production pipeline разделён на collector Jobs, очередь `listing-processing` и очередь `telegram-delivery`.
 - Telegram webhook не выполняет долгий сбор: `/scan` только запускает фоновые collector Jobs.
 - Пользовательские фильтры и действия хранятся в Firestore независимо для каждого Telegram user ID.
-- Production image `0.3.7` содержит Cloud Tasks pipeline, исправленный DubiCars currency parser, Firestore batch normalization, запрет убыточных `INSPECT`, engine-version task identity и корректную быструю выдачу `/deals`.
-- Рабочие production jobs: `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`.
+- Production image `0.4.1` добавляет OpenSooq, пакетную запись объявлений, ограниченный запрос аналогов по марке/модели, параллельную постановку backfill в Cloud Tasks и понятный статус `/sources`.
+- Рабочие production jobs: `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`, `deal-sniper-collector-opensooq`.
 - Raw bucket: `avo-deal-sniper-raw-snapshots`; очереди: `listing-processing`, `telegram-delivery`.
 - Terraform в `infra/terraform` прошёл `terraform validate`; существующие ручные ресурсы требуют import до apply.
-- Decision Engine `2.1.0`: `INSPECT` означает экономически подходящую сделку с warning; отрицательная прибыль всегда `REJECT`. Доставка дополнительно проверяет прибыль, ROI и max purchase price.
+- Decision Engine `2.2.1`: расширенный рынок пересчитывается только после завершения общего backfill; `INSPECT` означает экономически подходящую сделку с warning, отрицательная прибыль всегда `REJECT`.

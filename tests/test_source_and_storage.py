@@ -9,6 +9,7 @@ from src.domain.normalization import normalize_listing, resolve_vehicle_identiti
 from src.sources.cars24 import parse_cars24_page
 from src.sources.carswitch import parse_carswitch_page
 from src.sources.dubicars import parse_search_page
+from src.sources.opensooq import parse_opensooq_page
 from src.storage import LocalRepository
 
 SEARCH_HTML = """
@@ -83,6 +84,27 @@ window.__PRELOADED_STATE__ = {
 </script>
 """
 
+OPENSOOQ_HTML = """
+<script id="__NEXT_DATA__" type="application/json">
+{
+  "props": {"pageProps": {"serpApiResponse": {"listings": {"items": [{
+    "id": 284463144,
+    "is_active": true,
+    "title": "2008 Mercedes Benz S-Class S 550",
+    "price_amount": "20,000 AED",
+    "price_currency_iso": "AED",
+    "city_label": "Al Ain",
+    "post_url": "/search/284463144",
+    "image_uri": "e7/aa/example.jpg",
+    "kilometers_Cars_value_i": "150000",
+    "user_target_type": "free",
+    "masked_description": "Used car",
+    "cps": ["Used", "Mercedes Benz", "S-Class", "S 550", "2,008", "150,000 km", "Sedan"],
+    "starCps": [{"label": "Japanese Specs"}]
+  }]}}}}}
+</script>
+"""
+
 
 def listing(price: str) -> ListingSnapshot:
     """Создаёт версию одного объявления."""
@@ -126,6 +148,19 @@ def test_cars24_preloaded_state_parser() -> None:
     assert results[0].model == "Asx"
     assert results[0].price_aed == Decimal("33999")
     assert results[0].mileage_km == 78_171
+
+
+def test_opensooq_next_data_parser() -> None:
+    results = parse_opensooq_page(OPENSOOQ_HTML)
+    assert len(results) == 1
+    assert results[0].source_listing_id == "284463144"
+    assert results[0].make == "Mercedes Benz"
+    assert results[0].model == "S-Class"
+    assert results[0].trim == "S 550"
+    assert results[0].year == 2008
+    assert results[0].mileage_km == 150_000
+    assert results[0].price_aed == Decimal("20000")
+    assert results[0].specification == "Japanese Specs"
 
 
 def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:

@@ -37,6 +37,21 @@ class CloudTaskDispatcher:
             f"process:{engine_version}:{listing_id}:{content_hash}",
         )
 
+    async def enqueue_processing_batch(
+        self,
+        pending: list[tuple[str, str]],
+        engine_version: str,
+        concurrency: int = 20,
+    ) -> None:
+        """Ставит большой backfill в очередь с ограниченной параллельностью."""
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def enqueue(item: tuple[str, str]) -> None:
+            async with semaphore:
+                await self.enqueue_processing(item[0], item[1], engine_version)
+
+        await asyncio.gather(*(enqueue(item) for item in pending))
+
     async def enqueue_delivery(self, payload: dict[str, Any]) -> None:
         identity = (
             f"deliver:{payload['target_id']}:{payload['listing_id']}:"

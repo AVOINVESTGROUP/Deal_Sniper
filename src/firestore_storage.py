@@ -66,6 +66,70 @@ class FirestoreRepository:
         price_changed = current.exists and previous_price != str(snapshot.price_aed)
         return not current.exists, price_changed, content_hash
 
+    def save_snapshots(
+        self,
+        snapshots: list[ListingSnapshot],
+    ) -> list[tuple[ListingSnapshot, bool, bool, str]]:
+        """Пакетно читает состояние и сохраняет только новые версии объявлений."""
+        references = {
+            f"{snapshot.source}:{snapshot.source_listing_id}": self.client.collection(
+                "listings"
+            ).document(f"{snapshot.source}:{snapshot.source_listing_id}")
+            for snapshot in snapshots
+        }
+        current_by_id = {
+            document.id: document.to_dict() or {}
+            for document in self.client.get_all(list(references.values()))
+            if document.exists
+        }
+        results: list[tuple[ListingSnapshot, bool, bool, str]] = []
+        changed: list[tuple[ListingSnapshot, str, str, bool, bool]] = []
+        for snapshot in snapshots:
+            listing_id = f"{snapshot.source}:{snapshot.source_listing_id}"
+            content_hash = snapshot_hash(snapshot)
+            current = current_by_id.get(listing_id)
+            is_new = current is None
+            price_changed = current is not None and current.get("price_aed") != str(
+                snapshot.price_aed
+            )
+            results.append((snapshot, is_new, price_changed, content_hash))
+            if current is None or current.get("content_hash") != content_hash:
+                changed.append(
+                    (snapshot, listing_id, content_hash, is_new, price_changed)
+                )
+
+        for offset in range(0, len(changed), 150):
+            batch = self.client.batch()
+            for snapshot, listing_id, content_hash, _is_new, _price_changed in changed[
+                offset : offset + 150
+            ]:
+                listing_ref = references[listing_id]
+                payload = snapshot.model_dump(mode="json")
+                batch.set(
+                    listing_ref.collection("snapshots").document(content_hash),
+                    {
+                        "listing_id": listing_id,
+                        "content_hash": content_hash,
+                        "observed_at": snapshot.observed_at,
+                        "price_aed": str(snapshot.price_aed),
+                        "payload": payload,
+                    },
+                )
+                batch.set(
+                    listing_ref,
+                    {
+                        "listing_id": listing_id,
+                        "source": snapshot.source,
+                        "source_listing_id": snapshot.source_listing_id,
+                        "content_hash": content_hash,
+                        "price_aed": str(snapshot.price_aed),
+                        "updated_at": snapshot.observed_at,
+                        "payload": payload,
+                    },
+                )
+            batch.commit()
+        return results
+
     def latest_snapshots(self) -> list[ListingSnapshot]:
         results: list[ListingSnapshot] = []
         for document in self.client.collection("listings").stream():
@@ -107,6 +171,7 @@ class FirestoreRepository:
             {
                 "listing_id": vehicle.listing_id,
                 "comparison_key": vehicle.comparison_key,
+                "make_model": f"{vehicle.make}|{vehicle.model}",
                 "updated_at": datetime.now(UTC),
                 "payload": vehicle.model_dump(mode="json"),
             }
@@ -115,6 +180,20 @@ class FirestoreRepository:
     def normalized_vehicles(self) -> list[NormalizedVehicle]:
         results: list[NormalizedVehicle] = []
         for document in self.client.collection("normalized_vehicles").stream():
+            data = document.to_dict()
+            if data and "payload" in data:
+                results.append(NormalizedVehicle.model_validate(data["payload"]))
+        return results
+
+    def comparable_vehicles(self, make: str, model: str) -> list[NormalizedVehicle]:
+        """Читает из Firestore только одну марку и модель вместо всего рынка."""
+        query = self.client.collection("normalized_vehicles").where(
+            "make_model",
+            "==",
+            f"{make}|{model}",
+        )
+        results: list[NormalizedVehicle] = []
+        for document in query.stream():
             data = document.to_dict()
             if data and "payload" in data:
                 results.append(NormalizedVehicle.model_validate(data["payload"]))
@@ -156,6 +235,7 @@ class FirestoreRepository:
                 {
                     "listing_id": vehicle.listing_id,
                     "comparison_key": vehicle.comparison_key,
+                    "make_model": f"{vehicle.make}|{vehicle.model}",
                     "updated_at": datetime.now(UTC),
                     "payload": vehicle.model_dump(mode="json"),
                 },

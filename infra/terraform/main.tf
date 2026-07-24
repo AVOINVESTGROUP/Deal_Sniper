@@ -170,7 +170,7 @@ resource "google_cloud_run_v2_job" "collector" {
         command = ["python"]
         args    = ["main.py", "collect", "--source", each.key]
         dynamic "env" {
-          for_each = {
+          for_each = merge({
             GOOGLE_CLOUD_PROJECT         = var.project_id
             GOOGLE_CLOUD_REGION          = var.region
             STORAGE_BACKEND              = "firestore"
@@ -181,7 +181,7 @@ resource "google_cloud_run_v2_job" "collector" {
             TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
             TASK_INVOKER_SERVICE_ACCOUNT = google_service_account.runtime.email
             MIN_COMPARABLES_COUNT        = "5"
-          }
+          }, { (local.source_page_env[each.key]) = tostring(local.source_pages[each.key]) })
           content {
             name  = env.key
             value = env.value
@@ -205,7 +205,7 @@ resource "google_cloud_scheduler_job" "collector" {
   for_each         = local.sources
   name             = "deal-sniper-${each.key}-every-10m"
   region           = var.region
-  schedule         = "*/10 * * * *"
+  schedule         = local.source_schedules[each.key]
   time_zone        = "Asia/Dubai"
   attempt_deadline = "180s"
   retry_config {

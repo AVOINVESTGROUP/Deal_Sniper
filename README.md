@@ -6,7 +6,7 @@ Telegram-бот; TMA будет добавлена после пилота. Prod
 
 ## Что уже работает
 
-- реальный сбор объявлений DubiCars, CarSwitch и Cars24 UAE;
+- реальный сбор объявлений DubiCars, CarSwitch, Cars24 UAE и OpenSooq UAE;
 - несколько страниц источника за один запуск;
 - SQLite-хранилище для локального запуска с `listing_id` и `content_hash`;
 - сохранение новых версий и обнаружение изменения цены;
@@ -23,7 +23,7 @@ SQLite используется только локально. Production-кон
 ## Рабочий production-контур
 
 - Cloud Run API принимает Telegram webhook через API Gateway;
-- отдельные Cloud Run Jobs собирают DubiCars, CarSwitch и Cars24;
+- отдельные Cloud Run Jobs собирают DubiCars, CarSwitch, Cars24 и OpenSooq;
 - Cloud Scheduler запускает каждый источник каждые 10 минут по времени Дубая;
 - `listing-processing` выполняет расчёты, `telegram-delivery` доставляет карточки;
 - токены хранятся в Secret Manager, данные — в Firestore, raw — в Cloud Storage;
@@ -74,7 +74,7 @@ python main.py bot
 - `/status` — число сохранённых версий;
 - `/scan` — получить свежие объявления и рассчитать кандидатов;
 - `/deals` — показать последние `CONTACT` и `INSPECT` решения.
-- `/sources` — показать все зарегистрированные источники и их состояние;
+- `/sources` — показать источники, состояние и объём последнего сбора;
 - `/source_on cars24` или `/source_add cars24` — включить источник;
 - `/source_off cars24` или `/source_remove cars24` — отключить без удаления истории;
 - `/source_scan cars24` — проверить только выбранный источник.
@@ -107,6 +107,7 @@ python main.py publish
 Основные параметры `.env`:
 
 - `DUBICARS_MAX_PAGES` — сколько страниц проверять;
+- `CARSWITCH_MAX_PAGES`, `CARS24_MAX_PAGES`, `OPENSOOQ_MAX_PAGES` — глубина каждого коллектора;
 - `MIN_COMPARABLES_COUNT` — минимум аналогов для расчёта;
 - `TARGET_PROFIT_AED` — целевая прибыль;
 - `MIN_ROI_PERCENT` — минимальный ROI;

@@ -13,7 +13,7 @@ from src.domain.engines import (
     DecisionPolicy,
     RiskEngine,
 )
-from src.domain.models import DealDecision, ListingSnapshot, NormalizedVehicle
+from src.domain.models import DealDecision, ListingSnapshot
 from src.domain.normalization import normalize_listing, resolve_vehicle_identities
 from src.raw_storage import (
     GcsRawSnapshotArchive,
@@ -24,6 +24,7 @@ from src.sources.base import CompositeSource, SourceAdapter
 from src.sources.cars24 import Cars24Source
 from src.sources.carswitch import CarSwitchSource
 from src.sources.dubicars import DubiCarsSource
+from src.sources.opensooq import OpenSooqSource
 from src.storage import LocalRepository, Repository
 
 
@@ -122,6 +123,12 @@ class DealService:
                 timeout_seconds=settings.request_timeout_seconds,
                 archive=archive,
             ),
+            "opensooq": OpenSooqSource(
+                settings.opensooq_url_template,
+                pages=settings.opensooq_pages,
+                timeout_seconds=settings.request_timeout_seconds,
+                archive=archive,
+            ),
         }
         return cls(settings=settings, repository=repository, sources=sources)
 
@@ -179,8 +186,8 @@ class DealService:
             )
             raise
         report = ScanReport(fetched=len(fetched))
-        for listing in fetched:
-            is_new, price_changed, content_hash = self.repository.save_snapshot(listing)
+        saved = self.repository.save_snapshots(fetched)
+        for listing, is_new, price_changed, content_hash in saved:
             report.new += int(is_new)
             report.changed += int(price_changed)
             listing_id = f"{listing.source}:{listing.source_listing_id}"
@@ -191,8 +198,13 @@ class DealService:
             ):
                 report.pending.append((listing_id, content_hash))
 
-        if report.pending:
-            self._refresh_normalized_market()
+        normalized_fetched = [
+            vehicle
+            for listing in fetched
+            if (vehicle := normalize_listing(listing)) is not None
+        ]
+        if normalized_fetched:
+            self.repository.save_normalized_market(normalized_fetched, [])
 
         self.repository.record_source_run(
             metric_name,
@@ -208,16 +220,6 @@ class DealService:
 
         return report
 
-    def _refresh_normalized_market(self) -> None:
-        """Один раз готовит общий рынок перед fan-out задач обработки."""
-        normalized_vehicles: list[NormalizedVehicle] = []
-        for listing in self.repository.latest_snapshots():
-            vehicle = normalize_listing(listing)
-            if vehicle is not None:
-                normalized_vehicles.append(vehicle)
-        identities, _ = resolve_vehicle_identities(normalized_vehicles)
-        self.repository.save_normalized_market(normalized_vehicles, identities)
-
     async def process_listing(
         self,
         listing_id: str,
@@ -232,13 +234,21 @@ class DealService:
             return None
 
         target_listing = self.repository.latest_snapshot(listing_id)
-        normalized_vehicles = self.repository.normalized_vehicles()
-        _, listing_to_vehicle = resolve_vehicle_identities(normalized_vehicles)
-        normalized_by_id = {vehicle.listing_id: vehicle for vehicle in normalized_vehicles}
-
-        target = normalized_by_id.get(listing_id)
+        target = normalize_listing(target_listing) if target_listing is not None else None
         if target_listing is None or target is None:
             return None
+        normalized_vehicles = self.repository.comparable_vehicles(target.make, target.model)
+        if all(vehicle.listing_id != target.listing_id for vehicle in normalized_vehicles):
+            normalized_vehicles.append(target)
+        identities, listing_to_vehicle = resolve_vehicle_identities(normalized_vehicles)
+        target_vehicle_id = listing_to_vehicle.get(target.listing_id)
+        if target_vehicle_id is not None:
+            target_identity = next(
+                (identity for identity in identities if identity.vehicle_id == target_vehicle_id),
+                None,
+            )
+            if target_identity is not None:
+                self.repository.save_vehicle_identity(target_identity)
         peers = select_comparables(target, normalized_vehicles, listing_to_vehicle)
         market = self.market_engine.estimate(
             peers,

@@ -19,7 +19,10 @@ def parse_args() -> argparse.Namespace:
         choices=("bot", "scan", "collect", "publish"),
         help="Режим запуска",
     )
-    parser.add_argument("--source", choices=("dubicars", "carswitch", "cars24"))
+    parser.add_argument(
+        "--source",
+        choices=("dubicars", "carswitch", "cars24", "opensooq"),
+    )
     return parser.parse_args()
 
 
@@ -39,12 +42,10 @@ async def collect_once(settings: Settings, source_name: str | None) -> None:
     service = DealService.from_settings(settings)
     report = await service.collect(source_name)
     dispatcher = CloudTaskDispatcher(settings)
-    for listing_id, content_hash in report.pending:
-        await dispatcher.enqueue_processing(
-            listing_id,
-            content_hash,
-            service.decision_engine.version,
-        )
+    await dispatcher.enqueue_processing_batch(
+        report.pending,
+        service.decision_engine.version,
+    )
     print(report.summary())
 
 

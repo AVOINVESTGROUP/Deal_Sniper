@@ -23,6 +23,11 @@ class Repository(Protocol):
 
     def save_snapshot(self, snapshot: ListingSnapshot) -> tuple[bool, bool, str]: ...
 
+    def save_snapshots(
+        self,
+        snapshots: list[ListingSnapshot],
+    ) -> list[tuple[ListingSnapshot, bool, bool, str]]: ...
+
     def latest_snapshots(self) -> list[ListingSnapshot]: ...
 
     def latest_snapshot(self, listing_id: str) -> ListingSnapshot | None: ...
@@ -36,6 +41,8 @@ class Repository(Protocol):
     def save_normalized_vehicle(self, vehicle: NormalizedVehicle) -> None: ...
 
     def normalized_vehicles(self) -> list[NormalizedVehicle]: ...
+
+    def comparable_vehicles(self, make: str, model: str) -> list[NormalizedVehicle]: ...
 
     def save_vehicle_identity(self, identity: VehicleIdentity) -> None: ...
 
@@ -218,6 +225,16 @@ class LocalRepository:
         price_changed = previous is not None and previous["price_aed"] != str(snapshot.price_aed)
         return previous is None, price_changed, content_hash
 
+    def save_snapshots(
+        self,
+        snapshots: list[ListingSnapshot],
+    ) -> list[tuple[ListingSnapshot, bool, bool, str]]:
+        """Локально сохраняет пакет через существующую транзакционную операцию."""
+        return [
+            (snapshot, *self.save_snapshot(snapshot))
+            for snapshot in snapshots
+        ]
+
     def latest_snapshots(self) -> list[ListingSnapshot]:
         """Возвращает последнюю версию каждого объявления."""
         with self._connect() as connection:
@@ -293,6 +310,14 @@ class LocalRepository:
                 "SELECT payload_json FROM normalized_vehicles"
             ).fetchall()
         return [NormalizedVehicle.model_validate_json(row["payload_json"]) for row in rows]
+
+    def comparable_vehicles(self, make: str, model: str) -> list[NormalizedVehicle]:
+        """Возвращает ограниченный набор одной марки и модели для расчёта аналогов."""
+        return [
+            vehicle
+            for vehicle in self.normalized_vehicles()
+            if vehicle.make == make and vehicle.model == model
+        ]
 
     def save_vehicle_identity(self, identity: VehicleIdentity) -> None:
         with self._connect() as connection:

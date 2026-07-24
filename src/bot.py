@@ -246,16 +246,33 @@ def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
 
 
 def format_sources(service: DealService) -> str:
-    """Формирует компактную панель управления источниками."""
-    lines = ["Источники объявлений:"]
-    for name, enabled in service.source_statuses().items():
-        lines.append(f"{'✅' if enabled else '⛔'} {name}")
+    """Формирует понятную панель управления источниками и их здоровьем."""
+    statuses = service.source_statuses()
+    health = service.repository.source_health()
+    enabled_count = sum(statuses.values())
+    lines = [f"Источники: {len(statuses)}. Включено: {enabled_count}.", ""]
+    for name, enabled in statuses.items():
+        source_run = health.get(name, {})
+        if not enabled:
+            lines.append(f"⛔ {name}: отключён")
+            continue
+        success = source_run.get("success")
+        mark = "✅" if success is True else "⚠️" if success is False else "⏳"
+        fetched = source_run.get("fetched")
+        details = (
+            f"последний сбор {fetched} авто"
+            if isinstance(fetched, int)
+            else "ещё не запускался"
+        )
+        lines.append(f"{mark} {name}: {details}")
     lines.extend(
         [
             "",
-            "/source_on cars24 — включить",
-            "/source_off cars24 — отключить",
-            "/source_scan cars24 — проверить отдельно",
+            "Управление (замените имя источника):",
+            "/source_scan opensooq — запустить отдельно",
+            "/source_off opensooq — отключить",
+            "/source_on opensooq — включить",
+            "/scan — запустить все включённые",
         ]
     )
     return "\n".join(lines)
