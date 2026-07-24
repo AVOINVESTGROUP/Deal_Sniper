@@ -91,3 +91,4 @@ C:\Dev\Deal_Sniper
 - Production backfill 24.07.2026: 2 042 объявления, 2 042 решения (`CONTACT` 1, `INSPECT` 6, `WATCH` 4, `REJECT` 427, `INSUFFICIENT_DATA` 1 604), экономических нарушений в публикуемой выборке — 0.
 - Cloud Run Job `deal-sniper-publisher` описана в Terraform и получает обязательные `RAW_SNAPSHOTS_BUCKET`, Firestore и Telegram параметры; ручное исправление production не должно теряться при следующем развёртывании.
 - Telegram channel locale всегда `en`. В личном чате язык берётся из Telegram `from.language_code`, сохраняется в `UserSettings.language_code`; поддерживается русский, остальные локали получают английский fallback.
+- `/id` возвращает Telegram chat ID и user ID раздельно; это используется для подключения закрытого Pro-канала.
