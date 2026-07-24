@@ -1,0 +1,19 @@
+swagger: "2.0"
+info:
+  title: Dubai Deal Sniper Telegram Gateway
+  version: "1.0.0"
+schemes:
+  - https
+produces:
+  - application/json
+paths:
+  /telegram/webhook:
+    post:
+      operationId: telegramWebhook
+      x-google-backend:
+        address: https://deal-sniper-api-1054850076890.me-central1.run.app/telegram/webhook
+        jwt_audience: https://deal-sniper-api-1054850076890.me-central1.run.app
+        path_translation: CONSTANT_ADDRESS
+      responses:
+        "200":
+          description: Telegram update accepted

@@ -5,8 +5,29 @@ import json
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Protocol
 
 from src.domain.models import DealDecision, ListingSnapshot
+
+
+class Repository(Protocol):
+    """Контракт хранилища для локального и облачного режимов."""
+
+    def save_snapshot(self, snapshot: ListingSnapshot) -> tuple[bool, bool, str]: ...
+
+    def latest_snapshots(self) -> list[ListingSnapshot]: ...
+
+    def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None: ...
+
+    def latest_decisions(self, limit: int = 10) -> list[tuple[ListingSnapshot, DealDecision]]: ...
+
+    def count_snapshots(self) -> int: ...
+
+    def notification_sent(self, target_id: str, listing_id: str, content_hash: str) -> bool: ...
+
+    def mark_notification_sent(
+        self, target_id: str, listing_id: str, content_hash: str
+    ) -> None: ...
 
 
 def snapshot_hash(snapshot: ListingSnapshot) -> str:

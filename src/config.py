@@ -17,9 +17,14 @@ class Settings:
     telegram_bot_token: str
     telegram_allowed_user_ids: frozenset[int]
     telegram_channel_id: str | None
+    telegram_webhook_secret: str
+    google_cloud_project: str
+    storage_backend: str
     database_path: Path
     source_url_template: str
     source_pages: int
+    carswitch_url_template: str
+    carswitch_pages: int
     request_timeout_seconds: float
     target_profit_aed: Decimal
     min_roi_percent: Decimal
@@ -33,12 +38,20 @@ class Settings:
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
             telegram_allowed_user_ids=_integer_set(os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")),
             telegram_channel_id=os.getenv("TELEGRAM_CHANNEL_ID") or None,
+            telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip(),
+            google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
+            storage_backend=os.getenv("STORAGE_BACKEND", "local").strip().lower(),
             database_path=Path(os.getenv("LOCAL_DATABASE_PATH", "data/deal_sniper.db")),
             source_url_template=os.getenv(
                 "DUBICARS_URL_TEMPLATE",
                 "https://www.dubicars.com/uae/used?page={page}",
             ),
             source_pages=max(1, int(os.getenv("DUBICARS_MAX_PAGES", "3"))),
+            carswitch_url_template=os.getenv(
+                "CARSWITCH_URL_TEMPLATE",
+                "https://carswitch.com/dubai/used-cars/search?page={page}",
+            ),
+            carswitch_pages=max(1, int(os.getenv("CARSWITCH_MAX_PAGES", "3"))),
             request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "30")),
             target_profit_aed=Decimal(os.getenv("TARGET_PROFIT_AED", "5000")),
             min_roi_percent=Decimal(os.getenv("MIN_ROI_PERCENT", "10")),

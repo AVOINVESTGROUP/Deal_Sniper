@@ -32,6 +32,9 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # HTTP-клиенты могут включать секретный Telegram-токен в полный URL запроса.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     args = parse_args()
     settings = Settings.from_env()
     if args.command == "bot":

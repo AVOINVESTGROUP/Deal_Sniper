@@ -1,11 +1,12 @@
 # Dubai Deal Sniper
 
 Сервис подбора автомобилей с фиксированной ценой на рынке ОАЭ. Первый интерфейс —
-Telegram-бот; TMA будет добавлена после пилота.
+Telegram-бот; TMA будет добавлена после пилота. Production-версия работает в Google Cloud,
+а новые кандидаты публикуются в канале `@Dubai_Auto_Invest`.
 
 ## Что уже работает
 
-- реальный сбор объявлений DubiCars из структурированных данных страниц поиска;
+- реальный сбор объявлений DubiCars и CarSwitch из структурированных данных страниц поиска;
 - несколько страниц источника за один запуск;
 - SQLite-хранилище для локального запуска с `listing_id` и `content_hash`;
 - сохранение новых версий и обнаружение изменения цены;
@@ -14,8 +15,19 @@ Telegram-бот; TMA будет добавлена после пилота.
 - публикация новых кандидатов в Telegram-канал без повторной отправки;
 - тесты, Ruff, mypy, GitHub Actions и Dockerfile.
 
-SQLite используется только локально. Переход на Firestore и Cloud Storage описан в
-`docs/IMPLEMENTATION_PLAN.md`.
+SQLite используется только локально. Production-контур хранит объявления, версии цен,
+решения и отметки доставки в Firestore.
+
+## Рабочий production-контур
+
+- Cloud Run API принимает Telegram webhook через API Gateway;
+- Cloud Run Job `deal-sniper-publisher` выполняет сбор, расчёт и публикацию;
+- Cloud Scheduler запускает задачу каждые 10 минут по времени Дубая;
+- токен Telegram хранится в Secret Manager, а данные — в Firestore;
+- повторная публикация одной версии объявления блокируется отметкой доставки.
+
+Проверка для владельца: откройте `@DubaiDealSniper111_bot` и выполните `/status`, `/scan`
+или `/deals`. Для работы по расписанию компьютер пользователя включать не требуется.
 
 ## Локальная подготовка
 
@@ -105,8 +117,8 @@ python -m mypy src
 
 ```powershell
 docker build -t deal-sniper .
-docker run --rm --env-file .env -v "${PWD}/data:/app/data" deal-sniper scan
-docker run --rm --env-file .env -v "${PWD}/data:/app/data" deal-sniper bot
+docker run --rm --env-file .env -v "${PWD}/data:/app/data" deal-sniper python main.py scan
+docker run --rm --env-file .env -v "${PWD}/data:/app/data" deal-sniper python main.py bot
 ```
 
 Для публикации в канал замените последнюю команду контейнера на `publish`.

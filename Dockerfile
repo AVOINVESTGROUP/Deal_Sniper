@@ -1,7 +1,8 @@
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONUTF8=1
 
 WORKDIR /app
 
@@ -17,5 +18,5 @@ COPY src ./src
 RUN mkdir -p /app/data && chown -R app:app /app
 USER app
 
-ENTRYPOINT ["python", "main.py"]
-CMD ["bot"]
+ENTRYPOINT []
+CMD ["uvicorn", "src.web:app", "--host", "0.0.0.0", "--port", "8080"]

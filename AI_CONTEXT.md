@@ -67,3 +67,8 @@ C:\Dev\Deal_Sniper
 - Владелец проекта подтвердил переход от согласования документации к полной реализации рабочего бота; релизы выполняются последовательно до работающего канального режима.
 - После команды владельца перейти к результату реализован рабочий локальный вертикальный срез: реальный DubiCars collector, versioned SQLite repository, детерминированные Comparable/Decision Engines, Telegram polling bot и идемпотентная публикация кандидатов в канал.
 - Рабочие команды: `python main.py scan`, `python main.py bot` и `python main.py publish`. Для фактической Telegram-проверки требуются локальные `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS` и, для канала, `TELEGRAM_CHANNEL_ID`.
+- Production backend развёрнут в Google Cloud проекте `avo-deal-sniper`: приватный Cloud Run API, публичный API Gateway для Telegram webhook, Firestore, Secret Manager и Cloud Run Jobs.
+- Telegram-бот работает из Google Cloud; канал публикации — `@Dubai_Auto_Invest`.
+- Задача `deal-sniper-publisher` выполняет сбор, детерминированный расчёт и идемпотентную публикацию новых кандидатов. Проверочный запуск 24 июля 2026 года завершился успешно.
+- Cloud Scheduler запускает `deal-sniper-publisher` каждые 10 минут по часовому поясу `Asia/Dubai`; проверен запуск именно через Scheduler.
+- Активные реальные источники: DubiCars и CarSwitch через композитный адаптер; ошибка одного источника не останавливает второй.

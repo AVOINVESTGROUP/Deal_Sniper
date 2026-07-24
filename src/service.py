@@ -6,8 +6,10 @@ from decimal import Decimal
 from src.config import Settings
 from src.domain.engines import ComparablePriceEngine, DecisionEngine, DecisionPolicy
 from src.domain.models import ComparableVehicle, CostEstimate, DealDecision, ListingSnapshot
+from src.sources.base import CompositeSource, SourceAdapter
+from src.sources.carswitch import CarSwitchSource
 from src.sources.dubicars import DubiCarsSource
-from src.storage import LocalRepository
+from src.storage import LocalRepository, Repository
 
 
 @dataclass(slots=True)
@@ -41,8 +43,8 @@ class DealService:
     def __init__(
         self,
         settings: Settings,
-        repository: LocalRepository,
-        source: DubiCarsSource,
+        repository: Repository,
+        source: SourceAdapter,
     ) -> None:
         self.settings = settings
         self.repository = repository
@@ -58,13 +60,28 @@ class DealService:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "DealService":
+        if settings.storage_backend == "firestore":
+            from src.firestore_storage import FirestoreRepository
+
+            repository: Repository = FirestoreRepository(settings.google_cloud_project)
+        else:
+            repository = LocalRepository(settings.database_path)
         return cls(
             settings=settings,
-            repository=LocalRepository(settings.database_path),
-            source=DubiCarsSource(
-                settings.source_url_template,
-                pages=settings.source_pages,
-                timeout_seconds=settings.request_timeout_seconds,
+            repository=repository,
+            source=CompositeSource(
+                [
+                    DubiCarsSource(
+                        settings.source_url_template,
+                        pages=settings.source_pages,
+                        timeout_seconds=settings.request_timeout_seconds,
+                    ),
+                    CarSwitchSource(
+                        settings.carswitch_url_template,
+                        pages=settings.carswitch_pages,
+                        timeout_seconds=settings.request_timeout_seconds,
+                    ),
+                ]
             ),
         )
 

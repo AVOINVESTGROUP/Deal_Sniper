@@ -79,3 +79,15 @@
 - [x] Добавлен режим `publish` для идемпотентной публикации новых кандидатов в Telegram-канал.
 - [x] Добавлены README, Dockerfile, Ruff, mypy, pytest и GitHub Actions.
 - [x] Реальный smoke test получил 88 объявлений; повторный запуск создал 0 новых версий и 0 ложных изменений цены.
+
+## Фаза 10: Рабочий бот и канал в Google Cloud
+
+- [x] Создан отдельный Google Cloud проект `avo-deal-sniper`, подключены биллинг, Firestore, Artifact Registry, Secret Manager, Cloud Run, Cloud Scheduler и API Gateway.
+- [x] Telegram webhook опубликован через API Gateway и проверен реальным ответом бота из Google Cloud.
+- [x] Добавлен второй реальный источник CarSwitch и резервирование источников при недоступности DubiCars.
+- [x] Cloud Run Job успешно получает и обрабатывает реальные объявления; Cloud Scheduler выполняет сбор каждые 10 минут.
+- [x] Создан канал `@Dubai_Auto_Invest`, бот назначен его администратором и тестовая публикация подтверждена.
+- [x] Развёрнут Cloud Run Job `deal-sniper-publisher`; первый запуск завершён успешно и не создал повторных публикаций.
+- [x] HTTP-логи Telegram-клиента ограничены уровнем WARNING, чтобы URL с токеном не попадал в журналы следующих релизов.
+- [x] Cloud Scheduler переключён на `deal-sniper-publisher`; ручной запуск расписания успешно завершил полный облачный цикл за 24 секунды.
+- [x] README обновлён фактической production-схемой, командами проверки и корректными Docker-командами.

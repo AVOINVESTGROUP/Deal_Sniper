@@ -5,6 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.domain.models import ListingSnapshot
+from src.sources.carswitch import parse_carswitch_page
 from src.sources.dubicars import parse_search_page
 from src.storage import LocalRepository
 
@@ -34,6 +35,29 @@ SEARCH_HTML = """
 </script></head></html>
 """
 
+CARSWITCH_HTML = """
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  "itemListElement": [{
+    "@type": "ItemPage",
+    "mainEntity": {
+      "name": "2016 Porsche Macan S",
+      "url": "https://carswitch.com/dubai/used-car/porsche/macan/2016/841364",
+      "image": ["https://example.com/car.jpg"],
+      "description": "Certified car",
+      "brand": {"name": "Porsche"},
+      "model": "Macan",
+      "vehicleModelDate": "2016",
+      "mileageFromOdometer": {"value": 254400},
+      "offers": {"price": "38150", "priceCurrency": "AED"}
+    }
+  }]
+}
+</script>
+"""
+
 
 def listing(price: str) -> ListingSnapshot:
     """Создаёт версию одного объявления."""
@@ -58,6 +82,15 @@ def test_dubicars_json_ld_parser() -> None:
     assert results[0].make == "Toyota"
     assert results[0].model == "Camry"
     assert results[0].price_aed == Decimal("79000")
+
+
+def test_carswitch_json_ld_parser() -> None:
+    results = parse_carswitch_page(CARSWITCH_HTML)
+    assert len(results) == 1
+    assert results[0].source_listing_id == "841364"
+    assert results[0].make == "Porsche"
+    assert results[0].model == "Macan"
+    assert results[0].price_aed == Decimal("38150")
 
 
 def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:
