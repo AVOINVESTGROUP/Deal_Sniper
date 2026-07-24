@@ -95,9 +95,7 @@ class FirestoreRepository:
             )
             results.append((snapshot, is_new, price_changed, content_hash))
             if current is None or current.get("content_hash") != content_hash:
-                changed.append(
-                    (snapshot, listing_id, content_hash, is_new, price_changed)
-                )
+                changed.append((snapshot, listing_id, content_hash, is_new, price_changed))
 
         for offset in range(0, len(changed), 150):
             batch = self.client.batch()
@@ -157,9 +155,7 @@ class FirestoreRepository:
             }
         )
 
-    def decision_exists(
-        self, listing_id: str, content_hash: str, engine_version: str
-    ) -> bool:
+    def decision_exists(self, listing_id: str, content_hash: str, engine_version: str) -> bool:
         return (
             self.client.collection("decisions")
             .document(_stable_id(listing_id, content_hash, engine_version))
@@ -228,9 +224,7 @@ class FirestoreRepository:
                 operation_count = 0
 
         for vehicle in vehicles:
-            reference = self.client.collection("normalized_vehicles").document(
-                vehicle.listing_id
-            )
+            reference = self.client.collection("normalized_vehicles").document(vehicle.listing_id)
             batch.set(
                 reference,
                 {
@@ -244,9 +238,7 @@ class FirestoreRepository:
             operation_count += 1
             commit_if_needed()
         for identity in identities:
-            reference = self.client.collection("vehicle_identities").document(
-                identity.vehicle_id
-            )
+            reference = self.client.collection("vehicle_identities").document(identity.vehicle_id)
             batch.set(
                 reference,
                 {
@@ -315,9 +307,7 @@ class FirestoreRepository:
                 )
 
         return [
-            (snapshots[path], decision)
-            for path, decision in ordered_decisions
-            if path in snapshots
+            (snapshots[path], decision) for path, decision in ordered_decisions if path in snapshots
         ]
 
     def count_snapshots(self) -> int:

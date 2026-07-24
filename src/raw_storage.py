@@ -72,9 +72,7 @@ class GcsRawSnapshotArchive:
     ) -> RawSnapshotMetadata:
         checksum = hashlib.sha256(payload).hexdigest()
         suffix = _suffix(content_type)
-        object_name = (
-            f"raw/{source}/{datetime.now(UTC).strftime('%Y/%m/%d')}/{checksum}{suffix}"
-        )
+        object_name = f"raw/{source}/{datetime.now(UTC).strftime('%Y/%m/%d')}/{checksum}{suffix}"
         blob = self.bucket.blob(object_name)
         if not await asyncio.to_thread(blob.exists):
             await asyncio.to_thread(blob.upload_from_string, payload, content_type=content_type)

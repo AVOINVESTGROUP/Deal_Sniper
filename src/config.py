@@ -74,18 +74,12 @@ class Settings:
             telegram_delivery_queue=os.getenv(
                 "TELEGRAM_DELIVERY_QUEUE", "telegram-delivery"
             ).strip(),
-            task_invoker_service_account=os.getenv(
-                "TASK_INVOKER_SERVICE_ACCOUNT", ""
-            ).strip(),
+            task_invoker_service_account=os.getenv("TASK_INVOKER_SERVICE_ACCOUNT", "").strip(),
             internal_task_secret=os.getenv("INTERNAL_TASK_SECRET", "").strip(),
-            collector_job_prefix=os.getenv(
-                "COLLECTOR_JOB_PREFIX", "deal-sniper-collector"
-            ).strip(),
+            collector_job_prefix=os.getenv("COLLECTOR_JOB_PREFIX", "deal-sniper-collector").strip(),
             storage_backend=os.getenv("STORAGE_BACKEND", "local").strip().lower(),
             database_path=Path(os.getenv("LOCAL_DATABASE_PATH", "data/deal_sniper.db")),
-            local_raw_snapshots_path=Path(
-                os.getenv("LOCAL_RAW_SNAPSHOTS_PATH", "data/raw")
-            ),
+            local_raw_snapshots_path=Path(os.getenv("LOCAL_RAW_SNAPSHOTS_PATH", "data/raw")),
             source_url_template=os.getenv(
                 "DUBICARS_URL_TEMPLATE",
                 "https://www.dubicars.com/uae/used?page={page}",
@@ -117,12 +111,8 @@ class Settings:
             ),
             inspection_cost_aed=Decimal(os.getenv("INSPECTION_COST_AED", "500")),
             preparation_cost_aed=Decimal(os.getenv("PREPARATION_COST_AED", "1500")),
-            base_repair_reserve_aed=Decimal(
-                os.getenv("BASE_REPAIR_RESERVE_AED", "2500")
-            ),
-            holding_cost_per_day_aed=Decimal(
-                os.getenv("HOLDING_COST_PER_DAY_AED", "50")
-            ),
+            base_repair_reserve_aed=Decimal(os.getenv("BASE_REPAIR_RESERVE_AED", "2500")),
+            holding_cost_per_day_aed=Decimal(os.getenv("HOLDING_COST_PER_DAY_AED", "50")),
             expected_hold_days=max(1, int(os.getenv("EXPECTED_HOLD_DAYS", "45"))),
             annual_capital_percent=Decimal(os.getenv("ANNUAL_CAPITAL_PERCENT", "8")),
             selling_cost_percent=Decimal(os.getenv("SELLING_COST_PERCENT", "2")),

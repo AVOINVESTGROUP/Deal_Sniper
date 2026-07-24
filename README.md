@@ -14,6 +14,7 @@ Telegram-бот; TMA будет добавлена после пилота. Prod
 - cross-source identity resolution и исключение дублей из аналогов;
 - детерминированные Comparable, Cost, Risk и Decision Engines без LLM;
 - команды Telegram `/start`, `/status`, `/scan`, `/deals`, `/settings` и `/watchlist`;
+- английские карточки в Telegram-канале и автоматический русский/английский язык личного бота по языку устройства;
 - публикация новых кандидатов в Telegram-канал без повторной отправки;
 - тесты, Ruff, mypy, GitHub Actions и Dockerfile.
 

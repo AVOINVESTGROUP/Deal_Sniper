@@ -134,10 +134,7 @@ class DealService:
 
     def source_statuses(self) -> dict[str, bool]:
         """Возвращает доступные адаптеры и централизованные переключатели Firestore/SQLite."""
-        return {
-            name: self.repository.source_enabled(name, default=True)
-            for name in self.sources
-        }
+        return {name: self.repository.source_enabled(name, default=True) for name in self.sources}
 
     def set_source_enabled(self, source_name: str, enabled: bool) -> None:
         """Меняет состояние зарегистрированного адаптера без удаления данных."""
@@ -199,9 +196,7 @@ class DealService:
                 report.pending.append((listing_id, content_hash))
 
         normalized_fetched = [
-            vehicle
-            for listing in fetched
-            if (vehicle := normalize_listing(listing)) is not None
+            vehicle for listing in fetched if (vehicle := normalize_listing(listing)) is not None
         ]
         if normalized_fetched:
             self.repository.save_normalized_market(normalized_fetched, [])

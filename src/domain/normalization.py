@@ -100,11 +100,7 @@ def resolve_vehicle_identities(
         has_shared_vin = bool(group[0].vin) and all(item.vin == group[0].vin for item in group)
         method = "vin" if has_shared_vin else "strong_attributes" if len(group) > 1 else "single"
         confidence = (
-            Decimal("1")
-            if has_shared_vin
-            else Decimal("0.9")
-            if len(group) > 1
-            else Decimal("0.5")
+            Decimal("1") if has_shared_vin else Decimal("0.9") if len(group) > 1 else Decimal("0.5")
         )
         vehicle_id = hashlib.sha256("|".join(listing_ids).encode()).hexdigest()
         reasons = (

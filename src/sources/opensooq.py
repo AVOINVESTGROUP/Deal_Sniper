@@ -126,11 +126,7 @@ def _parse_items(items: Any) -> list[ListingSnapshot]:
             listing_id = str(item["id"])
             post_url = str(item.get("post_url") or f"/search/{listing_id}")
             image_uri = str(item.get("image_uri") or "").strip()
-            image_urls = (
-                [HttpUrl(f"{IMAGE_BASE_URL}{image_uri}.webp")]
-                if image_uri
-                else []
-            )
+            image_urls = [HttpUrl(f"{IMAGE_BASE_URL}{image_uri}.webp")] if image_uri else []
             body_type = cps[year_index + 2] if len(cps) > year_index + 2 else None
             description = str(item.get("masked_description") or "")
             specification = _specification(item.get("starCps"))

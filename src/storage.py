@@ -35,9 +35,7 @@ class Repository(Protocol):
 
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None: ...
 
-    def decision_exists(
-        self, listing_id: str, content_hash: str, engine_version: str
-    ) -> bool: ...
+    def decision_exists(self, listing_id: str, content_hash: str, engine_version: str) -> bool: ...
 
     def save_normalized_vehicle(self, vehicle: NormalizedVehicle) -> None: ...
 
@@ -231,10 +229,7 @@ class LocalRepository:
         snapshots: list[ListingSnapshot],
     ) -> list[tuple[ListingSnapshot, bool, bool, str]]:
         """Локально сохраняет пакет через существующую транзакционную операцию."""
-        return [
-            (snapshot, *self.save_snapshot(snapshot))
-            for snapshot in snapshots
-        ]
+        return [(snapshot, *self.save_snapshot(snapshot)) for snapshot in snapshots]
 
     def latest_snapshots(self) -> list[ListingSnapshot]:
         """Возвращает последнюю версию каждого объявления."""
@@ -278,9 +273,7 @@ class LocalRepository:
                 ),
             )
 
-    def decision_exists(
-        self, listing_id: str, content_hash: str, engine_version: str
-    ) -> bool:
+    def decision_exists(self, listing_id: str, content_hash: str, engine_version: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -307,9 +300,7 @@ class LocalRepository:
 
     def normalized_vehicles(self) -> list[NormalizedVehicle]:
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT payload_json FROM normalized_vehicles"
-            ).fetchall()
+            rows = connection.execute("SELECT payload_json FROM normalized_vehicles").fetchall()
         return [NormalizedVehicle.model_validate_json(row["payload_json"]) for row in rows]
 
     def comparable_vehicles(self, make: str, model: str) -> list[NormalizedVehicle]:
@@ -381,9 +372,7 @@ class LocalRepository:
             decision = DealDecision.model_validate_json(row["decision_json"])
             if decision.action not in {DecisionAction.CONTACT, DecisionAction.INSPECT}:
                 continue
-            decisions.append(
-                (ListingSnapshot.model_validate_json(row["listing_json"]), decision)
-            )
+            decisions.append((ListingSnapshot.model_validate_json(row["listing_json"]), decision))
             if len(decisions) >= limit:
                 break
         return decisions

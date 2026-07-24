@@ -36,9 +36,7 @@ def snapshot(
 
 def test_cross_source_identity_and_comparable_deduplication() -> None:
     target = normalize_listing(snapshot("cars24", "1"))
-    duplicate = normalize_listing(
-        snapshot("carswitch", "2", mileage=40_100, price="81000")
-    )
+    duplicate = normalize_listing(snapshot("carswitch", "2", mileage=40_100, price="81000"))
     peer = normalize_listing(snapshot("dubicars", "3", mileage=55_000, price="85000"))
     assert target is not None
     assert duplicate is not None

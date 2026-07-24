@@ -54,8 +54,7 @@ class CloudTaskDispatcher:
 
     async def enqueue_delivery(self, payload: dict[str, Any]) -> None:
         identity = (
-            f"deliver:{payload['target_id']}:{payload['listing_id']}:"
-            f"{payload['content_hash']}"
+            f"deliver:{payload['target_id']}:{payload['listing_id']}:{payload['content_hash']}"
         )
         await self._enqueue(
             self.settings.telegram_delivery_queue,

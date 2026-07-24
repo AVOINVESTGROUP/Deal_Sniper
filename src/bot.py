@@ -15,6 +15,16 @@ from src.service import DealService
 logger = logging.getLogger(__name__)
 
 
+def telegram_language(language_code: str | None) -> str:
+    """Поддерживает русский интерфейс устройства, для остальных языков использует английский."""
+    return "ru" if (language_code or "").casefold().startswith("ru") else "en"
+
+
+def localized(language: str, russian: str, english: str) -> str:
+    """Возвращает строку на поддерживаемом языке Telegram-пользователя."""
+    return russian if telegram_language(language) == "ru" else english
+
+
 def is_publishable(decision: DealDecision, settings: Settings) -> bool:
     """Защитный фильтр: убыточное решение никогда не уходит как кандидат."""
     return bool(
@@ -119,9 +129,7 @@ class DealBot:
             return
         await status_message.edit_text(report.summary())
         candidates = [
-            item
-            for item in report.decisions
-            if is_publishable(item.decision, self.settings)
+            item for item in report.decisions if is_publishable(item.decision, self.settings)
         ][:5]
         for item in candidates:
             await update.effective_message.reply_text(
@@ -183,9 +191,7 @@ class DealBot:
             return
         assert update.effective_message
         if not context.args:
-            await update.effective_message.reply_text(
-                "Укажите источник. Пример: /source_on cars24"
-            )
+            await update.effective_message.reply_text("Укажите источник. Пример: /source_on cars24")
             return
         try:
             self.service.set_source_enabled(context.args[0], enabled)
@@ -218,11 +224,17 @@ class DealBot:
         await update.effective_message.reply_text(f"{source_name}: {report.summary()}")
 
 
-def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
+def format_card(
+    listing: ListingSnapshot,
+    decision: DealDecision,
+    language: str = "ru",
+) -> str:
     """Создаёт безопасную HTML-карточку решения."""
     market = decision.market
     market_text = (
-        f"{market.low_aed:,.0f}–{market.high_aed:,.0f} AED" if market else "недостаточно данных"
+        f"{market.low_aed:,.0f}–{market.high_aed:,.0f} AED"
+        if market
+        else localized(language, "недостаточно данных", "insufficient data")
     )
     profit = (
         f"{decision.expected_profit_aed:,.0f} AED"
@@ -234,45 +246,69 @@ def format_card(listing: ListingSnapshot, decision: DealDecision) -> str:
     return (
         f"<b>{html.escape(decision.action.value)}</b>\n"
         f"<b>{html.escape(listing.title)}</b>\n"
-        f"Цена: <b>{listing.price_aed:,.0f} AED</b>\n"
-        f"Рынок: {market_text}\n"
-        f"Ожидаемая прибыль: {profit}\n"
+        f"{localized(language, 'Цена', 'Price')}: <b>{listing.price_aed:,.0f} AED</b>\n"
+        f"{localized(language, 'Рынок', 'Market')}: {market_text}\n"
+        f"{localized(language, 'Ожидаемая прибыль', 'Expected profit')}: {profit}\n"
         f"ROI: {roi}\n"
-        f"Уверенность: {decision.confidence:.0%}\n"
-        f'<a href="{html.escape(str(listing.url), quote=True)}">Открыть объявление</a>\n'
+        f"{localized(language, 'Уверенность', 'Confidence')}: {decision.confidence:.0%}\n"
+        f'<a href="{html.escape(str(listing.url), quote=True)}">'
+        f"{localized(language, 'Открыть объявление', 'Open listing')}</a>\n"
         f"ID: <code>{html.escape(listing_id)}</code>\n"
         f"/watch {html.escape(listing_id)}"
     )
 
 
-def format_sources(service: DealService) -> str:
+def format_sources(service: DealService, language: str = "ru") -> str:
     """Формирует понятную панель управления источниками и их здоровьем."""
     statuses = service.source_statuses()
     health = service.repository.source_health()
     enabled_count = sum(statuses.values())
-    lines = [f"Источники: {len(statuses)}. Включено: {enabled_count}.", ""]
+    lines = [
+        localized(
+            language,
+            f"Источники: {len(statuses)}. Включено: {enabled_count}.",
+            f"Sources: {len(statuses)}. Enabled: {enabled_count}.",
+        ),
+        "",
+    ]
     for name, enabled in statuses.items():
         source_run = health.get(name, {})
         if not enabled:
-            lines.append(f"⛔ {name}: отключён")
+            lines.append(f"⛔ {name}: {localized(language, 'отключён', 'disabled')}")
             continue
         success = source_run.get("success")
         mark = "✅" if success is True else "⚠️" if success is False else "⏳"
         fetched = source_run.get("fetched")
         details = (
-            f"последний сбор {fetched} авто"
+            localized(
+                language,
+                f"последний сбор {fetched} авто",
+                f"last scan: {fetched} cars",
+            )
             if isinstance(fetched, int)
-            else "ещё не запускался"
+            else localized(language, "ещё не запускался", "not scanned yet")
         )
         lines.append(f"{mark} {name}: {details}")
     lines.extend(
         [
             "",
-            "Управление (замените имя источника):",
-            "/source_scan opensooq — запустить отдельно",
-            "/source_off opensooq — отключить",
-            "/source_on opensooq — включить",
-            "/scan — запустить все включённые",
+            localized(
+                language,
+                "Управление (замените имя источника):",
+                "Management (replace the source name):",
+            ),
+            localized(
+                language,
+                "/source_scan opensooq — запустить отдельно",
+                "/source_scan opensooq — run separately",
+            ),
+            localized(
+                language, "/source_off opensooq — отключить", "/source_off opensooq — disable"
+            ),
+            localized(language, "/source_on opensooq — включить", "/source_on opensooq — enable"),
+            localized(
+                language, "/scan — запустить все включённые", "/scan — run all enabled sources"
+            ),
         ]
     )
     return "\n".join(lines)
@@ -308,11 +344,7 @@ async def scan_and_publish(settings: Settings) -> int:
         raise RuntimeError("TELEGRAM_CHANNEL_ID не задан в .env")
     service = DealService.from_settings(settings)
     report = await service.scan()
-    candidates = [
-        item
-        for item in report.decisions
-        if is_publishable(item.decision, settings)
-    ]
+    candidates = [item for item in report.decisions if is_publishable(item.decision, settings)]
     candidates.sort(
         key=lambda item: (
             item.decision.expected_profit_aed or 0,
@@ -340,7 +372,7 @@ async def publish_candidates(
             continue
         await bot.send_message(
             chat_id=target_id,
-            text=format_card(item.listing, item.decision),
+            text=format_card(item.listing, item.decision, language="en"),
             parse_mode=ParseMode.HTML,
         )
         service.repository.mark_notification_sent(target_id, listing_id, item.content_hash)

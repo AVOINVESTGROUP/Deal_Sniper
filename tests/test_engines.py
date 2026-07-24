@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from src.bot import format_card, telegram_language
 from src.domain.engines import (
     ComparablePriceEngine,
     CostEngine,
@@ -134,3 +135,24 @@ def test_warning_returns_inspect_only_for_profitable_listing() -> None:
     assert decision.expected_profit_aed is not None
     assert decision.expected_profit_aed > 0
     assert decision.action is DecisionAction.INSPECT
+
+
+def test_telegram_card_uses_channel_english_and_device_russian() -> None:
+    listing = ListingSnapshot(
+        source="test",
+        source_listing_id="localized-1",
+        url="https://example.com/localized-1",
+        title="Toyota Camry",
+        price_aed=Decimal("70000"),
+    )
+    decision = DecisionEngine().decide(
+        asking_price_aed=listing.price_aed,
+        market=None,
+        costs=CostEstimate(),
+    )
+
+    assert "Price:" in format_card(listing, decision, language="en")
+    assert "Expected profit:" in format_card(listing, decision, language="en")
+    assert "Цена:" in format_card(listing, decision, language="ru")
+    assert telegram_language("ru-RU") == "ru"
+    assert telegram_language("ar") == "en"

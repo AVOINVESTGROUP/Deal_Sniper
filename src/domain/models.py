@@ -203,6 +203,7 @@ class UserSettings(BaseModel):
     min_profit_aed: Decimal = Field(default=Decimal("5000"), ge=0)
     min_roi_percent: Decimal = Field(default=Decimal("10"), ge=0)
     makes: list[str] = Field(default_factory=list)
+    language_code: str = "en"
 
 
 class UserAction(BaseModel):

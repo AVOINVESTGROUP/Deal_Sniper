@@ -82,9 +82,7 @@ def _adjust_comparable(
         adjustments.append(f"Поправка типа продавца: {-seller_adjustment * 100:+.1f}%")
 
     factor = max(Decimal("0.7"), min(Decimal("1.3"), factor))
-    adjusted = (candidate.asking_price_aed * factor).quantize(
-        Decimal("1"), rounding=ROUND_HALF_UP
-    )
+    adjusted = (candidate.asking_price_aed * factor).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     return ComparableVehicle(
         listing_id=candidate.listing_id,
         vehicle_id=vehicle_id,
