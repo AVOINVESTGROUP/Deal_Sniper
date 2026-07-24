@@ -114,7 +114,7 @@ flowchart TD
 
 Повторная оценка запускается только для нового объявления или материального изменения. Простая повторная загрузка той же версии не должна вызывать Gemini.
 
-Каждая processing task адресует точную версию `listing_id + content_hash`. Обработчик загружает именно этот snapshot и отказывается от расчёта при его отсутствии. Указатель current обновляется транзакционно и только монотонно по `observed_at`, поэтому запоздавший collector не может вернуть объявление к старой версии.
+Каждая processing task адресует точную версию `listing_id + content_hash`. Обработчик загружает именно этот snapshot и отказывается от расчёта при его отсутствии. Snapshot раздельно хранит `source_observed_at`, `fetched_at` и серверный `ingested_at`. Указатель current обновляется транзакционно по серверному `version_sequence`/precondition и детерминированному tie-breaker; приложение не полагается только на собственный `observed_at`. Запоздавшая версия сохраняется в истории, но не становится current.
 
 Жизненный цикл объявления содержит `active`, `changed`, `stale`, `removed` и `quarantined`, а также `first_seen_at` и `last_seen_at`. Исчезновение с первых страниц поиска само по себе не доказывает удаление; состояние `removed` требует подтверждения detail page либо устойчивого правила источника.
 
@@ -155,36 +155,47 @@ flowchart TD
 
 Результат содержит нижнюю, медианную и верхнюю оценку, количество уникальных аналогов, свежесть данных и уровень покрытия.
 
-В Comparable Engine допускаются только объявления с подтверждённой detail-page ценой. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются. Решение содержит `market_fingerprint`, поэтому изменение набора или цены аналогов создаёт новую версию оценки.
+В Comparable Engine допускаются только объявления с неистёкшей detail-page проверкой. `verification_key = source + listing_id + content_hash + extractor_version`; состояния: `pending`, `verified`, `temporary_error`, `permanent_invalid`, `expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
+
+`market_fingerprint` включает ID, подтверждённые цены и время проверки аналогов, source roles, применённые adjustments и их версии, а также accepted/rejected status. Изменение verified market bucket ставит affected targets на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
 
 ### 3.7. Cost and Risk Engine
 
-Полная себестоимость:
+Расходы хранятся диапазонами `low/expected/high`. Для решения используется явно версионированный консервативный `repair_basis`, по умолчанию `repair_high`. Канонические обозначения:
 
 ```text
-цена покупки
-+ проверка и регистрация
-+ ожидаемый ремонт
-+ подготовка к продаже
-+ хранение и стоимость капитала
-+ расходы на продажу
-+ резерв риска
+R = market_low - liquidity_discount
+P = цена покупки: asking для оценки либо неизвестная величина для max purchase
+repair_basis = repair_high
+c = annual_capital_rate × hold_days / 365
+r = risk_rate
+
+base_fixed = inspection + registration + repair_basis + preparation + holding
+selling = R × selling_rate
+capital(P) = (P + inspection + registration + repair_basis + preparation) × c
+risk_reserve(P) = (P + repair_basis) × r
+non_purchase_cost(P) = base_fixed + selling + capital(P) + risk_reserve(P)
 ```
+
+`selling` считается от консервативной цены перепродажи. Стоимость капитала считается от реально вложенного до продажи капитала. Basis резерва риска фиксируется конфигурацией; в первой канонической версии это `P + repair_basis`. Резерв риска входит в `non_purchase_cost` ровно один раз.
 
 Стоп-факторы переводят автомобиль в `inspect` или `reject`: неизвестные документы, повреждение шасси, признаки затопления, критически неполные характеристики, неподтверждённый VIN и недостаток сопоставимых автомобилей.
 
 ### 3.8. Decision Engine
 
 ```text
-expected_profit = conservative_resale_price - total_cost
+expected_profit = R - asking - non_purchase_cost(asking)
+invested_capital = asking + non_purchase_cost(asking)
 roi = expected_profit / invested_capital
-max_purchase_price = conservative_resale_price
-                     - non_purchase_costs
-                     - target_profit
-                     - risk_reserve
+
+constant = base_fixed
+           + selling
+           + c × (inspection + registration + repair_basis + preparation)
+           + r × repair_basis
+max_purchase_price = (R - target_profit - constant) / (1 + c + r)
 ```
 
-Финансовая арифметика выполняется приложением, а не LLM.
+Формула `max_purchase_price` является алгебраическим решением зависимости расходов от цены покупки; детерминированная итерация не требуется. Финансовая арифметика выполняется приложением, а не LLM. Версия коэффициентов, repair basis, rounding policy и формулы входит в `financial_config_version`.
 
 ### 3.9. LLM Enrichment
 
@@ -354,6 +365,7 @@ discovered
 sources/{source_id}
 listings/{listing_id}
 listings/{listing_id}/snapshots/{content_hash}
+listings/{listing_id}/verifications/{verification_key}
 vehicles/{vehicle_id}
 decisions/{decision_id}
 users/{telegram_user_id}/settings/current
@@ -362,11 +374,13 @@ notifications/{notification_id}
 outcomes/{outcome_id}
 search_requests/{request_id}
 publication_events/{event_id}
+delivery_attempts/{delivery_id}
 content_posts/{post_id}
 admin_audit/{event_id}
+migrations/{migration_id}
 ```
 
-`listing_id`, `content_hash`, `decision_id` и `notification_id` должны быть детерминированными там, где это необходимо для идемпотентности Cloud Tasks и повторных запусков Jobs. Согласованные изменения состояния выполняются Firestore transaction или batched write.
+`listing_id`, `content_hash`, `decision_id` и `delivery_id` детерминированы. `decision_id = listing_id + content_hash + engine_version + financial_config_version + verification_version + market_fingerprint`; `delivery_id = decision_id + target_id + template_version + format`. Согласованные изменения состояния выполняются Firestore transaction либо preconditioned batched write.
 
 ### ListingSnapshot
 
@@ -387,6 +401,9 @@ admin_audit/{event_id}
 - пробег и specification;
 - связи со снимками разных источников;
 - confidence межсайтового совпадения.
+- стабильный `vehicle_id`, `identity_version` и `cluster_status`;
+- evidence каждой связи, merge/split events и audit trail;
+- запрет транзитивного auto-merge без попарной совместимости.
 
 ### DealDecision
 
@@ -401,6 +418,8 @@ admin_audit/{event_id}
 - `action`;
 - `risk_flags`;
 - список использованных аналогов и происхождение данных.
+- `content_hash`, `engine_version`, `financial_config_version`, `verification_version` и `market_fingerprint`;
+- `superseded_by` и признак current; выдача исключает stale, removed, quarantined и истёкшую verification.
 
 ---
 
@@ -454,22 +473,17 @@ admin_audit/{event_id}
 
 ## 8. Порядок реализации
 
-1. Остановить использование legacy LLM-конвейера как источника финансового решения.
-2. Зафиксировать контракт решения и подготовить контрольный набор объявлений и аналогов.
-3. Реализовать чистые Domain Models, Comparable Price Engine, Cost/Risk Engine и Decision Engine.
-4. Покрыть расчётное ядро unit-тестами и добавить GitHub Actions.
-5. Ограничить Vertex AI извлечением признаков и объяснением готового решения.
-6. Подготовить Google Cloud foundation, IAM, Secret Manager и Infrastructure as Code.
-7. Реализовать Firestore-модель, Cloud Storage, индексы и идемпотентность.
-8. Реализовать Cloud Tasks processing pipeline и первый collector Cloud Run Job.
-9. Выпустить Cloud Run Application API и Telegram-бот с повтором доставки.
-10. Провести пилот, откалибровать коэффициенты и контролировать облачные расходы.
-11. Подключить дополнительные классифайды и межсайтовое объединение.
-12. Разделить публичные тизеры и полные Pro-карточки.
-13. Добавить подбор по пользовательскому запросу и подписки на новые совпадения.
-14. Выпустить административную панель на Firebase Hosting/Auth.
-15. Добавить проверяемые информационные публикации и общий `PublicationEvent`.
-16. Подключить официальный WhatsApp Business adapter после настройки Meta; WhatsApp Channel не автоматизировать без официального API.
-17. Добавить TMA на Firebase Hosting/Auth и outcome-аналитику.
+Канонический порядок и критерии находятся в `docs/IMPLEMENTATION_PLAN.md`; этот раздел не дублирует динамический release backlog.
+
+Обязательный текущий gate:
+
+1. `0.11-STOP` — после отдельного подтверждения владельца ограничить небезопасный production и сохранить backup/deployment manifest.
+2. `0.11A` — исправить provenance, owner scope, роли, retry и outbox.
+3. `0.11B` — исправить verified market, decision identity, финансовую модель, риски и identity resolution.
+4. `0.11C` — исправить lifecycle, запросы, конфигурацию, IAM, IaC и CI.
+5. `0.11M` — выполнить версионированную миграцию production-данных и reconciliation.
+6. `0.11D` — сформировать проверяемый baseline в `main`, staging и deployment того же image digest.
+7. Заново провести официальный пилот; прежние результаты считать диагностическими.
+8. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
 
 Подробные этапы и границы релизов описаны в `docs/IMPLEMENTATION_PLAN.md`, а схема ресурсов, потоков, IAM и идемпотентности — в `docs/CLOUD_ARCHITECTURE.md`.

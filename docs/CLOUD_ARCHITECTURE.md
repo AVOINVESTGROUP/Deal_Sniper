@@ -32,22 +32,27 @@ sequenceDiagram
     participant F as Firestore
     participant Q as Cloud Tasks
     participant A as Cloud Run API
+    participant O as Outbox
     participant V as Vertex AI
     participant T as Telegram
 
     S->>J: Запустить источник
     J->>G: Сохранить сырой снимок
-    J->>F: Transaction: listing + snapshot
-    J->>Q: Создать task с детерминированным именем
-    Q->>A: Обработать новую версию
-    A->>F: Проверить состояние и получить аналоги
+    J->>F: Transaction: listing + immutable snapshot
+    J->>Q: Создать verification task
+    Q->>A: Проверить точный snapshot на detail page
+    A->>F: Сохранить verification status/version/TTL
+    A->>Q: Создать processing task только для verified snapshot
+    Q->>A: Обработать точную версию
+    A->>F: Получить только verified аналоги и market fingerprint
     A->>A: Цена, расходы, риски, решение
     A->>V: Enrichment только при отсутствии результата
     A->>F: Сохранить decision
-    A->>Q: Создать delivery task
-    Q->>A: Доставить уведомление
+    A->>O: Создать PublicationEvent/DeliveryAttempt
+    O->>Q: Создать delivery task с lease
+    Q->>A: Доставить pending attempt
     A->>T: Telegram Bot API
-    A->>F: Сохранить результат доставки
+    A->>O: sent с message_id либо unknown
 ```
 
 ## Firestore
@@ -58,6 +63,7 @@ sequenceDiagram
 sources/{source_id}
 listings/{listing_id}
 listings/{listing_id}/snapshots/{content_hash}
+listings/{listing_id}/verifications/{verification_key}
 vehicles/{vehicle_id}
 decisions/{decision_id}
 users/{telegram_user_id}/settings/current
@@ -66,11 +72,17 @@ notifications/{notification_id}
 outcomes/{outcome_id}
 search_requests/{request_id}
 publication_events/{event_id}
+delivery_attempts/{delivery_id}
 content_posts/{post_id}
 admin_audit/{event_id}
+migrations/{migration_id}
 ```
 
 Сырые ответы не дублируются в документах Firestore: хранится `gs://` URI, checksum, тип содержимого и время получения. Поля для поиска аналогов денормализуются и индексируются: `make`, `model`, `generation`, `year`, `trim`, `specification`, `mileage_bucket`, `seller_type`, `asking_price_aed`, `observed_at`, `comparison_key`.
+
+Каждый тип production-документа содержит `schema_version`. Decision считается текущим только при совпадении current content hash, Engine, financial config, verification version и market fingerprint; новое решение supersedes предыдущее. `stale`, `removed`, `quarantined` и истёкшая verification исключаются из выдачи и публикации.
+
+`market_fingerprint` включает verified prices/timestamps, source roles, accepted/rejected аналоги и версии adjustments. Изменение verified market bucket ставит affected targets на пересчёт; delivery дополнительно проверяет fingerprint перед внешним вызовом.
 
 ## Идемпотентность
 
@@ -78,13 +90,14 @@ admin_audit/{event_id}
 - snapshot document ID равен `content_hash`;
 - Cloud Task name включает listing ID, content hash и тип обработки;
 - enrichment key включает snapshot, prompt version, schema version и model;
-- notification ID включает user, decision version и notification type;
-- delivery identity включает target, content hash, Engine version, template version и формат;
+- `decision_id` включает listing ID, content hash, Engine, financial config, verification version и market fingerprint;
+- `delivery_id = decision_id + target_id + template_version + format`;
 - publication event ID включает тип материала, период данных, версию шаблона и целевой формат;
 - обработчик сначала проверяет сохранённый статус, затем выполняет внешний вызов;
-- повтор Tasks не должен создавать повторный Vertex AI вызов или Telegram-сообщение.
+- повтор Tasks не создаёт повторный Vertex AI вызов;
+- повтор delivery task не отправляет сообщение после подтверждённого `sent`, а неоднозначный результат переводит в `unknown`.
 
-Внешний `sendMessage` и запись Firestore не образуют одну транзакцию, поэтому архитектура не обещает строгую exactly-once доставку. Outbox использует lease и состояния `pending/sending/sent/failed/unknown`; неоднозначный timeout не повторяется автоматически до сверки, чтобы не создавать слепой дубль.
+Внешний `sendMessage` и запись Firestore не образуют одну транзакцию, поэтому архитектура не обещает строгую exactly-once доставку. Outbox использует `attempt_id`, lease, timestamps, error и состояния `pending/sending/sent/failed/unknown`; неоднозначный timeout не повторяется автоматически до сверки. Запись `unknown` старше SLA создаёт alert и требует операторского `mark_sent`, `mark_failed` либо одноразового `retry_once` с audit event.
 
 ## Авторизация и секреты
 

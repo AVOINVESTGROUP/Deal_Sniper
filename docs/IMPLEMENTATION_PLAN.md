@@ -2,6 +2,20 @@
 
 Статус документа: новая редакция ожидает проверки и утверждения владельцем; код следующих релизов до утверждения не изменяется.
 
+## 0. Решения владельца до начала работ
+
+План не считается утверждённым, пока владелец явно не подтвердит:
+
+1. разрешение и время включения аварийного режима `0.11-STOP`;
+2. ответственного оператора за backup, queues, delivery pause и emergency runbook;
+3. GitHub username независимого reviewer, который не является автором replacement PR;
+4. допустимое окно недоступности для миграции `0.11M`;
+5. retention старых snapshots/decisions/notifications и место хранения export;
+6. SLA reconciliation для delivery `unknown`;
+7. канонические финансовые коэффициенты после утверждения формулы, но до реализации `0.11B`.
+
+До этих решений PR #1 остаётся Draft, production не изменяется по данному плану, а новые продуктовые релизы не начинаются.
+
 ## 1. Цель MVP
 
 Создать Telegram-бота, который регулярно получает объявления о продаже автомобилей с фиксированной ценой, сохраняет историю изменений, сравнивает автомобиль с актуальными аналогами и отправляет пользователю объяснимое решение:
@@ -37,7 +51,7 @@
 | Контур | Фактическое состояние |
 |---|---|
 | default-ветка `main` | legacy: `DubizzleMockScraper`, SQLite, `GEMINI_API_KEY`, LLM-оценка рынка и бесконечный локальный цикл |
-| draft PR #1 / рабочая ветка | новая реализация: 17 коммитов относительно `main`, 54 изменённых файла, более 6 000 добавленных строк; CI проходит, но критические дефекты целостности и доступа ещё не устранены |
+| draft PR #1 / рабочая ветка | крупный монолитный PR с кодом, Terraform и документацией; динамические counts намеренно не фиксируются, CI проходит, но критические дефекты целостности и доступа ещё не устранены |
 | Google Cloud production | развёрнут образ из рабочей ветки, а не из слитой и воспроизводимой default-ветки; фактический код production необходимо связать с commit SHA и image digest |
 
 Следовательно, ни `main`, ни draft PR #1 пока не считаются утверждённым production-baseline. До новых продуктовых функций требуется стабилизация, разделение изменений на проверяемые PR и синхронизация `main` с реально развёрнутой версией.
@@ -56,7 +70,7 @@
 | WhatsApp | отсутствует | официальный Business API для opt-in получателей; Channel — только при появлении официального API |
 | Проверки | unit, Ruff, mypy, CI и production smoke tests | добавить integration/E2E для новых каналов и панели |
 
-Рабочая ветка является аварийно развёрнутым кандидатом baseline, но не утверждённым источником production-кода. Сначала выполняются релизы стабилизации `0.11A–0.11D`; только после их приёмки начинаются продуктовые релизы `0.12+`.
+Рабочая ветка является аварийно развёрнутым кандидатом baseline, но не утверждённым источником production-кода. Сначала выполняются `0.11-STOP`, стабилизация `0.11A–0.11C`, миграция `0.11M` и baseline `0.11D`; только после их приёмки и нового пилота начинаются продуктовые релизы `0.12+`.
 
 ## 4. Принципы реализации
 
@@ -240,7 +254,7 @@ TMA после пилота -> Firebase Hosting/Auth -> тот же Cloud Run AP
 
 Задачи:
 
-- рассчитать проверку, ремонт, подготовку, хранение, стоимость капитала, расходы на продажу и резерв риска;
+- рассчитать проверку, регистрацию/transfer fee, ремонт, подготовку, хранение, стоимость капитала, расходы на продажу и резерв риска;
 - поддержать точечные значения и диапазоны расходов;
 - определить hard stop flags и предупреждения;
 - рассчитывать консервативную цену перепродажи;
@@ -252,12 +266,24 @@ TMA после пилота -> Firebase Hosting/Auth -> тот же Cloud Run AP
 Основные формулы:
 
 ```text
-conservative_resale_price = market_low - liquidity_discount
-total_non_purchase_cost = inspection + repair + preparation + holding + selling + risk_reserve
-max_purchase_price = conservative_resale_price - total_non_purchase_cost - target_profit
-expected_profit = conservative_resale_price - asking_price - total_non_purchase_cost
-roi_percent = expected_profit / (asking_price + total_non_purchase_cost) * 100
+R = market_low - liquidity_discount
+repair_basis = repair_high
+c = annual_capital_rate × hold_days / 365
+r = risk_rate
+base_fixed = inspection + registration + repair_basis + preparation + holding
+selling = R × selling_rate
+capital(P) = (P + inspection + registration + repair_basis + preparation) × c
+risk_reserve(P) = (P + repair_basis) × r
+non_purchase_cost(P) = base_fixed + selling + capital(P) + risk_reserve(P)
+expected_profit = R - asking - non_purchase_cost(asking)
+roi_percent = expected_profit / (asking + non_purchase_cost(asking)) × 100
+constant = base_fixed + selling
+           + c × (inspection + registration + repair_basis + preparation)
+           + r × repair_basis
+max_purchase_price = (R - target_profit - constant) / (1 + c + r)
 ```
+
+Резерв риска не вычитается второй раз: он уже входит в `non_purchase_cost`. Selling cost считается от `R`, capital cost — от вложений до продажи. Диапазоны ремонта и прочих неопределённых расходов сохраняются, а применённая консервативная граница входит в объяснение решения и `financial_config_version`.
 
 Критерий приёмки:
 
@@ -338,6 +364,8 @@ Vertex AI подключается через `google-genai` только пос
 
 Объём пилота: не менее 100–300 обработанных объявлений и ручная проверка всех отправленных кандидатов.
 
+Все pilot/backfill результаты, полученные до приёмки `0.11D` и migration reconciliation, считаются только диагностическими. Они не входят в официальную оценку precision, ошибки цены и конверсии. Официальный пилот начинается заново после формирования воспроизводимого baseline.
+
 Измерять:
 
 - precision уведомлений `CONTACT/INSPECT`;
@@ -357,6 +385,31 @@ Vertex AI подключается через `google-genai` только пос
 - коэффициенты изменяются только версионированной конфигурацией;
 - решение о переходе к TMA принимается по итогам пилота, а не по готовности интерфейса.
 
+### Релиз 0.11-STOP. Немедленное ограничение production
+
+Статус: аварийный эксплуатационный gate. Он выполняется сразу после отдельного подтверждения владельца и до начала исправления кода. Само включение режима не означает утверждение остальных релизов.
+
+Действия:
+
+- зафиксировать commit SHA, image digest, Cloud Run revisions, environment names и фактические IAM bindings текущего production;
+- выполнить Firestore managed export и сохранить снимок состояния обеих Cloud Tasks queues;
+- приостановить автоматическую Free/Pro и персональную delivery;
+- ограничить Telegram-бот только административными user ID;
+- временно отключить для обычных пользователей `/deals`, `/watchlist`, `/scan` и команды управления источниками;
+- немедленно pause `telegram-delivery` и `listing-processing`; поскольку текущий collector совмещает raw capture и enqueue, до появления проверенного raw-only entrypoint также pause collector schedulers, чтобы не создавать неконтролируемый backlog старых tasks;
+- raw capture разрешить повторно только отдельным raw-only Job, который не создаёт processing/delivery tasks;
+- не удалять накопленные данные и старые задачи до migration dry run;
+- записать точные команды остановки/возобновления, ответственного оператора и журнал выполненных действий;
+- разместить в каналах нейтральное уведомление о технической перепроверке данных без публикации новых сделок.
+
+Критерий завершения:
+
+- новые финансовые карточки не могут уйти ни в один target;
+- обычный пользователь не может прочитать персональные данные и запустить side effect;
+- raw-сбор либо продолжает работать изолированно, либо его состояние явно зафиксировано;
+- backup, queue inventory, deployment manifest и emergency runbook сохранены;
+- возврат в рабочий режим разрешён только после migration reconciliation и приёмки `0.11D`.
+
 ### Релиз 0.11A. Целостность версий, доступ и доставка
 
 Статус: обязательный блокирующий релиз до слияния новой реализации и до любых функций монетизации.
@@ -366,25 +419,32 @@ Vertex AI подключается через `google-genai` только пос
 - добавить `get_snapshot(listing_id, content_hash)` во все Repository и рассчитывать решение только по точной версии;
 - отклонять processing task, если указанный snapshot отсутствует или его hash не совпадает;
 - исправить `user_watchlist(user_id)` и все пользовательские запросы так, чтобы фильтрация владельца выполнялась в Firestore/SQLite, а не после общего scan;
+- применять к `/deals`, push delivery и watchlist один owner-scoped слой доступа и одни подтверждённые настройки бюджета, марок, прибыли и ROI;
 - разделить `TELEGRAM_ADMIN_USER_IDS` и обычных пользователей; централизовать authorization guard для каждой команды;
 - оставить управление источниками, ручной scan и системный status только администраторам;
-- заменить read-then-batch обновление current listing транзакцией либо update precondition с проверкой монотонности `observed_at`;
+- заменить read-then-batch обновление current listing транзакцией либо update precondition; порядок определять по серверному `version_sequence`/`ingested_at` и детерминированному tie-breaker, а не только по формируемому приложением `observed_at`;
 - добавить out-of-order тест: версия A не может перезаписать current pointer после версии B;
 - классифицировать detail verification на `verified`, `permanent_invalid` и `temporary_error`;
 - для timeout, HTTP 429 и 5xx возвращать retriable ответ Cloud Tasks, для постоянной невалидности — карантин без retry;
 - заменить безусловный ранний claim Telegram `update_id` состояниями `processing/completed/failed` с lease и безопасным повтором;
-- расширить delivery identity полями `engine_version`, `template_version`, `format` и target;
+- определить `delivery_id = decision_id + target_id + template_version + format`, не дублируя вручную неполный набор компонентов решения;
 - ввести outbox-состояния `pending/sending/sent/failed/unknown`, lease и audit поля;
+- хранить `attempt_id`, `lease_owner`, `lease_expires_at`, `last_attempt_at`, `last_error` и полученный `telegram_message_id`;
+- определить максимальный возраст `unknown`, автоматический alert и административные действия `mark_sent`, `mark_failed`, `retry_once`;
+- запрещать повтор `unknown` без явного решения оператора и записывать audit event каждой сверки;
+- сделать side effects Telegram-команд идемпотентными отдельными operation ID: запуск Job, изменение источника, настройки и публикация;
 - не обещать строгую exactly-once доставку через Telegram: при неоднозначном сетевом результате переводить событие в `unknown` и не выполнять слепой повтор.
 
 Критерий приёмки:
 
 - задача версии A никогда не создаёт решение из snapshot B;
 - два пользователя не могут прочитать действия и watchlist друг друга;
-- обычный пользователь получает `403` на все административные операции;
+- Telegram webhook отвечает `200`, показывает обычному пользователю отказ и не создаёт side effect; Admin HTTP API возвращает `401/403`;
+- `/deals`, push delivery и watchlist используют одинаковые owner-scoped настройки и не возвращают чужие либо неподходящие данные;
 - конкурентные и out-of-order записи сохраняют правильный current snapshot;
 - 429/5xx detail page приводит к retry, постоянный `Price on request` — к карантину;
-- delivery ID различается для новой версии Engine и шаблона;
+- изменение Engine, financial config, verification или market fingerprint создаёт новый `decision_id`, а новый decision либо шаблон создаёт отдельный `delivery_id`;
+- ни одна запись `unknown` старше установленного SLA не остаётся без алерта и операторского решения;
 - integration-тесты покрывают Firestore emulator, Cloud Tasks retry и Telegram failure windows.
 
 ### Релиз 0.11B. Достоверность цены и финансового решения
@@ -393,6 +453,11 @@ Vertex AI подключается через `google-genai` только пос
 
 - проверять цену detail page до попадания объявления в `normalized_vehicles` и рынок аналогов, а не только перед публикацией кандидата;
 - хранить статус проверки, detail-page checksum, проверенную цену, валюту, время и причину отказа;
+- определить `verification_key = source + listing_id + content_hash + extractor_version` и состояния `pending/verified/temporary_error/permanent_invalid/expired`;
+- задать verification TTL, freshness threshold, extractor version, кеширование по snapshot, source-specific rate limit и circuit breaker;
+- повторно проверять цену перед публикацией, если TTL истёк; временная недоступность блокирует публикацию и создаёт retry, а не удаляет кандидата;
+- при изменении detail price создавать новый snapshot либо неизменяемую verified-price revision, не переписывая старую версию;
+- измерять долю рынка, потерянную из-за temporary/permanent verification failures;
 - реализовать source-specific привязку JSON-LD offer к конкретному автомобилю; не выбирать произвольный ближайший `offers` со страницы;
 - запретить общую эвристику «любое положительное USD выше 5 000 AED» без подтверждённого price field данного listing;
 - пересчитать Cost Engine: selling cost от консервативной цены перепродажи, capital cost от полного инвестированного капитала;
@@ -401,20 +466,32 @@ Vertex AI подключается через `google-genai` только пос
 - расширить Risk Engine валидируемым VIN, chassis/flood/salvage/major accident, документами, арабскими и английскими формулировками и противоречиями полей;
 - обрабатывать hard stop до раннего выхода `INSUFFICIENT_DATA`;
 - сделать `vehicle_id` стабильным и не зависящим от текущего списка listing ID;
+- хранить `identity_version`, `cluster_status`, evidence, `merge_event` и `split_event`;
+- поддержать ручное подтверждение спорного merge, split ошибочного cluster и merge существующих vehicle ID с audit trail;
+- запретить транзитивный auto-merge, если не подтверждена совместимость каждой пары внутри cluster;
+- определить переназначение текущих решений и блокировку старых уведомлений после split/merge;
 - принимать VIN только после нормализации и валидации, исключать заглушки;
 - заменить ложное объединение по близкой цене/пробегу на объяснимый scoring с evidence и запретом auto-merge ниже порога;
 - убрать target-price ratio как предварительный фильтр аналогов; outlier detection выполнять относительно распределения сопоставимого рынка;
 - рассчитывать private, dealer, certified и C2B отдельно и явно преобразовывать их в итоговую оценку;
 - сохранять причину отклонения каждого аналога и дедуплицировать публикации по стабильному `vehicle_id`;
-- добавить `market_fingerprint` в идентичность решения, чтобы изменение набора аналогов инвалидировало старую оценку.
+- определить канонический `decision_id = listing_id + content_hash + engine_version + financial_config_version + verification_version + market_fingerprint`;
+- включать в `market_fingerprint` ID аналогов, подтверждённые цены и timestamps, source roles, adjustments, adjustment/config versions и accepted/rejected status;
+- при изменении verified market bucket ставить processing tasks всем затронутым активным targets;
+- перед выдачей и delivery вычислять текущий fingerprint: несовпадение блокирует старое решение и ставит target на пересчёт;
+- каждое новое решение помечает предыдущее того же target как superseded;
+- выдавать только решение текущего snapshot, Engine, financial config, verification и market fingerprint; исключать `stale`, `removed`, `quarantined` и истёкшую verification;
+- запрещать старому `CONTACT/INSPECT` оставаться текущим после нового `REJECT/INSUFFICIENT_DATA`.
 
 Критерий приёмки:
 
 - ни одно неподтверждённое объявление не участвует в рынке аналогов;
 - контрольные `Price on request` и служебные USD-значения не становятся ценой;
+- в verified market входят только записи `verified` с неистёкшим `verified_at`;
 - ожидаемая прибыль, ROI и все расходы воспроизводятся по fixture до каждого вычета;
 - сильно недооценённый target сравнивается с независимым рыночным диапазоном, а не исключает дорогие аналоги своим asking price;
 - hard stop всегда имеет приоритет над недостатком аналогов;
+- изменение аналога при неизменившемся target snapshot создаёт новое актуальное решение и supersedes старое;
 - regression-набор содержит положительные и отрицательные примеры VIN/entity resolution на разных языках.
 
 ### Релиз 0.11C. Хранилище, масштабирование и инфраструктура
@@ -422,6 +499,8 @@ Vertex AI подключается через `google-genai` только пос
 Задачи:
 
 - добавить lifecycle `active/changed/stale/removed/quarantined`, `first_seen_at`, `last_seen_at` и подтверждённое событие удаления;
+- разделить `source_observed_at`, `fetched_at` и серверный `ingested_at`; добавить `version_sequence` или update precondition и детерминированный tie-breaker;
+- обновлять current pointer транзакционно по серверному порядку, сохраняя запоздавший snapshot только в истории;
 - не считать отсутствие на первых страницах доказанным удалением без повторной detail-проверки;
 - заменить полные scans Firestore индексируемыми запросами и счётчиками для status, decisions и watchlist;
 - выполнять detail verification вне длительного Telegram webhook через Cloud Tasks;
@@ -434,6 +513,7 @@ Vertex AI подключается через `google-genai` только пос
 - убрать жёстко заданные production URL и project number из gateway template;
 - разделить production и development dependencies, добавить lock с точными версиями;
 - расширить CI: сборка контейнера, `/health`, Firestore emulator, Cloud Tasks/webhook integration, coverage threshold и vulnerability scan.
+- добавить docs job: `git diff --check`, markdownlint, проверку внутренних/внешних ссылок и наличие обязательных release headings;
 
 Критерий приёмки:
 
@@ -442,6 +522,34 @@ Vertex AI подключается через `google-genai` только пос
 - Terraform plan описывает весь production-контур без ручных скрытых ресурсов;
 - collector не может читать Telegram/Meta secrets;
 - чистый checkout фиксированного commit собирает тот же dependency graph и проходит container smoke test.
+- отдельный docs job проходит `git diff --check`, markdownlint, link checks и проверку обязательных release headings.
+
+### Релиз 0.11M. Миграция production-данных
+
+Статус: отдельный обязательный релиз после готовности новых схем `0.11A–0.11C` и до формирования baseline `0.11D`.
+
+Задачи:
+
+- добавить `schema_version` для listings, snapshots, normalized vehicles, identities, decisions, notifications, telegram updates, user actions и outbox;
+- выполнить backup и migration dry run без записей с отчётом количества документов по каждой операции;
+- определить, какие данные мигрируются, какие пересоздаются из raw, какие архивируются и какие признаются недостоверными;
+- построить заново verified market и vehicle identity clusters;
+- инвалидировать прежние decisions и пересчитать их с новым `decision_id` и market fingerprint;
+- закрыть старые notification records так, чтобы смена ID не вызвала повторную массовую публикацию;
+- удалить либо безопасно отклонить Cloud Tasks старого payload/identity после сохранения inventory;
+- мигрировать `telegram_updates` и `user_actions` с owner scope;
+- установить checkpoints, resumable batches и детерминированный migration ID;
+- подготовить forward-compatible rollback reader либо запретить rollback старого образа после необратимого checkpoint;
+- выполнить reconciliation counts, выборочную проверку provenance и отчёт расхождений после каждого этапа.
+
+Критерий приёмки:
+
+- dry run и фактическая миграция дают согласованные counts;
+- ни одно старое решение не считается текущим без нового fingerprint и verification;
+- миграция не создаёт повторные исторические публикации;
+- owner-scoped данные после миграции изолированы;
+- rollback совместимость либо точка необратимости доказана и зафиксирована до production cutover;
+- итоговый migration report утверждён независимым reviewer.
 
 ### Релиз 0.11D. Формирование воспроизводимого production-baseline
 
@@ -450,11 +558,14 @@ Vertex AI подключается через `google-genai` только пос
 - не сливать draft PR #1 в текущем виде; пометить его superseded после сохранения истории обсуждения;
 - разнести миграцию на проверяемую последовательность: доменное ядро и storage; collectors; cloud pipeline; Telegram/API; инфраструктура и документация;
 - для каждого PR назначить reviewer, дать русское читаемое описание, ограничить область и приложить тестовые доказательства;
+- создать tracking issues для `0.11-STOP`, `0.11A`, `0.11B`, `0.11C`, `0.11M` и `0.11D`; каждый replacement PR связывать со своим issue;
+- требовать минимум одно approving review не от автора и запретить автору единоличный merge;
 - защитить `main` обязательными checks и запретом прямого push;
-- слить стабилизированную реализацию в `main` только после приёмки `0.11A–0.11C`;
+- слить стабилизированную реализацию в `main` только после приёмки `0.11A–0.11C` и migration reconciliation `0.11M`;
 - собирать release image только из commit в `main`, записывать commit SHA и image digest в `/version` и deployment metadata;
 - развернуть staging, выполнить E2E, затем продвинуть тот же digest в production;
 - проверить rollback предыдущего digest и задокументировать процедуру;
+- проверять rollback только с учётом schema compatibility и migration checkpoint из `0.11M`;
 - синхронизировать README и `.env.example` с командами чистого checkout.
 
 Критерий приёмки:
@@ -473,8 +584,9 @@ Vertex AI подключается через `google-genai` только пос
 
 Задачи:
 
-- ввести отдельные форматы `PublicTeaser` и `ProDealCard`;
-- публично показывать только марку, модель, год, фотографию, безопасный общий сигнал и CTA;
+- ввести общий `PublicationEvent`, отдельные форматы `PublicTeaser` и `ProDealCard` и использовать generic outbox из `0.11A`;
+- публично показывать только марку, модель, год, защищённое изображение и CTA;
+- не использовать оригинальную фотографию без обработки: применять crop/blur/watermark либо нейтральное изображение модели и при необходимости задержку тизера;
 - скрыть в Free прямую ссылку продавца, listing ID, точную прибыль, ROI, максимальную цену покупки, полный рынок и аналоги;
 - в Pro сохранить полную проверенную карточку;
 - включить в Pro максимальную цену покупки, детализацию расходов, risk flags, причины решения, размер и состав аналогов, версию Engine и дату рыночного среза;
@@ -486,7 +598,7 @@ Vertex AI подключается через `google-genai` только пос
 Критерий приёмки:
 
 - один кандидат создаёт короткий Free-тизер и отдельную полную Pro-карточку;
-- в Free нет данных, позволяющих обойти Pro и сразу забрать сделку;
+- в Free отсутствуют прямые идентификаторы; остаточная discoverability через внешний поиск признаётся и измеряется, а не объявляется абсолютно невозможной;
 - ошибочный или неподтверждённый кандидат не появляется ни в одном канале;
 - повтор задачи не дублирует ни Free, ни Pro;
 - владелец утверждает тексты и внешний вид обоих форматов до production-развёртывания.
@@ -504,7 +616,7 @@ Vertex AI подключается через `google-genai` только пос
 - показывать распознанные параметры и требовать подтверждение до сохранения;
 - не додумывать отсутствующие параметры; LLM при наличии используется только для извлечения структуры;
 - искать по последним нормализованным объявлениям и повторно проверять цену каждого результата;
-- применять подтверждённые персональные фильтры не только к push-уведомлениям, но и к ручной команде `/deals`;
+- переиспользовать owner-scoped фильтры `/deals` и push, уже исправленные в `0.11A`;
 - при отсутствии результата сохранять активную подписку и проверять её при каждом новом решении;
 - ограничить объём бесплатной выдачи и частоту запросов конфигурацией тарифа.
 
@@ -592,8 +704,8 @@ Firebase Hosting: admin frontend
 
 Задачи:
 
-- ввести `PublicationEvent` и outbox со статусом каждой доставки;
-- реализовать Telegram Free, Telegram Pro и personal adapters;
+- подключить WhatsApp adapter к существующим `PublicationEvent` и generic outbox релизов `0.11A/0.12`;
+- сохранить Telegram Free, Telegram Pro и personal adapters без изменения доменной модели события;
 - сохранить повтор, идемпотентность и независимую ошибку каждого target;
 - подготовить адаптер официального WhatsApp Business Cloud API;
 - хранить Meta access token и webhook secret только в Secret Manager;
@@ -699,16 +811,19 @@ Firebase Hosting: admin frontend
 Переход к полной реализации подтверждён владельцем проекта. Релизы выполняются в следующем порядке:
 
 1. получить от владельца правки и явное утверждение этой редакции плана;
-2. выполнить `0.11A`: точные версии, изоляция пользователей, роли, retry и outbox;
-3. выполнить `0.11B`: достоверность цен, аналогов, рисков и финансовой модели;
-4. выполнить `0.11C`: lifecycle, масштабирование, конфигурация, IaC и воспроизводимая сборка;
-5. выполнить `0.11D`: заменить draft PR #1 проверяемой серией PR, слить baseline в `main` и развернуть тот же image digest;
-6. выпустить разделение `Free teaser / Pro full card`;
-7. выпустить пользовательский `/find` и подписки на новые совпадения;
-8. выпустить административную панель на Firebase Hosting/Auth;
-9. выпустить информационный модуль в режиме предварительного согласования;
-10. перейти к автоматическим информационным публикациям после ручной проверки шаблонов;
-11. подключить официальный WhatsApp Business adapter после предоставления Meta-реквизитов;
-12. провести контрольный запуск монетизации и только затем возвращаться к TMA.
+2. после отдельного подтверждения выполнить `0.11-STOP` и ограничить production;
+3. выполнить `0.11A`: точные версии, изоляция пользователей, роли, retry и outbox;
+4. выполнить `0.11B`: достоверность цен, аналогов, рисков и финансовой модели;
+5. выполнить `0.11C`: lifecycle, масштабирование, конфигурация, IaC и воспроизводимая сборка;
+6. выполнить `0.11M`: dry run, backup, миграцию схемы и reconciliation;
+7. выполнить `0.11D`: заменить draft PR #1 проверяемой серией PR, слить baseline в `main` и развернуть тот же image digest;
+8. заново провести официальный пилот на воспроизводимом baseline;
+9. выпустить разделение `Free teaser / Pro full card`;
+10. выпустить пользовательский `/find` и подписки на новые совпадения;
+11. выпустить административную панель на Firebase Hosting/Auth;
+12. выпустить информационный модуль в режиме предварительного согласования;
+13. перейти к автоматическим информационным публикациям после ручной проверки шаблонов;
+14. подключить официальный WhatsApp Business adapter после предоставления Meta-реквизитов;
+15. провести контрольный запуск монетизации и только затем возвращаться к TMA.
 
 Каждый релиз выполняется отдельным pull request либо небольшой серией pull request. Следующий релиз не начинается, пока не выполнены критерии приёмки предыдущего или письменно не зафиксировано исключение.
