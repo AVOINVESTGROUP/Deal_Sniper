@@ -43,7 +43,8 @@ def _get_items(
     allowed_fields: tuple[str, ...],
 ) -> list[dict[str, Any]]:
     response = session.get(url, timeout=20)
-    response.raise_for_status()
+    if not response.ok:
+        return [{"state": "UNAVAILABLE", "http_status": response.status_code}]
     payload = response.json()
     return [
         {field: item.get(field) for field in allowed_fields}
