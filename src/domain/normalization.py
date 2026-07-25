@@ -148,4 +148,3 @@ def resolve_vehicle_identities(
         for listing_id in listing_ids:
             listing_to_vehicle[listing_id] = vehicle_id
     return identities, listing_to_vehicle
-
