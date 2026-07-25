@@ -31,6 +31,19 @@ paths:
     get: {operationId: tmaFavorites, responses: {"200": {description: Favorites}}}
     post: {operationId: tmaSaveFavorite, responses: {"200": {description: Saved}}}
     options: {operationId: tmaFavoritesOptions, responses: {"200": {description: CORS}}}
+  /tma/settings:
+    get: {operationId: tmaSettings, responses: {"200": {description: Settings}}}
+    post: {operationId: tmaSaveSettings, responses: {"200": {description: Saved}}}
+    options: {operationId: tmaSettingsOptions, responses: {"200": {description: CORS}}}
+  /tma/searches:
+    get: {operationId: tmaSearches, responses: {"200": {description: Searches}}}
+    post: {operationId: tmaCreateSearch, responses: {"200": {description: Created}}}
+    options: {operationId: tmaSearchesOptions, responses: {"200": {description: CORS}}}
+  /tma/searches/{search_id}:
+    parameters:
+      - {name: search_id, in: path, required: true, type: string}
+    post: {operationId: tmaSetSearchState, responses: {"200": {description: Updated}}}
+    options: {operationId: tmaSetSearchStateOptions, responses: {"200": {description: CORS}}}
   /admin/overview:
     get: {operationId: adminOverview, responses: {"200": {description: Overview}}}
     options: {operationId: adminOverviewOptions, responses: {"200": {description: CORS}}}

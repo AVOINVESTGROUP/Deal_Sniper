@@ -81,3 +81,5 @@ Firebase Authentication инициализирован. TMA проверяет T
 Production-проход всех четырёх collectors успешен. После обработки актуальный market содержит 1 177 verified evidence, 1 671 permanent invalid и 4 temporary error; current decisions не содержат CONTACT/INSPECT, поэтому система корректно не публикует недостоверные автомобили. Информационный Market Pulse и production status доставлены, старые pending outbox записи периода delivery-disabled помечены superseded.
 
 WhatsApp реализация присутствует и остаётся `WHATSAPP_ENABLED=false`: это единственный внешний credential blocker, требующий Meta access token, phone number ID, утверждённый template и user opt-in.
+
+После production-проверки TMA устранён браузерный `Failed to fetch`: точный API Gateway добавлен в `connect-src` Firebase Hosting. Пользовательский путь больше не строится вокруг slash-команд. Основной интерфейс — Telegram menu button и Mini App с вкладками Deals/Search/Saved/Settings; владелец дополнительно видит Admin и управляет source switches кнопками. Backend содержит owner-scoped `/tma/settings` и `/tma/searches`, поэтому пользователь не может читать или менять чужие настройки и подборы.

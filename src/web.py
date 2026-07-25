@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import TimeoutException, TransportError
 from pydantic import BaseModel, Field
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, TimedOut
 
@@ -130,6 +130,29 @@ class OutcomeRequest(BaseModel):
 class FavoriteRequest(BaseModel):
     listing_id: str
     favorite: bool = True
+
+
+class TmaSettingsRequest(BaseModel):
+    """Редактируемые пользователем фильтры без возможности сменить владельца."""
+
+    max_budget_aed: Decimal | None = Field(default=None, gt=0)
+    min_profit_aed: Decimal = Field(default=Decimal("5000"), ge=0)
+    min_roi_percent: Decimal = Field(default=Decimal("10"), ge=0)
+    makes: list[str] = Field(default_factory=list)
+    models: list[str] = Field(default_factory=list)
+    min_year: int | None = Field(default=None, ge=1950, le=2100)
+    max_year: int | None = Field(default=None, ge=1950, le=2100)
+    max_mileage_km: int | None = Field(default=None, ge=0)
+    specifications: list[str] = Field(default_factory=list)
+    body_types: list[str] = Field(default_factory=list)
+
+
+class TmaSearchRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=500)
+
+
+class TmaSearchStateRequest(BaseModel):
+    enabled: bool
 
 
 class ContentDeliveryTask(BaseModel):
@@ -619,6 +642,87 @@ async def tma_save_favorite(
     return {"ok": True}
 
 
+@app.get("/tma/settings")
+async def tma_settings(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    value = await asyncio.to_thread(
+        service.repository.get_user_settings, principal.telegram_user_id
+    ) or default_user_settings(principal.telegram_user_id)
+    return value.model_dump(mode="json")
+
+
+@app.post("/tma/settings")
+async def tma_save_settings(
+    request: TmaSettingsRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    current = await asyncio.to_thread(
+        service.repository.get_user_settings, principal.telegram_user_id
+    ) or default_user_settings(principal.telegram_user_id)
+    payload = current.model_dump()
+    payload.update(request.model_dump())
+    value = UserSettings.model_validate(payload)
+    await asyncio.to_thread(service.repository.save_user_settings, value)
+    return value.model_dump(mode="json")
+
+
+@app.get("/tma/searches")
+async def tma_searches(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    items = await asyncio.to_thread(
+        service.repository.user_searches, principal.telegram_user_id
+    )
+    return {"items": [item.model_dump(mode="json") for item in items]}
+
+
+@app.post("/tma/searches")
+async def tma_create_search(
+    request: TmaSearchRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    current = await asyncio.to_thread(
+        service.repository.get_user_settings, principal.telegram_user_id
+    ) or default_user_settings(principal.telegram_user_id)
+    parsed = parse_search(request.query, principal.telegram_user_id, current.language_code)
+    search = build_saved_search(request.query, parsed).model_copy(update={"enabled": True})
+    await asyncio.to_thread(service.repository.save_search, search)
+    return {
+        "search": search.model_dump(mode="json"),
+        "recognized": parsed.recognized,
+        "unknown": parsed.unknown,
+    }
+
+
+@app.post("/tma/searches/{search_id}")
+async def tma_set_search_state(
+    search_id: str,
+    request: TmaSearchStateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, bool]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    changed = await asyncio.to_thread(
+        service.repository.set_search_enabled,
+        principal.telegram_user_id,
+        search_id,
+        request.enabled,
+    )
+    if not changed:
+        raise HTTPException(status_code=404, detail="Поиск не найден")
+    return {"ok": True}
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     update: dict[str, Any],
@@ -693,26 +797,25 @@ async def telegram_webhook(
             user_settings.language_code = language
         await asyncio.to_thread(service.repository.save_user_settings, user_settings)
         if text in {"/start", "/help"}:
+            keyboard = None
+            if settings.tma_url:
+                keyboard = InlineKeyboardMarkup(
+                    [[InlineKeyboardButton(
+                        text=tr("Открыть приложение", "Open application"),
+                        web_app=WebAppInfo(url=settings.tma_url),
+                    )]]
+                )
             await bot.send_message(
                 chat_id=chat_id,
                 text=tr(
-                    "Dubai Deal Sniper работает в Google Cloud.\n\n"
-                    "/scan — получить объявления и выполнить расчёт\n"
-                    "/deals — показать последние подходящие варианты\n"
-                    "/status — показать состояние хранилища\n"
-                    "/sources — управление источниками\n"
-                    "/settings — персональные фильтры\n"
-                    "/watchlist — сохранённые автомобили",
-                    "Dubai Deal Sniper runs in Google Cloud.\n\n"
-                    "/scan — fetch listings and calculate deals\n"
-                    "/deals — show the latest suitable cars\n"
-                    "/status — show system status\n"
-                    "/sources — manage sources\n"
-                    "/settings — personal filters\n"
-                    "/watchlist — saved cars\n"
-                    "/find — create a car search\n"
-                    "/my_searches — saved searches",
+                    "Dubai Deal Sniper готов к работе.\n\n"
+                    "Откройте приложение: там находятся сделки, подбор автомобиля, "
+                    "избранное, настройки и панель владельца.",
+                    "Dubai Deal Sniper is ready.\n\n"
+                    "Open the application to view deals, create car searches, manage "
+                    "favorites, settings and the owner dashboard.",
                 ),
+                reply_markup=keyboard,
             )
         elif text == "/status":
             count = await asyncio.to_thread(service.repository.count_snapshots)

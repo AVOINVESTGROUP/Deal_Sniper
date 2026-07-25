@@ -2,127 +2,43 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/fireba
 import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const telegram = window.Telegram.WebApp;
-telegram.ready();
-telegram.expand();
-const language = (telegram.initDataUnsafe?.user?.language_code || navigator.language || "en")
-  .toLowerCase().startsWith("ru") ? "ru" : "en";
+telegram.ready(); telegram.expand();
+const language = (telegram.initDataUnsafe?.user?.language_code || navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
 const tr = (ru, en) => language === "ru" ? ru : en;
-document.querySelector("#title").textContent = tr("Проверенные автомобили", "Verified car deals");
-const runtime = await (await fetch("/runtime-config.json")).json();
+const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const api = runtime.apiBase || "";
+let token = ""; let feedItems = []; let favoriteIds = new Set(); let isAdmin = false;
+const labels = {deals:tr("Сделки","Deals"),search:tr("Подбор","Search"),saved:tr("Избранное","Saved"),settings:tr("Настройки","Settings"),admin:tr("Управление","Admin")};
+document.querySelector("#subtitle").textContent = tr("Проверенные автомобили с расчётом", "Verified cars with financial analysis");
 
-async function authorized(path, token, options = {}) {
-  const response = await fetch(api + path, {
-    ...options,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-  });
-  if (!response.ok) throw new Error(await response.text());
+async function authorized(path, options = {}) {
+  const response = await fetch(api + path, {...options, headers:{"Content-Type":"application/json",Authorization:`Bearer ${token}`,...(options.headers||{})}});
+  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
   return response.json();
 }
-
-async function recordOutcome(item, token) {
-  const purchase = window.prompt("Actual purchase price, AED");
-  if (purchase === null) return;
-  const repair = window.prompt("Actual repair and other costs, AED", "0");
-  const sale = window.prompt("Actual sale price, AED (leave blank if not sold)", "");
-  const holdDays = window.prompt("Hold days", "0");
-  await authorized("/tma/outcomes", token, {
-    method: "POST",
-    body: JSON.stringify({
-      listing_id: `${item.listing.source}:${item.listing.source_listing_id}`,
-      decision_content_hash: item.decision.content_hash,
-      status: sale ? "sold" : "purchased",
-      purchase_price_aed: purchase,
-      actual_cost_aed: repair || "0",
-      sale_price_aed: sale || null,
-      hold_days: Number(holdDays || 0),
-    }),
-  });
-  telegram.showAlert("Outcome saved");
+const money = value => value == null ? "—" : `${Number(value).toLocaleString(language === "ru" ? "ru-RU" : "en-US")} AED`;
+function show(view) {
+  document.querySelectorAll(".view").forEach(node => node.hidden = node.id !== `${view}-view`);
+  document.querySelectorAll("#tabs button").forEach(node => node.classList.toggle("active", node.dataset.view === view));
+  if(view==="search")loadSearches(); if(view==="saved")renderSaved(); if(view==="settings")loadSettings(); if(view==="admin")renderAdmin();
 }
-
-async function toggleFavorite(item, token, button) {
-  const listingId = `${item.listing.source}:${item.listing.source_listing_id}`;
-  const favorite = button.dataset.favorite !== "true";
-  await authorized("/tma/favorites", token, {
-    method: "POST",
-    body: JSON.stringify({ listing_id: listingId, favorite }),
-  });
-  button.dataset.favorite = String(favorite);
-  button.textContent = favorite ? "Saved" : "Save";
+function buildTabs() {
+  const tabs=document.querySelector("#tabs"); tabs.innerHTML="";
+  for(const view of ["deals","search","saved","settings",...(isAdmin?["admin"]:[])]){const button=document.createElement("button");button.textContent=labels[view];button.dataset.view=view;button.onclick=()=>show(view);tabs.append(button);}
+  tabs.hidden=false; show("deals");
 }
+async function toggleFavorite(item,button){const id=`${item.listing.source}:${item.listing.source_listing_id}`;const favorite=!favoriteIds.has(id);await authorized("/tma/favorites",{method:"POST",body:JSON.stringify({listing_id:id,favorite})});favorite?favoriteIds.add(id):favoriteIds.delete(id);button.textContent=favorite?tr("★ Сохранено","★ Saved"):tr("☆ Сохранить","☆ Save");}
+function dealCard(item){const {listing,decision}=item;const card=document.createElement("article");card.className="card";const title=document.createElement("h2");title.textContent=listing.title;const meta=document.createElement("div");meta.className="deal-meta";meta.textContent=`${tr("Цена","Price")}: ${money(listing.price_aed)}\n${tr("Решение","Decision")}: ${decision.action}\n${tr("Ожидаемая прибыль","Expected profit")}: ${money(decision.expected_profit_aed)}\nROI: ${decision.roi_percent??"—"}%`;meta.style.whiteSpace="pre-line";const actions=document.createElement("div");actions.className="actions";const link=document.createElement("a");link.className="button";link.href=listing.url;link.target="_blank";link.rel="noopener";link.textContent=tr("Открыть объявление","Open listing");const favorite=document.createElement("button");favorite.className="secondary";const id=`${listing.source}:${listing.source_listing_id}`;favorite.textContent=favoriteIds.has(id)?tr("★ Сохранено","★ Saved"):tr("☆ Сохранить","☆ Save");favorite.onclick=()=>toggleFavorite(item,favorite);actions.append(link,favorite);card.append(title,meta,actions);return card;}
+function renderDeals(){const root=document.querySelector("#feed");root.innerHTML="";if(!feedItems.length)root.innerHTML=`<div class="card"><b>${tr("Сейчас нет вариантов, прошедших все проверки.","No opportunities currently pass all checks.")}</b></div>`;feedItems.forEach(item=>root.append(dealCard(item)));}
+function renderSaved(){const root=document.querySelector("#saved");root.innerHTML="";const items=feedItems.filter(item=>favoriteIds.has(`${item.listing.source}:${item.listing.source_listing_id}`));if(!items.length)root.innerHTML=`<div class="card">${tr("Избранное пока пусто.","No saved cars yet.")}</div>`;items.forEach(item=>root.append(dealCard(item)));}
+async function loadSearches(){const data=await authorized("/tma/searches");const root=document.querySelector("#searches");root.innerHTML="";for(const item of data.items){const row=document.createElement("div");row.className="card source-row";const text=document.createElement("div");text.textContent=item.query_text;const button=document.createElement("button");button.className="secondary";button.textContent=item.enabled?tr("Остановить","Pause"):tr("Включить","Enable");button.onclick=async()=>{await authorized(`/tma/searches/${item.search_id}`,{method:"POST",body:JSON.stringify({enabled:!item.enabled})});await loadSearches();};row.append(text,button);root.append(row);}}
+async function loadSettings(){const data=await authorized("/tma/settings");document.querySelector("#budget").value=data.max_budget_aed??"";document.querySelector("#profit").value=data.min_profit_aed;document.querySelector("#roi").value=data.min_roi_percent;document.querySelector("#makes").value=(data.makes||[]).join(", ");document.querySelector("#min-year").value=data.min_year??"";document.querySelector("#max-year").value=data.max_year??"";document.querySelector("#mileage").value=data.max_mileage_km??"";}
+async function renderAdmin(){if(!isAdmin)return;const data=await authorized("/admin/overview");document.querySelector("#admin-summary").textContent=tr(`Объявлений: ${data.snapshot_count}. Доставка: ${data.delivery_enabled?"включена":"выключена"}.`,`Listings: ${data.snapshot_count}. Delivery: ${data.delivery_enabled?"enabled":"disabled"}.`);const root=document.querySelector("#admin-sources");root.innerHTML="";for(const [name,enabled] of Object.entries(data.source_switches)){const row=document.createElement("div");row.className="card source-row";const state=document.createElement("div");state.innerHTML=`<b>${name}</b><br><span class="muted">${enabled?tr("Включён","Enabled"):tr("Выключен","Disabled")}</span>`;const button=document.createElement("button");button.textContent=enabled?tr("Выключить","Disable"):tr("Включить","Enable");button.onclick=async()=>{await authorized(`/admin/sources/${name}`,{method:"POST",body:JSON.stringify({enabled:!enabled})});await renderAdmin();};row.append(state,button);root.append(row);}}
 
-async function renderAdmin(token) {
-  const data = await authorized("/admin/overview", token);
-  document.querySelector("#admin").hidden = false;
-  document.querySelector("#admin-title").textContent = tr("Управление проектом", "Project control");
-  document.querySelector("#admin-summary").textContent = tr(
-    `Версий: ${data.snapshot_count}; доставка: ${data.delivery_enabled ? "включена" : "выключена"}`,
-    `Snapshots: ${data.snapshot_count}; delivery: ${data.delivery_enabled ? "enabled" : "disabled"}`,
-  );
-  const root = document.querySelector("#admin-sources");
-  root.innerHTML = "";
-  for (const [name, enabled] of Object.entries(data.source_switches)) {
-    const row = document.createElement("p");
-    row.textContent = `${name}: ${enabled ? tr("включён", "enabled") : tr("выключен", "disabled")} `;
-    const button = document.createElement("button");
-    button.textContent = enabled ? tr("Выключить", "Disable") : tr("Включить", "Enable");
-    button.onclick = async () => {
-      await authorized(`/admin/sources/${name}`, token, {
-        method: "POST", body: JSON.stringify({ enabled: !enabled }),
-      });
-      await renderAdmin(token);
-    };
-    row.append(button);
-    root.append(row);
-  }
-}
+document.querySelector("#search-title").textContent=tr("Подобрать автомобиль","Find a car");document.querySelector("#search-help").textContent=tr("Напишите обычным текстом: марка, бюджет, годы, пробег, GCC, прибыль и ROI.","Describe make, budget, years, mileage, GCC, profit and ROI.");document.querySelector("#create-search").textContent=tr("Создать подбор","Create search");
+document.querySelector("#create-search").onclick=async()=>{const query=document.querySelector("#search-query").value.trim();if(!query)return;await authorized("/tma/searches",{method:"POST",body:JSON.stringify({query})});document.querySelector("#search-result").textContent=tr("Подбор включён. Бот сообщит о совпадениях.","Search enabled. The bot will notify you about matches.");document.querySelector("#search-query").value="";await loadSearches();};
+for(const [id,ru,en] of [["budget-label","Максимальный бюджет, AED","Maximum budget, AED"],["profit-label","Минимальная прибыль, AED","Minimum profit, AED"],["roi-label","Минимальный ROI, %","Minimum ROI, %"],["makes-label","Марки через запятую","Makes, comma separated"],["years-label","Годы выпуска: от / до","Model years: from / to"],["mileage-label","Максимальный пробег, км","Maximum mileage, km"]])document.querySelector(`#${id}`).textContent=tr(ru,en);
+document.querySelector("#save-settings").textContent=tr("Сохранить настройки","Save settings");document.querySelector("#admin-title").textContent=tr("Управление проектом","Project control");
+document.querySelector("#settings-form").onsubmit=async event=>{event.preventDefault();const number=id=>document.querySelector(id).value?Number(document.querySelector(id).value):null;await authorized("/tma/settings",{method:"POST",body:JSON.stringify({max_budget_aed:number("#budget"),min_profit_aed:number("#profit")||0,min_roi_percent:number("#roi")||0,makes:document.querySelector("#makes").value.split(",").map(x=>x.trim()).filter(Boolean),models:[],min_year:number("#min-year"),max_year:number("#max-year"),max_mileage_km:number("#mileage"),specifications:[],body_types:[]})});document.querySelector("#settings-result").textContent=tr("Сохранено","Saved");const data=await authorized("/tma/feed");feedItems=data.items;renderDeals();};
 
-try {
-  const config = await (await fetch("/__/firebase/init.json")).json();
-  const auth = getAuth(initializeApp(config));
-  const exchange = await fetch(api + "/tma/auth", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ init_data: telegram.initData }),
-  });
-  if (!exchange.ok) throw new Error(await exchange.text());
-  const custom = await exchange.json();
-  const credential = await signInWithCustomToken(auth, custom.firebase_custom_token);
-  const token = await credential.user.getIdToken();
-  const data = await authorized("/tma/feed", token);
-  document.querySelector("#state").textContent = tr(
-    `Актуальных вариантов: ${data.items.length}`,
-    `${data.items.length} current opportunities`,
-  );
-  const feed = document.querySelector("#feed");
-  for (const item of data.items) {
-    const decision = item.decision;
-    const listing = item.listing;
-    const card = document.createElement("article");
-    card.className = "card";
-    const title = document.createElement("h2");
-    title.textContent = listing.title;
-    const summary = document.createElement("p");
-    summary.textContent = `${listing.price_aed} AED · ${decision.action} · ${tr("прибыль", "profit")} ${decision.expected_profit_aed ?? "—"} AED · ROI ${decision.roi_percent ?? "—"}%`;
-    const link = document.createElement("a");
-    link.href = listing.url;
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.textContent = tr("Открыть объявление", "Open listing");
-    const favorite = document.createElement("button");
-    favorite.textContent = tr("Сохранить", "Save");
-    favorite.dataset.favorite = "false";
-    favorite.onclick = () => toggleFavorite(item, token, favorite);
-    const outcome = document.createElement("button");
-    outcome.textContent = tr("Записать результат", "Record outcome");
-    outcome.onclick = () => recordOutcome(item, token);
-    card.append(title, summary, link, document.createTextNode(" "), favorite,
-      document.createTextNode(" "), outcome);
-    feed.append(card);
-  }
-  if (data.is_admin) await renderAdmin(token);
-} catch (error) {
-  document.querySelector("#state").textContent = tr("Недоступно", "Unavailable");
-  document.querySelector("#error").textContent = error.message;
-}
+try{const config=await(await fetch("/__/firebase/init.json")).json();const auth=getAuth(initializeApp(config));const exchange=await fetch(api+"/tma/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({init_data:telegram.initData})});if(!exchange.ok)throw new Error(await exchange.text());const custom=await exchange.json();const credential=await signInWithCustomToken(auth,custom.firebase_custom_token);token=await credential.user.getIdToken();const [feed,favorites]=await Promise.all([authorized("/tma/feed"),authorized("/tma/favorites")]);feedItems=feed.items;favoriteIds=new Set(favorites.items);isAdmin=feed.is_admin;document.querySelector("#state").textContent=tr(`Подходящих вариантов: ${feedItems.length}`,`${feedItems.length} matching opportunities`);document.querySelector("#connection").textContent=tr("Онлайн","Online");renderDeals();buildTabs();}catch(error){document.querySelector("#state").textContent=tr("Не удалось подключиться","Connection failed");document.querySelector("#connection").textContent=tr("Ошибка","Error");document.querySelector("#error").textContent=error.message;}
