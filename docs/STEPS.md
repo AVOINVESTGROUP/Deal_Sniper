@@ -204,3 +204,14 @@
 - [x] Официальный пилот физически перенесён после `0.11D` и переименован в `0.11P`; SPEC синхронизирован по защите Free-изображений.
 - [x] Создан `docs/PLAN_REVIEW_2026-07-24-R3.md` с результатами третьей проверки.
 - [ ] План остаётся Draft и требует повторной проверки; `0.11-STOP`, код и production не изменялись.
+
+## Фаза 19: Четвёртая проверка плана стабилизации
+
+- [x] Из `0.11-STOP` удалена зависимость от отсутствующего code-level feature flag; gate использует существующие publisher/Scheduler/queue/secret/Telegram permission controls.
+- [x] Application `delivery_enabled` перенесён в `0.11A`, а его Settings/Terraform wiring — в `0.11C`.
+- [x] Перед production-миграцией добавлен immutable release candidate `0.11RC` с точным commit, runtime/migration digests, schema/tool versions и rehearsal.
+- [x] `0.11M` разрешено выполнять только утверждёнными digests; `0.11D` должен сделать `main` указателем на тот же commit и продвинуть тот же runtime digest.
+- [x] Разделены `decision_subject_id = listing_id`, `vehicle_id` и `delivery_recipient_id`.
+- [x] Operational verification freshness исключена из `market_fingerprint`; неизменившийся refresh не создаёт decision/delivery/publication.
+- [x] Создан `docs/PLAN_REVIEW_2026-07-25-R4.md` с результатами четвёртой проверки.
+- [ ] План остаётся Draft и требует повторной проверки; `0.11-STOP`, код и production не изменялись.

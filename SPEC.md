@@ -157,7 +157,11 @@ flowchart TD
 
 В Comparable Engine допускаются только объявления с неистёкшей detail-page проверкой. `verification_key` является SHA-256 canonical JSON объекта `verification-key/v1` с полями `source`, `listing_id`, `content_hash` и `extractor_version`; состояния: `pending`, `verified`, `temporary_error`, `permanent_invalid`, `expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
 
-`market_fingerprint` включает ID, подтверждённые цены и время проверки аналогов, source roles, применённые adjustments и их версии, а также accepted/rejected status. Изменение verified market bucket ставит affected targets на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
+`market_fingerprint` включает только семантически значимые evidence: `listing_id`, `content_hash` либо immutable verified-price revision ID, подтверждённую цену, валюту, source role, extractor/config/adjustment versions и accepted/rejected status. В него не входят `last_checked_at`, время обычного refresh, attempt number, latency и operational status, не меняющий доказательство цены. `verified_at` входит только как время создания новой immutable evidence revision. Изменение verified market bucket ставит затронутые `decision_subject_id` на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
+
+Повторная detail verification при неизменившихся цене, валюте, snapshot и extractor version обновляет freshness/TTL, но сохраняет evidence revision, `market_fingerprint`, `decision_id` и `delivery_id`. Она не создаёт новую публикацию. Изменение цены, валюты, snapshot, extractor version либо semantic verification result создаёт новую immutable evidence revision и новый fingerprint.
+
+`verification_version` в `decision_id` равен ID immutable semantic evidence revision. Он не меняется от `last_checked_at`, TTL refresh, номера попытки или latency.
 
 ### 3.7. Cost and Risk Engine
 
@@ -368,7 +372,7 @@ listings/{listing_id}/snapshots/{content_hash}
 listings/{listing_id}/verifications/{verification_key}
 vehicles/{vehicle_id}
 decisions/{decision_id}
-current_decisions/{target_id}
+current_decisions/{decision_subject_id}
 users/{telegram_user_id}/settings/current
 users/{telegram_user_id}/favorites/{vehicle_id}
 notifications/{notification_id}
@@ -404,12 +408,15 @@ decision_id        = sha256(canonical_json({schema: decision-id/v1,
                          financial_config_version, verification_version,
                          market_fingerprint}))
 delivery_id        = sha256(canonical_json({schema: delivery-id/v1,
-                         decision_id, target_id, template_version, format}))
+                         decision_id, delivery_recipient_id,
+                         template_version, format}))
 ```
 
 Тот же контракт применяется к operation ID, migration ID, publication event ID и Cloud Task name. Golden fixtures обязаны давать одинаковые hashes в Python, migration tooling и любом будущем runtime.
 
-Согласованные изменения состояния выполняются Firestore transaction либо compare-and-set с precondition. Новое решение и переключение `current_decisions/{target_id}` записываются одной транзакцией: pointer указывает ровно на одно решение, а прежнее получает `superseded_by`. Выдача читает pointer индексируемым запросом и не определяет current полным scan или клиентской сортировкой.
+`decision_subject_id = listing_id`: финансовое решение относится к конкретному объявлению, snapshot и asking price. `vehicle_id` является cross-source identity для связи и дедупликации объявлений, но не подменяет listing-specific решение; два объявления одного автомобиля с разными asking price имеют разные decision subjects. `delivery_recipient_id` однозначно описывает Telegram user/chat/channel либо получателя другого адаптера и не используется как subject финансового решения.
+
+Согласованные изменения состояния выполняются Firestore transaction либо compare-and-set с precondition. Новое решение и переключение `current_decisions/{decision_subject_id}` записываются одной транзакцией: pointer указывает ровно на одно решение, а прежнее получает `superseded_by`. Выдача читает pointer индексируемым запросом и не определяет current полным scan или клиентской сортировкой.
 
 ### ListingSnapshot
 
@@ -436,6 +443,8 @@ delivery_id        = sha256(canonical_json({schema: delivery-id/v1,
 
 ### DealDecision
 
+- `decision_subject_id` (`listing_id`);
+- `vehicle_id` для cross-source связи и отдельной политики дедупликации публикаций;
 - `market_price_low_aed`;
 - `market_price_median_aed`;
 - `market_price_high_aed`;
@@ -511,9 +520,10 @@ delivery_id        = sha256(canonical_json({schema: delivery-id/v1,
 3. `0.11A` — исправить provenance, owner scope, роли, retry и outbox.
 4. `0.11B` — исправить verified market, decision identity, финансовую модель, риски и identity resolution.
 5. `0.11C` — исправить lifecycle, запросы, конфигурацию, IAM, IaC и CI.
-6. `0.11M` — выполнить restore rehearsal, версионированную миграцию, raw catch-up и reconciliation.
-7. `0.11D` — сформировать проверяемый baseline в `main`, staging и deployment того же image digest.
-8. `0.11P` — заново провести официальный пилот; прежние результаты считать диагностическими.
-9. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
+6. `0.11RC` — заморозить точный release candidate commit, runtime/migration image digests и пройти staging/rehearsal.
+7. `0.11M` — выполнить утверждённым migration digest версионированную миграцию, raw catch-up и reconciliation.
+8. `0.11D` — сделать `main` указателем на тот же RC commit и развернуть тот же runtime digest.
+9. `0.11P` — заново провести официальный пилот; прежние результаты считать диагностическими.
+10. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
 
 Подробные этапы и границы релизов описаны в `docs/IMPLEMENTATION_PLAN.md`, а схема ресурсов, потоков, IAM и идемпотентности — в `docs/CLOUD_ARCHITECTURE.md`.
