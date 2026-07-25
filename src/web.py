@@ -762,9 +762,7 @@ async def tma_market_watch(
     firebase_principal(authorization, require_admin=False)
     decisions = await current_market_snapshot()
     candidates = [item for item in decisions if item[1].market is not None]
-    candidates.sort(
-        key=lambda item: item[1].asking_price_aed / item[1].market.low_aed  # type: ignore[union-attr]
-    )
+    candidates.sort(key=lambda item: item[1].asking_price_aed / item[1].market.low_aed)
     return {
         "items": [
             {
