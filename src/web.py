@@ -58,7 +58,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-app = FastAPI(title="Dubai Deal Sniper", version="0.6.0")
+app = FastAPI(title="Dubai Deal Sniper", version="1.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -303,9 +303,8 @@ def user_accepts(value: UserSettings, item: EvaluatedListing) -> bool:
         return False
     if value.max_year is not None and (item.listing.year or 9999) > value.max_year:
         return False
-    if (
-        value.max_mileage_km is not None
-        and (item.listing.mileage_km is None or item.listing.mileage_km > value.max_mileage_km)
+    if value.max_mileage_km is not None and (
+        item.listing.mileage_km is None or item.listing.mileage_km > value.max_mileage_km
     ):
         return False
     specifications = {item.casefold() for item in value.specifications}
@@ -340,7 +339,7 @@ async def version() -> dict[str, str]:
     return {
         "git_commit": settings.git_commit,
         "runtime_image_digest": settings.runtime_image_digest,
-        "api_version": "1.0.0",
+        "api_version": "1.1.0",
         "engine_version": service.decision_engine.version,
         "schema_version": settings.schema_version,
         "financial_config_version": settings.financial_config_version,
@@ -593,9 +592,7 @@ async def tma_outcomes(authorization: str | None = Header(default=None)) -> dict
     principal = firebase_principal(authorization, require_admin=False)
     if principal.telegram_user_id is None:
         raise HTTPException(status_code=403, detail="Owner scope отсутствует")
-    outcomes = await asyncio.to_thread(
-        service.repository.user_outcomes, principal.telegram_user_id
-    )
+    outcomes = await asyncio.to_thread(service.repository.user_outcomes, principal.telegram_user_id)
     return {"items": [item.model_dump(mode="json") for item in outcomes]}
 
 
@@ -617,9 +614,7 @@ async def tma_favorites(authorization: str | None = Header(default=None)) -> dic
     principal = firebase_principal(authorization, require_admin=False)
     if principal.telegram_user_id is None:
         raise HTTPException(status_code=403, detail="Owner scope отсутствует")
-    items = await asyncio.to_thread(
-        service.repository.user_watchlist, principal.telegram_user_id
-    )
+    items = await asyncio.to_thread(service.repository.user_watchlist, principal.telegram_user_id)
     return {"items": items}
 
 
@@ -676,9 +671,7 @@ async def tma_searches(authorization: str | None = Header(default=None)) -> dict
     principal = firebase_principal(authorization, require_admin=False)
     if principal.telegram_user_id is None:
         raise HTTPException(status_code=403, detail="Owner scope отсутствует")
-    items = await asyncio.to_thread(
-        service.repository.user_searches, principal.telegram_user_id
-    )
+    items = await asyncio.to_thread(service.repository.user_searches, principal.telegram_user_id)
     return {"items": [item.model_dump(mode="json") for item in items]}
 
 
@@ -721,6 +714,49 @@ async def tma_set_search_state(
     if not changed:
         raise HTTPException(status_code=404, detail="Поиск не найден")
     return {"ok": True}
+
+
+@app.get("/tma/summary")
+async def tma_summary(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Показывает понятное состояние рынка без раскрытия административных данных."""
+    firebase_principal(authorization, require_admin=False)
+    decisions = await asyncio.to_thread(service.repository.current_decisions, 10_000)
+    action_counts: dict[str, int] = {}
+    for _listing, decision in decisions:
+        action_counts[decision.action.value] = action_counts.get(decision.action.value, 0) + 1
+    source_switches = service.source_statuses()
+    return {
+        "listings": await asyncio.to_thread(service.repository.count_snapshots),
+        "analyzed": len(decisions),
+        "verified_market": sum(1 for _listing, decision in decisions if decision.market),
+        "deals": sum(action_counts.get(action, 0) for action in ("CONTACT", "INSPECT", "WATCH")),
+        "insufficient": action_counts.get("INSUFFICIENT_DATA", 0),
+        "rejected": action_counts.get("REJECT", 0),
+        "sources": len(source_switches),
+        "sources_enabled": sum(source_switches.values()),
+    }
+
+
+@app.get("/tma/market-watch")
+async def tma_market_watch(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Возвращает подтверждённые рыночные объекты, не выдавая их за сделки."""
+    firebase_principal(authorization, require_admin=False)
+    decisions = await asyncio.to_thread(service.repository.current_decisions, 10_000)
+    candidates = [item for item in decisions if item[1].market is not None]
+    candidates.sort(
+        key=lambda item: item[1].asking_price_aed / item[1].market.low_aed  # type: ignore[union-attr]
+    )
+    return {
+        "items": [
+            {
+                "listing": listing.model_dump(mode="json"),
+                "decision": decision.model_dump(mode="json"),
+            }
+            for listing, decision in candidates[:50]
+        ]
+    }
 
 
 @app.post("/telegram/webhook")
@@ -782,10 +818,7 @@ async def telegram_webhook(
                 ),
             )
             return {"ok": True}
-        if (
-            settings.telegram_allowed_user_ids
-            and user_id not in settings.telegram_allowed_user_ids
-        ):
+        if settings.telegram_allowed_user_ids and user_id not in settings.telegram_allowed_user_ids:
             await bot.send_message(
                 chat_id=chat_id,
                 text=tr("Доступ к боту не настроен.", "Bot access is not configured."),
@@ -800,10 +833,14 @@ async def telegram_webhook(
             keyboard = None
             if settings.tma_url:
                 keyboard = InlineKeyboardMarkup(
-                    [[InlineKeyboardButton(
-                        text=tr("Открыть приложение", "Open application"),
-                        web_app=WebAppInfo(url=settings.tma_url),
-                    )]]
+                    [
+                        [
+                            InlineKeyboardButton(
+                                text=tr("Открыть приложение", "Open application"),
+                                web_app=WebAppInfo(url=settings.tma_url),
+                            )
+                        ]
+                    ]
                 )
             await bot.send_message(
                 chat_id=chat_id,
@@ -857,9 +894,7 @@ async def telegram_webhook(
             for listing, decision in recent_candidates:
                 listing_id = f"{listing.source}:{listing.source_listing_id}"
                 content_hash = decision.content_hash or snapshot_hash(listing)
-                key = verification_key(
-                    listing.source, listing_id, content_hash, EXTRACTOR_VERSION
-                )
+                key = verification_key(listing.source, listing_id, content_hash, EXTRACTOR_VERSION)
                 evidence = await asyncio.to_thread(
                     service.repository.get_verification_evidence, key
                 )
@@ -1062,13 +1097,56 @@ async def telegram_webhook(
                 ),
             )
         else:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=tr(
-                    "Используйте /start для списка команд.",
-                    "Use /start to see the command list.",
-                ),
-            )
+            keyboard = None
+            if settings.tma_url:
+                keyboard = InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                text=tr("Открыть приложение", "Open application"),
+                                web_app=WebAppInfo(url=settings.tma_url),
+                            )
+                        ]
+                    ]
+                )
+            if raw_text and not raw_text.startswith("/") and user_id is not None:
+                parsed = parse_search(raw_text, user_id, language)
+                if parsed.recognized:
+                    search = build_saved_search(raw_text, parsed).model_copy(
+                        update={"enabled": True}
+                    )
+                    await asyncio.to_thread(service.repository.save_search, search)
+                    recognized = "\n".join(f"• {item}" for item in parsed.recognized)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=tr(
+                            f"Подбор создан и уже работает:\n{recognized}\n\n"
+                            "Я сообщу, когда появится подходящий проверенный автомобиль.",
+                            f"Your search is active:\n{recognized}\n\n"
+                            "I will notify you when a matching verified car appears.",
+                        ),
+                        reply_markup=keyboard,
+                    )
+                else:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=tr(
+                            "Напишите, какой автомобиль нужен. Например: Toyota Land Cruiser, "
+                            "бюджет 180000 AED, 2020–2024, пробег до 80000 км, GCC.",
+                            "Describe the car you need. Example: Toyota Land Cruiser, budget "
+                            "180000 AED, 2020–2024, mileage up to 80000 km, GCC.",
+                        ),
+                        reply_markup=keyboard,
+                    )
+            else:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=tr(
+                        "Откройте приложение или напишите требования к автомобилю обычным текстом.",
+                        "Open the application or describe the car you need in plain text.",
+                    ),
+                    reply_markup=keyboard,
+                )
     return {"ok": True}
 
 

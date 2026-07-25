@@ -5,7 +5,13 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.content import audience_poll, market_pulse, price_drop
-from src.domain.models import ListingSnapshot
+from src.domain.models import (
+    CostEstimate,
+    DealDecision,
+    DecisionAction,
+    ListingSnapshot,
+    RiskAssessment,
+)
 from src.storage import LocalRepository
 
 
@@ -30,7 +36,23 @@ def test_market_pulse_and_price_drop_are_repository_backed(tmp_path: Path) -> No
     repository = LocalRepository(tmp_path / "content.db")
     now = datetime.now(UTC)
     repository.save_snapshot(snapshot("90000", now - timedelta(hours=2)))
-    repository.save_snapshot(snapshot("85000", now - timedelta(hours=1)))
+    current = snapshot("85000", now - timedelta(hours=1))
+    _new, _changed, content_hash = repository.save_snapshot(current)
+    repository.save_decision(
+        "fixture:drop-1",
+        content_hash,
+        DealDecision(
+            action=DecisionAction.CONTACT,
+            asking_price_aed=Decimal("85000"),
+            market=None,
+            costs=CostEstimate(),
+            risks=RiskAssessment(),
+            max_purchase_price_aed=Decimal("85000"),
+            expected_profit_aed=Decimal("5000"),
+            roi_percent=Decimal("10"),
+            confidence=Decimal("0.5"),
+        ),
+    )
 
     pulse = market_pulse(repository)
     drops = price_drop(repository)

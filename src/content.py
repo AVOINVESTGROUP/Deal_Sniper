@@ -27,7 +27,9 @@ def market_pulse(repository: Repository, days: int = 7) -> ContentReport:
     period_to = datetime.now(UTC)
     period_from = period_to - timedelta(days=days)
     snapshots = [
-        item for item in repository.latest_snapshots() if item.observed_at >= period_from
+        item
+        for item, _decision in repository.current_decisions(limit=10_000)
+        if item.observed_at >= period_from
     ]
     prices = sorted(item.price_aed for item in snapshots)
     median = prices[len(prices) // 2] if prices else Decimal(0)

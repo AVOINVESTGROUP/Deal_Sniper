@@ -4,14 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Dubai Deal Sniper</title>
-  <link rel="stylesheet" href="/styles.css?v=db0ad16">
+  <link rel="stylesheet" href="/styles.css?v=market-watch-1">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <main>
     <header><div><h1 id="title">Dubai Deal Sniper</h1><p id="subtitle" class="muted"></p></div><span id="connection" class="badge">...</span></header>
     <p id="state" class="muted">Authenticating…</p>
-    <section id="deals-view" class="view"><div id="feed"></div></section>
+    <section id="deals-view" class="view">
+      <div id="overview" class="stats"></div>
+      <div class="hero card"><h2 id="home-title"></h2><p id="home-text" class="muted"></p><div class="actions"><button id="home-search"></button><button id="home-market" class="secondary"></button><button id="refresh-data" class="secondary"></button></div></div>
+      <h2 id="deals-title"></h2><div id="feed"></div>
+    </section>
+    <section id="market-view" class="view" hidden><h2 id="market-title"></h2><p id="market-help" class="muted"></p><div id="market"></div></section>
     <section id="search-view" class="view" hidden>
       <div class="card"><h2 id="search-title"></h2><p id="search-help" class="muted"></p><textarea id="search-query" rows="4"></textarea><button id="create-search"></button><p id="search-result" class="muted"></p></div>
       <div id="searches"></div>
@@ -34,6 +39,6 @@
     <p id="error" class="danger"></p>
   </main>
   <nav id="tabs" hidden></nav>
-  <script type="module" src="/tma.js?v=db0ad16"></script>
+  <script type="module" src="/tma.js?v=market-watch-1"></script>
 </body>
 </html>

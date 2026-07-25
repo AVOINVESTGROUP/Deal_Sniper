@@ -71,6 +71,8 @@ class Repository(Protocol):
 
     def latest_decisions(self, limit: int = 10) -> list[tuple[ListingSnapshot, DealDecision]]: ...
 
+    def current_decisions(self, limit: int = 100) -> list[tuple[ListingSnapshot, DealDecision]]: ...
+
     def count_snapshots(self) -> int: ...
 
     def notification_sent(self, target_id: str, listing_id: str, content_hash: str) -> bool: ...
@@ -105,9 +107,7 @@ class Repository(Protocol):
 
     def record_audit_event(self, event_type: str, payload: dict[str, Any]) -> None: ...
 
-    def get_verification_evidence(
-        self, verification_key: str
-    ) -> VerificationEvidence | None: ...
+    def get_verification_evidence(self, verification_key: str) -> VerificationEvidence | None: ...
 
     def save_verification_evidence(self, evidence: VerificationEvidence) -> None: ...
 
@@ -360,9 +360,7 @@ class LocalRepository:
                     "DEFAULT 'completed'"
                 )
             if "lease_expires_at" not in telegram_columns:
-                connection.execute(
-                    "ALTER TABLE telegram_updates ADD COLUMN lease_expires_at TEXT"
-                )
+                connection.execute("ALTER TABLE telegram_updates ADD COLUMN lease_expires_at TEXT")
             if "payload_json" not in telegram_columns:
                 connection.execute("ALTER TABLE telegram_updates ADD COLUMN payload_json TEXT")
             listing_columns = {
@@ -523,9 +521,7 @@ class LocalRepository:
             ).fetchone()
         return bool(row and row["content_hash"] == content_hash)
 
-    def get_verification_evidence(
-        self, verification_key: str
-    ) -> VerificationEvidence | None:
+    def get_verification_evidence(self, verification_key: str) -> VerificationEvidence | None:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT payload_json FROM verification_evidence WHERE verification_key = ?",
@@ -663,9 +659,7 @@ class LocalRepository:
             ).fetchone()
         return OutboxRecord.model_validate_json(row["payload_json"]) if row else None
 
-    def list_outbox(
-        self, state: OutboxState | None = None, limit: int = 100
-    ) -> list[OutboxRecord]:
+    def list_outbox(self, state: OutboxState | None = None, limit: int = 100) -> list[OutboxRecord]:
         with self._connect() as connection:
             if state is None:
                 rows = connection.execute(
@@ -893,7 +887,7 @@ class LocalRepository:
                 ),
             )
             connection.execute(
-                    """
+                """
                     INSERT INTO decision_current(
                         decision_subject_id, decision_id, listing_id,
                         content_hash, engine_version
@@ -905,14 +899,14 @@ class LocalRepository:
                         engine_version = excluded.engine_version,
                         updated_at = CURRENT_TIMESTAMP
                     """,
-                    (
-                        decision.decision_subject_id or listing_id,
-                        current_decision_id,
-                        listing_id,
-                        content_hash,
-                        decision.engine_version,
-                    ),
-                )
+                (
+                    decision.decision_subject_id or listing_id,
+                    current_decision_id,
+                    listing_id,
+                    content_hash,
+                    decision.engine_version,
+                ),
+            )
 
     def decision_exists(self, listing_id: str, content_hash: str, engine_version: str) -> bool:
         with self._connect() as connection:
@@ -998,6 +992,15 @@ class LocalRepository:
 
     def latest_decisions(self, limit: int = 10) -> list[tuple[ListingSnapshot, DealDecision]]:
         """Возвращает последние рассчитанные карточки."""
+        decisions = [
+            item
+            for item in self.current_decisions(limit=10_000)
+            if item[1].action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        ]
+        return decisions[:limit]
+
+    def current_decisions(self, limit: int = 100) -> list[tuple[ListingSnapshot, DealDecision]]:
+        """Возвращает актуальные решения всех типов для обзора рынка."""
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -1013,8 +1016,6 @@ class LocalRepository:
         decisions: list[tuple[ListingSnapshot, DealDecision]] = []
         for row in rows:
             decision = DealDecision.model_validate_json(row["decision_json"])
-            if decision.action not in {DecisionAction.CONTACT, DecisionAction.INSPECT}:
-                continue
             decisions.append((ListingSnapshot.model_validate_json(row["listing_json"]), decision))
             if len(decisions) >= limit:
                 break
@@ -1104,9 +1105,7 @@ class LocalRepository:
             ).fetchone()
             if row is not None:
                 lease_value = row["lease_expires_at"]
-                lease_active = bool(
-                    lease_value and datetime.fromisoformat(str(lease_value)) > now
-                )
+                lease_active = bool(lease_value and datetime.fromisoformat(str(lease_value)) > now)
                 if row["state"] == ProcessingState.COMPLETED.value or (
                     row["state"] == ProcessingState.PROCESSING.value and lease_active
                 ):

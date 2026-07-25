@@ -18,6 +18,11 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         return None
     service = DealService.from_settings(settings)
     report = await asyncio.to_thread(market_pulse, service.repository)
+    current = await asyncio.to_thread(service.repository.current_decisions, 10_000)
+    watch = [item for item in current if item[1].market is not None]
+    watch.sort(
+        key=lambda item: item[1].asking_price_aed / item[1].market.low_aed  # type: ignore[union-attr]
+    )
     facts_hash = canonical_hash(
         "market-pulse-facts/v1",
         {
@@ -46,6 +51,19 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         template_version=report.template_version,
         format_name="telegram-content",
     )
+    watch_lines = []
+    for listing, decision in watch[:3]:
+        assert decision.market is not None
+        vehicle = " ".join(
+            part for part in (listing.make, listing.model, str(listing.year or "")) if part
+        )
+        relation = (
+            "below the verified market range"
+            if listing.price_aed < decision.market.low_aed
+            else "within or above the verified market range"
+        )
+        watch_lines.append(f"• <b>{vehicle}</b> — verified fixed price; {relation}.")
+    objects = "\n".join(watch_lines) or "No vehicle currently has enough verified comparables."
     text = (
         "<b>UAE Used Car Market Pulse</b>\n"
         f"Period: {report.period_from.date()}–{report.period_to.date()}\n"
@@ -53,7 +71,10 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         f"Median asking price: {report.facts['median_asking_price_aed']} AED\n"
         f"Most represented make: {report.facts['top_make']} "
         f"({report.facts['top_make_count']})\n\n"
-        "Find a car for your budget: /find"
+        "<b>Market Watch</b>\n"
+        f"{objects}\n\n"
+        "These are verified market objects, not investment recommendations. "
+        "Open the bot to create a personal car search."
     )
     delivery_payload: dict[str, object] = {
         "delivery_id": stable_delivery_id,

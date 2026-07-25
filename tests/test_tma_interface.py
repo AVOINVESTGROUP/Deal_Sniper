@@ -10,6 +10,8 @@ def test_tma_exposes_button_driven_user_routes() -> None:
     assert ("/tma/searches", "GET") in routes
     assert ("/tma/searches", "POST") in routes
     assert ("/tma/searches/{search_id}", "POST") in routes
+    assert ("/tma/summary", "GET") in routes
+    assert ("/tma/market-watch", "GET") in routes
 
 
 def test_tma_settings_request_cannot_override_owner() -> None:

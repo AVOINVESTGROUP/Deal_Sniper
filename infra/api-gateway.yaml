@@ -44,6 +44,12 @@ paths:
       - {name: search_id, in: path, required: true, type: string}
     post: {operationId: tmaSetSearchState, responses: {"200": {description: Updated}}}
     options: {operationId: tmaSetSearchStateOptions, responses: {"200": {description: CORS}}}
+  /tma/summary:
+    get: {operationId: tmaSummary, responses: {"200": {description: Summary}}}
+    options: {operationId: tmaSummaryOptions, responses: {"200": {description: CORS}}}
+  /tma/market-watch:
+    get: {operationId: tmaMarketWatch, responses: {"200": {description: Market watch}}}
+    options: {operationId: tmaMarketWatchOptions, responses: {"200": {description: CORS}}}
   /admin/overview:
     get: {operationId: adminOverview, responses: {"200": {description: Overview}}}
     options: {operationId: adminOverviewOptions, responses: {"200": {description: CORS}}}

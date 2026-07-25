@@ -162,17 +162,13 @@ class FirestoreRepository:
             "changed",
         }
 
-    def get_verification_evidence(
-        self, verification_key: str
-    ) -> VerificationEvidence | None:
+    def get_verification_evidence(self, verification_key: str) -> VerificationEvidence | None:
         document = self.client.collection("verification_evidence").document(verification_key).get()
         data = document.to_dict()
         return VerificationEvidence.model_validate(data["payload"]) if data else None
 
     def save_verification_evidence(self, evidence: VerificationEvidence) -> None:
-        self.client.collection("verification_evidence").document(
-            evidence.verification_key
-        ).set(
+        self.client.collection("verification_evidence").document(evidence.verification_key).set(
             {
                 "verification_key": evidence.verification_key,
                 "evidence_revision_id": evidence.evidence_revision_id,
@@ -285,9 +281,7 @@ class FirestoreRepository:
         data = self.client.collection("delivery_outbox").document(delivery_id).get().to_dict()
         return OutboxRecord.model_validate(data["payload"]) if data else None
 
-    def list_outbox(
-        self, state: OutboxState | None = None, limit: int = 100
-    ) -> list[OutboxRecord]:
+    def list_outbox(self, state: OutboxState | None = None, limit: int = 100) -> list[OutboxRecord]:
         query: Any = self.client.collection("delivery_outbox")
         if state is not None:
             query = query.where("state", "==", state.value)
@@ -639,6 +633,15 @@ class FirestoreRepository:
         )
 
     def latest_decisions(self, limit: int = 10) -> list[tuple[ListingSnapshot, DealDecision]]:
+        decisions = [
+            item
+            for item in self.current_decisions(limit=10_000)
+            if item[1].action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+        ]
+        return decisions[:limit]
+
+    def current_decisions(self, limit: int = 100) -> list[tuple[ListingSnapshot, DealDecision]]:
+        """Возвращает актуальные решения всех типов с соответствующими snapshots."""
         current = list(self.client.collection("current_decisions").stream())
         decision_refs = []
         for pointer in current:
@@ -662,8 +665,6 @@ class FirestoreRepository:
             if "listing_id" not in data or "payload" not in data:
                 continue
             decision = DealDecision.model_validate(data["payload"])
-            if decision.action not in {DecisionAction.CONTACT, DecisionAction.INSPECT}:
-                continue
             snapshot_reference = (
                 self.client.collection("listings")
                 .document(data["listing_id"])
@@ -844,11 +845,7 @@ class FirestoreRepository:
             .where("action", "==", "WATCH")
             .stream()
         )
-        return [
-            str(data["listing_id"])
-            for document in documents
-            if (data := document.to_dict())
-        ]
+        return [str(data["listing_id"]) for document in documents if (data := document.to_dict())]
 
     def record_audit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """Записывает append-only audit event с серверным временем."""
