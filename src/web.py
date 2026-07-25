@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -59,6 +60,9 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
 app = FastAPI(title="Dubai Deal Sniper", version="1.1.0")
+_market_cache: list[tuple[Any, Any]] = []
+_market_cache_at = 0.0
+_market_cache_lock = asyncio.Lock()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -225,6 +229,19 @@ def firebase_principal(authorization: str | None, *, require_admin: bool) -> Pri
     if require_admin and not principal.admin:
         raise HTTPException(status_code=403, detail="Требуется роль администратора")
     return principal
+
+
+async def current_market_snapshot() -> list[tuple[Any, Any]]:
+    """Объединяет параллельные TMA-запросы в одно чтение Firestore на 30 секунд."""
+    global _market_cache, _market_cache_at
+    if _market_cache and time.monotonic() - _market_cache_at < 30:
+        return _market_cache
+    async with _market_cache_lock:
+        if _market_cache and time.monotonic() - _market_cache_at < 30:
+            return _market_cache
+        _market_cache = await asyncio.to_thread(service.repository.current_decisions, 10_000)
+        _market_cache_at = time.monotonic()
+        return _market_cache
 
 
 def require_internal_task(secret: str | None, task_name: str | None) -> None:
@@ -568,7 +585,7 @@ async def tma_feed(authorization: str | None = Header(default=None)) -> dict[str
     user_settings = await asyncio.to_thread(
         service.repository.get_user_settings, principal.telegram_user_id
     )
-    decisions = await asyncio.to_thread(service.repository.latest_decisions, 100)
+    decisions = await current_market_snapshot()
     feed = []
     for listing, decision in select_publishable_decisions(decisions, settings, limit=50):
         evaluated = EvaluatedListing(
@@ -720,7 +737,7 @@ async def tma_set_search_state(
 async def tma_summary(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Показывает понятное состояние рынка без раскрытия административных данных."""
     firebase_principal(authorization, require_admin=False)
-    decisions = await asyncio.to_thread(service.repository.current_decisions, 10_000)
+    decisions = await current_market_snapshot()
     action_counts: dict[str, int] = {}
     for _listing, decision in decisions:
         action_counts[decision.action.value] = action_counts.get(decision.action.value, 0) + 1
@@ -743,7 +760,7 @@ async def tma_market_watch(
 ) -> dict[str, Any]:
     """Возвращает подтверждённые рыночные объекты, не выдавая их за сделки."""
     firebase_principal(authorization, require_admin=False)
-    decisions = await asyncio.to_thread(service.repository.current_decisions, 10_000)
+    decisions = await current_market_snapshot()
     candidates = [item for item in decisions if item[1].market is not None]
     candidates.sort(
         key=lambda item: item[1].asking_price_aed / item[1].market.low_aed  # type: ignore[union-attr]
