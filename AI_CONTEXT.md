@@ -71,3 +71,13 @@ terraform -chdir=infra/terraform validate
 ```
 
 `replay --direct` разрешён только при `DELIVERY_ENABLED=false` и нужен для migration catch-up без включения production Cloud Tasks.
+
+## Production cutover 25 июля 2026
+
+Production запущен: четыре source schedules, processing queue и Telegram delivery queue работают; legacy общий schedule оставлен paused, чтобы не дублировать per-source сбор. Telegram webhook направлен через API Gateway и не имеет pending/error. Бот является администратором Free и Pro каналов, команды и TMA menu button настроены.
+
+Firebase Authentication инициализирован. TMA проверяет Telegram `initData`, использует отдельный Firebase signer service account, получает Firebase ID token и owner-scoped данные. Для Telegram owner в custom claims устанавливается `admin=true`; Admin в TMA управляет source switches и показывает состояние проекта. Отказ read-only Cloud Status не ломает управление источниками и возвращается как `UNAVAILABLE` для отдельного компонента.
+
+Production-проход всех четырёх collectors успешен. После обработки актуальный market содержит 1 177 verified evidence, 1 671 permanent invalid и 4 temporary error; current decisions не содержат CONTACT/INSPECT, поэтому система корректно не публикует недостоверные автомобили. Информационный Market Pulse и production status доставлены, старые pending outbox записи периода delivery-disabled помечены superseded.
+
+WhatsApp реализация присутствует и остаётся `WHATSAPP_ENABLED=false`: это единственный внешний credential blocker, требующий Meta access token, phone number ID, утверждённый template и user opt-in.

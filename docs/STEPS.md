@@ -37,9 +37,21 @@
 - PR #2 fast-forward слит в `main`; production API развёрнут на exact digest с delivery=false и подтвердил engine 3.1.0/schema 2 через `/version`.
 - Из-за запрета `allUsers` в организации Admin/TMA направлены через API Gateway с backend OIDC, ограниченным Firebase CORS и сохранением исходного Firebase bearer в `X-Forwarded-Authorization`.
 
-## Следующая обязательная операция
+## 25 июля 2026 — production запущен
 
-Развернуть gateway config v2 и статические Firebase assets, проверить Admin/TMA; затем staged resume collectors → processing → delivery, восстановить Telegram secret/webhook и выполнить smoke/pilot без публикации неподтверждённых кандидатов.
+- API Gateway v2, private Cloud Run API и Firebase Hosting развернуты и прошли smoke-проверку.
+- Firebase Authentication инициализирован; TMA обменивает подписанный Telegram `initData` на Firebase custom token.
+- Владелец получает admin claim и управляет четырьмя источниками прямо в TMA.
+- Коллекторы DubiCars, CarSwitch, Cars24 UAE и OpenSooq UAE успешно выполнены под отдельным service account.
+- Очереди processing и Telegram delivery работают; delivery включена только после полного reconciliation.
+- Telegram webhook, команды, menu button и права бота в Free/Pro каналах проверены.
+- Текущий production market содержит только `INSUFFICIENT_DATA` и `REJECT`; неподтверждённые или ложные сделки не публикуются.
+- WhatsApp adapter остаётся fail-closed до предоставления внешних Meta credentials, template approval и opt-in.
+- Локальный gate: Ruff, mypy и 47 тестов — green.
+
+## Следующая эксплуатационная операция
+
+Наблюдать первый недельный pilot, проверять source health и temporary verification errors в Admin/TMA. WhatsApp включать отдельно только после появления внешних Meta credentials.
 
 ## Ограничения
 
