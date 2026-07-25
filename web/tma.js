@@ -4,6 +4,10 @@ import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebase
 const telegram = window.Telegram.WebApp;
 telegram.ready();
 telegram.expand();
+const language = (telegram.initDataUnsafe?.user?.language_code || navigator.language || "en")
+  .toLowerCase().startsWith("ru") ? "ru" : "en";
+const tr = (ru, en) => language === "ru" ? ru : en;
+document.querySelector("#title").textContent = tr("Проверенные автомобили", "Verified car deals");
 const runtime = await (await fetch("/runtime-config.json")).json();
 const api = runtime.apiBase || "";
 
@@ -48,6 +52,32 @@ async function toggleFavorite(item, token, button) {
   button.textContent = favorite ? "Saved" : "Save";
 }
 
+async function renderAdmin(token) {
+  const data = await authorized("/admin/overview", token);
+  document.querySelector("#admin").hidden = false;
+  document.querySelector("#admin-title").textContent = tr("Управление проектом", "Project control");
+  document.querySelector("#admin-summary").textContent = tr(
+    `Версий: ${data.snapshot_count}; доставка: ${data.delivery_enabled ? "включена" : "выключена"}`,
+    `Snapshots: ${data.snapshot_count}; delivery: ${data.delivery_enabled ? "enabled" : "disabled"}`,
+  );
+  const root = document.querySelector("#admin-sources");
+  root.innerHTML = "";
+  for (const [name, enabled] of Object.entries(data.source_switches)) {
+    const row = document.createElement("p");
+    row.textContent = `${name}: ${enabled ? tr("включён", "enabled") : tr("выключен", "disabled")} `;
+    const button = document.createElement("button");
+    button.textContent = enabled ? tr("Выключить", "Disable") : tr("Включить", "Enable");
+    button.onclick = async () => {
+      await authorized(`/admin/sources/${name}`, token, {
+        method: "POST", body: JSON.stringify({ enabled: !enabled }),
+      });
+      await renderAdmin(token);
+    };
+    row.append(button);
+    root.append(row);
+  }
+}
+
 try {
   const config = await (await fetch("/__/firebase/init.json")).json();
   const auth = getAuth(initializeApp(config));
@@ -61,7 +91,10 @@ try {
   const credential = await signInWithCustomToken(auth, custom.firebase_custom_token);
   const token = await credential.user.getIdToken();
   const data = await authorized("/tma/feed", token);
-  document.querySelector("#state").textContent = `${data.items.length} current opportunities`;
+  document.querySelector("#state").textContent = tr(
+    `Актуальных вариантов: ${data.items.length}`,
+    `${data.items.length} current opportunities`,
+  );
   const feed = document.querySelector("#feed");
   for (const item of data.items) {
     const decision = item.decision;
@@ -71,24 +104,25 @@ try {
     const title = document.createElement("h2");
     title.textContent = listing.title;
     const summary = document.createElement("p");
-    summary.textContent = `${listing.price_aed} AED · ${decision.action} · profit ${decision.expected_profit_aed ?? "—"} AED · ROI ${decision.roi_percent ?? "—"}%`;
+    summary.textContent = `${listing.price_aed} AED · ${decision.action} · ${tr("прибыль", "profit")} ${decision.expected_profit_aed ?? "—"} AED · ROI ${decision.roi_percent ?? "—"}%`;
     const link = document.createElement("a");
     link.href = listing.url;
     link.target = "_blank";
     link.rel = "noopener";
-    link.textContent = "Open listing";
+    link.textContent = tr("Открыть объявление", "Open listing");
     const favorite = document.createElement("button");
-    favorite.textContent = "Save";
+    favorite.textContent = tr("Сохранить", "Save");
     favorite.dataset.favorite = "false";
     favorite.onclick = () => toggleFavorite(item, token, favorite);
     const outcome = document.createElement("button");
-    outcome.textContent = "Record outcome";
+    outcome.textContent = tr("Записать результат", "Record outcome");
     outcome.onclick = () => recordOutcome(item, token);
     card.append(title, summary, link, document.createTextNode(" "), favorite,
       document.createTextNode(" "), outcome);
     feed.append(card);
   }
+  if (data.is_admin) await renderAdmin(token);
 } catch (error) {
-  document.querySelector("#state").textContent = "Unavailable";
+  document.querySelector("#state").textContent = tr("Недоступно", "Unavailable");
   document.querySelector("#error").textContent = error.message;
 }

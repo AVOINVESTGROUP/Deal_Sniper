@@ -9,9 +9,14 @@
 </head>
 <body>
   <main>
-    <h1>Verified car deals</h1>
+    <h1 id="title">Verified car deals</h1>
     <p id="state" class="muted">Authenticating…</p>
     <div id="feed"></div>
+    <section id="admin" hidden>
+      <h2 id="admin-title">Project control</h2>
+      <p id="admin-summary" class="muted"></p>
+      <div id="admin-sources"></div>
+    </section>
     <p id="error" class="danger"></p>
   </main>
   <script type="module" src="/tma.js"></script>

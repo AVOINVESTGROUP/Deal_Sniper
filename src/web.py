@@ -527,10 +527,13 @@ async def tma_auth(request: TmaAuthRequest) -> dict[str, str]:
     try:
         firebase_admin.get_app()
     except ValueError:
-        firebase_admin.initialize_app()
+        signer = os.getenv("FIREBASE_SIGNER_SERVICE_ACCOUNT", "").strip()
+        options = {"serviceAccountId": signer} if signer else None
+        firebase_admin.initialize_app(options=options)
+    is_admin = principal.telegram_user_id in settings.telegram_admin_user_ids
     token = firebase_auth.create_custom_token(
         f"telegram:{principal.telegram_user_id}",
-        {"telegram_user_id": principal.telegram_user_id},
+        {"telegram_user_id": principal.telegram_user_id, "admin": is_admin},
     )
     return {"firebase_custom_token": token.decode("utf-8")}
 
@@ -559,7 +562,7 @@ async def tma_feed(authorization: str | None = Header(default=None)) -> dict[str
                 "decision": decision.model_dump(mode="json"),
             }
         )
-    return {"owner": principal.telegram_user_id, "items": feed}
+    return {"owner": principal.telegram_user_id, "items": feed, "is_admin": principal.admin}
 
 
 @app.get("/tma/outcomes")
