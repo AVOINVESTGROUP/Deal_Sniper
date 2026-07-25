@@ -10,7 +10,8 @@ RUN groupadd --system app && useradd --system --gid app app
 
 COPY requirements.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip \
-    && python -m pip install --no-cache-dir -r requirements.txt
+    && python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip uninstall --yes setuptools wheel
 
 COPY main.py ./
 COPY src ./src

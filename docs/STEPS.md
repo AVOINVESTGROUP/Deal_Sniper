@@ -22,6 +22,8 @@
 - Локальный gate: Ruff — green; mypy — green; 42 теста — green; coverage 46,81%; Terraform validate — green.
 - Документация приведена к фактической реализации; добавлен release/cutover/rollback runbook.
 - Исправлен CI pin Trivy Action на существующий официальный release `v0.36.0`.
+- Runtime image очищен от ненужных build-пакетов `setuptools` и `wheel`, найденных Trivy; прежний RC digest аннулирован.
+- Trivy подтверждает отсутствие исправимых HIGH/CRITICAL; 23 findings Debian 13 без `FixedVersion` сохраняются в отчёте и не блокируют gate через `ignore-unfixed`.
 
 ## Следующая обязательная операция
 
