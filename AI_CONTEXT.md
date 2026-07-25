@@ -83,3 +83,5 @@ Production-проход всех четырёх collectors успешен. По�
 WhatsApp реализация присутствует и остаётся `WHATSAPP_ENABLED=false`: это единственный внешний credential blocker, требующий Meta access token, phone number ID, утверждённый template и user opt-in.
 
 После production-проверки TMA устранён браузерный `Failed to fetch`: точный API Gateway добавлен в `connect-src` Firebase Hosting. Пользовательский путь больше не строится вокруг slash-команд. Основной интерфейс — Telegram menu button и Mini App с вкладками Deals/Search/Saved/Settings; владелец дополнительно видит Admin и управляет source switches кнопками. Backend содержит owner-scoped `/tma/settings` и `/tma/searches`, поэтому пользователь не может читать или менять чужие настройки и подборы.
+
+Документ TMA, runtime-config, JavaScript и CSS отдаются с `Cache-Control: no-store`; ссылки на assets версионированы. Это исключает повтор старого интерфейса из кэша Telegram WebView после развёртывания.
