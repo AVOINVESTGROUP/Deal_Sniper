@@ -21,6 +21,7 @@
 - CI использует Python 3.11, Ruff, mypy, pytest coverage, pip-audit, Terraform, Docker и Trivy.
 - Локальный gate: Ruff — green; mypy — green; 42 теста — green; coverage 46,81%; Terraform validate — green.
 - Документация приведена к фактической реализации; добавлен release/cutover/rollback runbook.
+- Исправлен CI pin Trivy Action на существующий официальный release `v0.36.0`.
 
 ## Следующая обязательная операция
 
