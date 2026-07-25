@@ -9,6 +9,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from httpx import TimeoutException, TransportError
 from pydantic import BaseModel, Field
 from telegram import Bot
@@ -58,6 +59,31 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
 app = FastAPI(title="Dubai Deal Sniper", version="0.6.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://avo-deal-sniper.web.app",
+        "https://avo-deal-sniper.firebaseapp.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+
+@app.middleware("http")
+async def restore_gateway_authorization(request: Any, call_next: Any) -> Any:
+    """Восстанавливает Firebase bearer, сохранённый API Gateway при backend OIDC."""
+    forwarded = request.headers.get("x-forwarded-authorization")
+    if forwarded:
+        headers = [
+            (name, value)
+            for name, value in request.scope.get("headers", [])
+            if name.lower() != b"authorization"
+        ]
+        headers.append((b"authorization", forwarded.encode("latin-1")))
+        request.scope["headers"] = headers
+    return await call_next(request)
 
 
 class ProcessingTask(BaseModel):

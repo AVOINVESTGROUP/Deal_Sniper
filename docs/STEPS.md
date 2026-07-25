@@ -33,10 +33,13 @@
 - Production reconciliation до включения delivery выявил и устранил неверный owner текущего решения: `decision_subject_id` и Firestore `current_decisions` теперь строго listing-specific; `vehicle_id` используется только для cross-source связи/дедупликации.
 - Identity v3 автоматически объединяет только одинаковый валидный VIN; заглушки VIN и неоднозначные fuzzy-совпадения не создают транзитивный auto-merge.
 - Engine 3.1.0 и migration tool 1.2.0 инвалидируют прежний RC; production остаётся остановленным до нового exact-digest rehearsal и повторного catch-up.
+- RC 3.1.0 прошёл повторный staging rehearsal и production migration/catch-up: 1 106 detail pages подтверждены, 1 672 отклонены как permanent invalid, 6 сохранили temporary error; 1 052 listing-specific current decisions, `delivery_outbox=0`.
+- PR #2 fast-forward слит в `main`; production API развёрнут на exact digest с delivery=false и подтвердил engine 3.1.0/schema 2 через `/version`.
+- Из-за запрета `allUsers` в организации Admin/TMA направлены через API Gateway с backend OIDC, ограниченным Firebase CORS и сохранением исходного Firebase bearer в `X-Forwarded-Authorization`.
 
 ## Следующая обязательная операция
 
-Сформировать новый immutable RC commit/image для engine 3.1.0/migration 1.2.0, повторить финальный staging dry-run/catch-up, затем повторно инвалидировать production derived state, выполнить catch-up с delivery disabled, merge в `main`, exact-digest deploy и staged resume.
+Развернуть gateway config v2 и статические Firebase assets, проверить Admin/TMA; затем staged resume collectors → processing → delivery, восстановить Telegram secret/webhook и выполнить smoke/pilot без публикации неподтверждённых кандидатов.
 
 ## Ограничения
 

@@ -3,7 +3,8 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstati
 
 const config = await (await fetch("/__/firebase/init.json")).json();
 const auth = getAuth(initializeApp(config));
-const api = window.DEAL_SNIPER_API || "";
+const runtime = await (await fetch("/runtime-config.json")).json();
+const api = window.DEAL_SNIPER_API || runtime.apiBase || "";
 let token = "";
 const error = document.querySelector("#error");
 

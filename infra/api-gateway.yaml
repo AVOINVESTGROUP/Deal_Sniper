@@ -1,19 +1,58 @@
 swagger: "2.0"
 info:
-  title: Dubai Deal Sniper Telegram Gateway
-  version: "1.0.0"
-schemes:
-  - https
-produces:
-  - application/json
+  title: Dubai Deal Sniper Gateway
+  version: "2.0.0"
+schemes: [https]
+produces: [application/json]
+x-google-backend:
+  address: https://deal-sniper-api-1054850076890.me-central1.run.app
+  jwt_audience: https://deal-sniper-api-1054850076890.me-central1.run.app
+  path_translation: APPEND_PATH_TO_ADDRESS
 paths:
+  /health:
+    get: {operationId: health, responses: {"200": {description: OK}}}
+  /ready:
+    get: {operationId: ready, responses: {"200": {description: Ready}}}
+  /version:
+    get: {operationId: version, responses: {"200": {description: Version}}}
   /telegram/webhook:
-    post:
-      operationId: telegramWebhook
-      x-google-backend:
-        address: https://deal-sniper-api-1054850076890.me-central1.run.app/telegram/webhook
-        jwt_audience: https://deal-sniper-api-1054850076890.me-central1.run.app
-        path_translation: CONSTANT_ADDRESS
-      responses:
-        "200":
-          description: Telegram update accepted
+    post: {operationId: telegramWebhook, responses: {"200": {description: Accepted}}}
+  /tma/auth:
+    post: {operationId: tmaAuth, responses: {"200": {description: Authenticated}}}
+    options: {operationId: tmaAuthOptions, responses: {"200": {description: CORS}}}
+  /tma/feed:
+    get: {operationId: tmaFeed, responses: {"200": {description: Feed}}}
+    options: {operationId: tmaFeedOptions, responses: {"200": {description: CORS}}}
+  /tma/outcomes:
+    get: {operationId: tmaOutcomes, responses: {"200": {description: Outcomes}}}
+    post: {operationId: tmaSaveOutcome, responses: {"200": {description: Saved}}}
+    options: {operationId: tmaOutcomesOptions, responses: {"200": {description: CORS}}}
+  /tma/favorites:
+    get: {operationId: tmaFavorites, responses: {"200": {description: Favorites}}}
+    post: {operationId: tmaSaveFavorite, responses: {"200": {description: Saved}}}
+    options: {operationId: tmaFavoritesOptions, responses: {"200": {description: CORS}}}
+  /admin/overview:
+    get: {operationId: adminOverview, responses: {"200": {description: Overview}}}
+    options: {operationId: adminOverviewOptions, responses: {"200": {description: CORS}}}
+  /admin/sources/{source_name}:
+    parameters:
+      - {name: source_name, in: path, required: true, type: string}
+    post: {operationId: adminSource, responses: {"200": {description: Updated}}}
+    options: {operationId: adminSourceOptions, responses: {"200": {description: CORS}}}
+  /admin/outbox:
+    get:
+      operationId: adminOutbox
+      parameters: [{name: state, in: query, required: false, type: string}]
+      responses: {"200": {description: Outbox}}
+    options: {operationId: adminOutboxOptions, responses: {"200": {description: CORS}}}
+  /admin/outbox/{delivery_id}/reconcile:
+    parameters:
+      - {name: delivery_id, in: path, required: true, type: string}
+    post: {operationId: adminReconcile, responses: {"200": {description: Reconciled}}}
+    options: {operationId: adminReconcileOptions, responses: {"200": {description: CORS}}}
+  /admin/preview:
+    get: {operationId: adminPreview, responses: {"200": {description: Preview}}}
+    options: {operationId: adminPreviewOptions, responses: {"200": {description: CORS}}}
+  /content/market-pulse:
+    get: {operationId: marketPulse, responses: {"200": {description: Pulse}}}
+    options: {operationId: marketPulseOptions, responses: {"200": {description: CORS}}}

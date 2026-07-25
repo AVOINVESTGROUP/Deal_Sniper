@@ -4,9 +4,11 @@ import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebase
 const telegram = window.Telegram.WebApp;
 telegram.ready();
 telegram.expand();
+const runtime = await (await fetch("/runtime-config.json")).json();
+const api = runtime.apiBase || "";
 
 async function authorized(path, token, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(api + path, {
     ...options,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
   });
@@ -49,7 +51,7 @@ async function toggleFavorite(item, token, button) {
 try {
   const config = await (await fetch("/__/firebase/init.json")).json();
   const auth = getAuth(initializeApp(config));
-  const exchange = await fetch("/tma/auth", {
+  const exchange = await fetch(api + "/tma/auth", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ init_data: telegram.initData }),

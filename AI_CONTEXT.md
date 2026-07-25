@@ -55,6 +55,10 @@ Firebase-проект `avo-deal-sniper` активирован, Hosting URL — 
 
 Production reconciliation до resume обнаружил критическое расхождение с контрактом: engine 3.0 записывал current pointer по cross-source vehicle cluster, из-за чего часть listing-specific решений схлопывалась. Engine 3.1.0 всегда использует `decision_subject_id = listing_id` и Firestore `current_decisions`; отдельный `vehicle_id` остаётся только связью и ключом дедупликации публикации. Identity v3 принимает для автоматического merge лишь совпадающий валидный VIN, а VIN-заглушки не нормализуются. Migration tool 1.2.0 инвалидирует как legacy `decision_current`, так и новый `current_decisions`. Любой предыдущий RC digest аннулирован; production delivery всё ещё выключена.
 
+RC commit `082db10e288e` и digest `sha256:ff609767c3a20cf3f6af1043178e3a013779cee22c7aa1915f3855bc8f8ee51f` прошли staging и production migration/replay. Production verified evidence: 1 106 active verified, 1 672 permanent invalid, 6 temporary error; `current_decisions=1052`, `delivery_outbox=0`, публикуемых CONTACT/INSPECT на текущем срезе нет. PR #2 fast-forward включён в `main`; revision `deal-sniper-api-00026-6q5` возвращает engine 3.1.0/schema 2.
+
+Организационная policy запрещает `allUsers` на Cloud Run. Telegram webhook и Web-клиенты используют существующий публичный API Gateway, который вызывает приватный Cloud Run с OIDC. Gateway v2 добавляет Admin/TMA/content endpoints и CORS только для Firebase Hosting; backend восстанавливает пользовательский Firebase bearer из стандартного `X-Forwarded-Authorization`.
+
 ## Важные команды
 
 ```powershell
