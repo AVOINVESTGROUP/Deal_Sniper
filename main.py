@@ -30,6 +30,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--concurrency", type=int, default=10)
+    parser.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Повторить временно упавшие migration replay requests",
+    )
+    parser.add_argument("--max-attempts", type=int, default=3)
     return parser.parse_args()
 
 
@@ -88,6 +94,8 @@ def main() -> None:
                     settings,
                     limit=args.limit,
                     concurrency=args.concurrency,
+                    retry_failed=args.retry_failed,
+                    max_attempts=args.max_attempts,
                 )
             )
         else:

@@ -45,6 +45,8 @@ Production-сервис быстрой монетизации сигналов �
 
 Первый staging replay выявил несовместимость legacy hash с canonical `listing-content/v2`: 100 requests были помечены completed без evidence. Production не затронут. Migration tool повышен до 1.1.0, создаёт canonical snapshot documents и current hashes; direct replay предварительно отклоняет missing/non-current snapshot. Требуется новый RC и полный повтор staging rehearsal.
 
+Полный staging catch-up показал временные verification/network failures. Direct replay поддерживает явный `--retry-failed` с `--max-attempts` (по умолчанию 3); бесконечного автоматического повтора нет.
+
 ## Важные команды
 
 ```powershell

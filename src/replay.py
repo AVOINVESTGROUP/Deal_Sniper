@@ -69,6 +69,8 @@ async def run_migration_replay_direct(
     *,
     limit: int | None = None,
     concurrency: int = 10,
+    retry_failed: bool = False,
+    max_attempts: int = 3,
 ) -> ReplayReport:
     """Обрабатывает catch-up напрямую в maintenance job, не включая production-очереди."""
     if settings.delivery_enabled:
@@ -77,6 +79,8 @@ async def run_migration_replay_direct(
         raise ValueError("limit должен быть положительным")
     if concurrency < 1 or concurrency > 50:
         raise ValueError("concurrency должен находиться в диапазоне 1..50")
+    if max_attempts < 1 or max_attempts > 5:
+        raise ValueError("max_attempts должен находиться в диапазоне 1..5")
 
     client = firestore.Client(
         project=settings.google_cloud_project,
@@ -85,6 +89,12 @@ async def run_migration_replay_direct(
     documents = list(
         client.collection("migration_replay_requests").where("state", "==", "pending").stream()
     )
+    if retry_failed:
+        documents.extend(
+            client.collection("migration_replay_requests")
+            .where("state", "==", "failed")
+            .stream()
+        )
     documents.sort(key=lambda item: item.id)
     if limit is not None:
         documents = documents[:limit]
@@ -108,9 +118,16 @@ async def run_migration_replay_direct(
                 merge=True,
             )
             return "skipped"
+        attempts = int(data.get("attempts") or 0)
+        if attempts >= max_attempts:
+            return "skipped"
         async with semaphore:
             reference.set(
-                {"state": "processing", "updated_at": firestore.SERVER_TIMESTAMP},
+                {
+                    "state": "processing",
+                    "attempts": attempts + 1,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
                 merge=True,
             )
             try:
