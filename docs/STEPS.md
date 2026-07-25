@@ -27,10 +27,13 @@
 - Staging replay обнаружил несовместимость legacy content hash; migration tool 1.1 rekey создаёт canonical v2 snapshots, переводит current pointer и отклоняет missing/non-current replay вместо ложного `completed`.
 - Direct replay получил ограниченный `--retry-failed --max-attempts 3` для временных source/network ошибок без бесконечного повтора.
 - Добавлен обязательный второй catch-up pass `--recalculate-all`, чтобы ранние решения пересчитывались уже на полном verified market.
+- Полный staging catch-up завершён на 2 784 объявлениях: 2 783 успешно, одно объявление изолировано после трёх временных ошибок проверки; `delivery_outbox` остался пустым.
+- Повторный migration dry-run после catch-up выявил и закрыл дефект идемпотентности: migration tool 1.1.1 явно принимает собственные актуальные immutable v1-контракты и по-прежнему блокирует неизвестные схемы.
+- Firebase подключён к `avo-deal-sniper`, статические TMA/Admin assets опубликованы с выключенной production delivery.
 
 ## Следующая обязательная операция
 
-Сформировать immutable RC commit и image digests; восстановить STOP export в staging named database; выполнить migration rehearsal и full catch-up с delivery disabled. Только затем разрешены production migration, merge в `main`, exact-digest deploy и staged resume.
+Сформировать новый immutable RC commit/image после исправления migration 1.1.1 и повторить финальный dry-run. Затем выполнить production export, migration/catch-up с delivery disabled, merge в `main`, exact-digest deploy и staged resume.
 
 ## Ограничения
 

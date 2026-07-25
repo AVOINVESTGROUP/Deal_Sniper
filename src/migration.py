@@ -14,9 +14,29 @@ from src.domain.ids import canonical_hash, migration_id
 from src.domain.models import ListingSnapshot
 from src.storage import snapshot_hash
 
-MIGRATION_TOOL_VERSION = "1.1.0"
+MIGRATION_TOOL_VERSION = "1.1.1"
 TARGET_SCHEMA_VERSION = "2"
-KNOWN_SCHEMA_VERSIONS = {None, "1", "2", "listing-current/v2", "deal-decision/v2"}
+KNOWN_SCHEMA_VERSIONS = {
+    None,
+    "1",
+    "2",
+    "listing-current/v2",
+    "deal-decision/v2",
+    # Актуальные неизменяемые контракты производных и пользовательских данных.
+    # Они намеренно имеют собственную версию и не должны блокировать повторный
+    # dry-run уже выполненной миграции.
+    "verification-evidence/v1",
+    "saved-search/v1",
+    "outcome/v1",
+    "publication-event/v1",
+    "audit-event/v1",
+    "migration-replay-request/v1",
+}
+
+
+def is_known_schema_version(schema: object) -> bool:
+    """Возвращает True только для явно поддерживаемого контракта схемы."""
+    return schema in KNOWN_SCHEMA_VERSIONS or str(schema).endswith("/v2")
 
 
 @dataclass(slots=True)
@@ -161,11 +181,11 @@ class FirestoreMigrator:
             for document in self.client.collection(collection).stream():
                 data = document.to_dict() or {}
                 schema = data.get("schema_version")
-                if schema not in KNOWN_SCHEMA_VERSIONS and not str(schema).endswith("/v2"):
+                if not is_known_schema_version(schema):
                     report.unknown_schema.append(f"{document.reference.path}={schema}")
         for document in self.client.collection_group("snapshots").stream():
             schema = (document.to_dict() or {}).get("schema_version")
-            if schema not in KNOWN_SCHEMA_VERSIONS and not str(schema).endswith("/v2"):
+            if not is_known_schema_version(schema):
                 report.unknown_schema.append(f"{document.reference.path}={schema}")
 
     def _upgrade_top_level_documents(self, report: MigrationReport) -> None:

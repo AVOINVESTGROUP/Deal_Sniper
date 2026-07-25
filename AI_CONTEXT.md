@@ -49,6 +49,10 @@ Production-сервис быстрой монетизации сигналов �
 
 Migration catch-up выполняется в два прохода: первый создаёт evidence/normalized market, второй `--recalculate-all --retry-failed` пересчитывает все current decisions на полном verified market. Оба прохода требуют delivery=false.
 
+Staging rehearsal на `deal-sniper-stage-rc2` завершил 2 783 из 2 784 replay requests; один источник остался в fail-closed карантине после трёх `TemporaryVerificationError`, доставка не создавалась. Повторный dry-run после пересчёта обнаружил, что migration 1.1.0 не признавал собственный `verification-evidence/v1`. В 1.1.1 проверка схем явно разрешает актуальные immutable v1-контракты и продолжает отклонять неизвестные v1. После этой правки требуется новый exact digest и финальный dry-run перед production.
+
+Firebase-проект `avo-deal-sniper` активирован, Hosting URL — `https://avo-deal-sniper.web.app`; production API rewrite остаётся fail-closed до cutover.
+
 ## Важные команды
 
 ```powershell
