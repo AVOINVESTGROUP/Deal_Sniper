@@ -38,7 +38,7 @@ docker build -t deal-sniper:rc .
 1. Подтвердить paused schedulers/queues и `DELIVERY_ENABLED=false`.
 2. Создать новый защищённый Firestore export.
 3. Запустить тот же migration digest: dry-run и apply.
-4. Выполнить `python main.py replay --direct --concurrency 10` в maintenance Job; временные ошибки повторить `--retry-failed --max-attempts 3`.
+4. Выполнить `python main.py replay --direct --concurrency 10` в maintenance Job; временные ошибки повторить `--retry-failed --max-attempts 3`; после наполнения verified market выполнить второй проход `--recalculate-all --retry-failed`.
 5. Сверить migration report, failed/rejected replay и derived-state counts. Delivery остаётся выключенной.
 
 ## 5. Cutover

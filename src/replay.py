@@ -70,6 +70,7 @@ async def run_migration_replay_direct(
     limit: int | None = None,
     concurrency: int = 10,
     retry_failed: bool = False,
+    recalculate_all: bool = False,
     max_attempts: int = 3,
 ) -> ReplayReport:
     """Обрабатывает catch-up напрямую в maintenance job, не включая production-очереди."""
@@ -93,6 +94,12 @@ async def run_migration_replay_direct(
         documents.extend(
             client.collection("migration_replay_requests")
             .where("state", "==", "failed")
+            .stream()
+        )
+    if recalculate_all:
+        documents.extend(
+            client.collection("migration_replay_requests")
+            .where("state", "==", "completed")
             .stream()
         )
     documents.sort(key=lambda item: item.id)

@@ -35,6 +35,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Повторить временно упавшие migration replay requests",
     )
+    parser.add_argument(
+        "--recalculate-all",
+        action="store_true",
+        help="Повторно рассчитать completed requests после наполнения verified market",
+    )
     parser.add_argument("--max-attempts", type=int, default=3)
     return parser.parse_args()
 
@@ -95,6 +100,7 @@ def main() -> None:
                     limit=args.limit,
                     concurrency=args.concurrency,
                     retry_failed=args.retry_failed,
+                    recalculate_all=args.recalculate_all,
                     max_attempts=args.max_attempts,
                 )
             )
