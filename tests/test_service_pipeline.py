@@ -76,6 +76,11 @@ async def test_pipeline_is_versioned_and_does_not_reprocess_unchanged_data(
     assert first.new == 7
     assert len(first.decisions) == 7
     assert any(item.decision.action is DecisionAction.CONTACT for item in first.decisions)
+    assert all(
+        item.decision.decision_subject_id
+        == f"{item.listing.source}:{item.listing.source_listing_id}"
+        for item in first.decisions
+    )
     assert second.new == 0
     assert second.changed == 0
     assert second.decisions == []

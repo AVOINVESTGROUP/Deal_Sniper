@@ -30,10 +30,13 @@
 - Полный staging catch-up завершён на 2 784 объявлениях: 2 783 успешно, одно объявление изолировано после трёх временных ошибок проверки; `delivery_outbox` остался пустым.
 - Повторный migration dry-run после catch-up выявил и закрыл дефект идемпотентности: migration tool 1.1.1 явно принимает собственные актуальные immutable v1-контракты и по-прежнему блокирует неизвестные схемы.
 - Firebase подключён к `avo-deal-sniper`, статические TMA/Admin assets опубликованы с выключенной production delivery.
+- Production reconciliation до включения delivery выявил и устранил неверный owner текущего решения: `decision_subject_id` и Firestore `current_decisions` теперь строго listing-specific; `vehicle_id` используется только для cross-source связи/дедупликации.
+- Identity v3 автоматически объединяет только одинаковый валидный VIN; заглушки VIN и неоднозначные fuzzy-совпадения не создают транзитивный auto-merge.
+- Engine 3.1.0 и migration tool 1.2.0 инвалидируют прежний RC; production остаётся остановленным до нового exact-digest rehearsal и повторного catch-up.
 
 ## Следующая обязательная операция
 
-Сформировать новый immutable RC commit/image после исправления migration 1.1.1 и повторить финальный dry-run. Затем выполнить production export, migration/catch-up с delivery disabled, merge в `main`, exact-digest deploy и staged resume.
+Сформировать новый immutable RC commit/image для engine 3.1.0/migration 1.2.0, повторить финальный staging dry-run/catch-up, затем повторно инвалидировать production derived state, выполнить catch-up с delivery disabled, merge в `main`, exact-digest deploy и staged resume.
 
 ## Ограничения
 

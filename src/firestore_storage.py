@@ -452,7 +452,7 @@ class FirestoreRepository:
             "outbox": "delivery_outbox",
             "audit_events": "audit_events",
             "quarantine": "verification_evidence",
-            "current_decisions": "decision_current",
+            "current_decisions": "current_decisions",
             "outcomes": "outcomes",
         }
         counts = {
@@ -473,9 +473,9 @@ class FirestoreRepository:
         immutable_id = decision.decision_id or _stable_id(
             listing_id, content_hash, decision.engine_version
         )
-        subject_id = decision.decision_subject_id or listing_id
+        subject_id = listing_id
         decision_ref = self.client.collection("decisions").document(immutable_id)
-        current_ref = self.client.collection("decision_current").document(subject_id)
+        current_ref = self.client.collection("current_decisions").document(subject_id)
         processing_ref = self.client.collection("decision_processing_keys").document(
             _stable_id(listing_id, content_hash, decision.engine_version)
         )
@@ -639,7 +639,7 @@ class FirestoreRepository:
         )
 
     def latest_decisions(self, limit: int = 10) -> list[tuple[ListingSnapshot, DealDecision]]:
-        current = list(self.client.collection("decision_current").stream())
+        current = list(self.client.collection("current_decisions").stream())
         decision_refs = []
         for pointer in current:
             data = pointer.to_dict() or {}

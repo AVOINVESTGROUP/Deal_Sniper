@@ -407,7 +407,8 @@ class DealService:
         decision = decision.model_copy(
             update={
                 "decision_id": stable_decision_id,
-                "decision_subject_id": target.vehicle_id or listing_id,
+                "decision_subject_id": listing_id,
+                "vehicle_id": target.vehicle_id,
                 "content_hash": content_hash,
                 "financial_config_version": self.settings.financial_config_version,
                 "verification_version": evidence.evidence_revision_id,

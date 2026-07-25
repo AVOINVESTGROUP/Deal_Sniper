@@ -30,6 +30,20 @@ def canonical_text(value: str | None) -> str | None:
     return normalized or None
 
 
+def valid_vin(value: str | None) -> str | None:
+    """Возвращает канонический VIN либо None для заглушки/невалидного значения."""
+    if value is None:
+        return None
+    normalized = value.strip().upper()
+    if len(normalized) != 17 or not normalized.isalnum():
+        return None
+    if any(character in "IOQ" for character in normalized):
+        return None
+    if len(set(normalized)) < 5 or normalized in {"0" * 17, "1" * 17, "X" * 17}:
+        return None
+    return normalized
+
+
 def normalize_listing(listing: ListingSnapshot) -> NormalizedVehicle | None:
     """Возвращает канонический автомобиль только при наличии обязательных признаков."""
     if listing.price_aed < MIN_VALID_LISTING_PRICE_AED:
@@ -44,7 +58,7 @@ def normalize_listing(listing: ListingSnapshot) -> NormalizedVehicle | None:
     generation = canonical_text(listing.generation)
     trim = canonical_text(listing.trim)
     specification = canonical_text(listing.specification)
-    vin = canonical_text(listing.vin)
+    vin = valid_vin(listing.vin)
     mileage_bucket = (listing.mileage_km // 10_000) * 10_000
     comparison_parts = [make, model, str(listing.year)]
     if generation:
@@ -73,7 +87,11 @@ def normalize_listing(listing: ListingSnapshot) -> NormalizedVehicle | None:
 def resolve_vehicle_identities(
     vehicles: list[NormalizedVehicle],
 ) -> tuple[list[VehicleIdentity], dict[str, str]]:
-    """Объединяет только сильные межсайтовые совпадения и объясняет использованные признаки."""
+    """Автоматически объединяет только объявления с одинаковым валидным VIN.
+
+    Без VIN похожие объявления остаются отдельными identity: неясное fuzzy-совпадение
+    нельзя превращать в транзитивный production merge без ручного подтверждения.
+    """
     groups: list[list[NormalizedVehicle]] = []
     assigned: set[str] = set()
     by_vin: dict[str, list[NormalizedVehicle]] = defaultdict(list)
@@ -86,43 +104,29 @@ def resolve_vehicle_identities(
         assigned.update(item.listing_id for item in vin_group)
 
     for vehicle in vehicles:
-        if vehicle.listing_id in assigned:
-            continue
-        matching_group: list[NormalizedVehicle] | None = None
-        for group in groups:
-            if any(_strong_attribute_match(vehicle, candidate) for candidate in group):
-                matching_group = group
-                break
-        if matching_group is None:
-            matching_group = [vehicle]
-            groups.append(matching_group)
-        else:
-            matching_group.append(vehicle)
-        assigned.add(vehicle.listing_id)
+        if vehicle.listing_id not in assigned:
+            groups.append([vehicle])
+            assigned.add(vehicle.listing_id)
 
     identities: list[VehicleIdentity] = []
     listing_to_vehicle: dict[str, str] = {}
     for group in groups:
         listing_ids = sorted(item.listing_id for item in group)
         has_shared_vin = bool(group[0].vin) and all(item.vin == group[0].vin for item in group)
-        method = "vin" if has_shared_vin else "strong_attributes" if len(group) > 1 else "single"
-        confidence = (
-            Decimal("1") if has_shared_vin else Decimal("0.9") if len(group) > 1 else Decimal("0.5")
-        )
+        method = "vin" if has_shared_vin else "single"
+        confidence = Decimal("1") if has_shared_vin else Decimal("0.5")
         vehicle_id = canonical_hash(
-            "vehicle-identity/v2",
+            "vehicle-identity/v3",
             {
                 "vin": group[0].vin if has_shared_vin else None,
-                "listing_ids": listing_ids,
+                "listing_id": None if has_shared_vin else listing_ids[0],
                 "method": method,
             },
         )
         reasons = (
             ["Совпадает VIN"]
             if has_shared_vin
-            else ["Совпадают марка, модель, год, пробег, цена и доступные спецификации"]
-            if len(group) > 1
-            else ["Межсайтовое совпадение не найдено"]
+            else ["Без валидного VIN автоматическое межсайтовое объединение запрещено"]
         )
         identity = VehicleIdentity(
             vehicle_id=vehicle_id,
@@ -145,22 +149,3 @@ def resolve_vehicle_identities(
             listing_to_vehicle[listing_id] = vehicle_id
     return identities, listing_to_vehicle
 
-
-def _strong_attribute_match(left: NormalizedVehicle, right: NormalizedVehicle) -> bool:
-    if left.source == right.source:
-        return False
-    if (left.make, left.model, left.year) != (right.make, right.model, right.year):
-        return False
-    if abs(left.mileage_km - right.mileage_km) > 250:
-        return False
-    if _relative_price_gap(left.asking_price_aed, right.asking_price_aed) > Decimal("0.03"):
-        return False
-    if left.trim and right.trim and left.trim != right.trim:
-        return False
-    if left.specification and right.specification and left.specification != right.specification:
-        return False
-    return True
-
-
-def _relative_price_gap(left: Decimal, right: Decimal) -> Decimal:
-    return abs(left - right) / max(left, right)

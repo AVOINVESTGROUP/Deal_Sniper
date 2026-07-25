@@ -161,7 +161,7 @@ class VehicleIdentity(BaseModel):
     confidence: Decimal = Field(ge=0, le=1)
     comparison_key: str
     reasons: list[str] = Field(default_factory=list)
-    identity_version: str = "vehicle-identity/v2"
+    identity_version: str = "vehicle-identity/v3"
     cluster_status: ClusterStatus = ClusterStatus.CONFIRMED
     evidence: list[dict[str, str]] = Field(default_factory=list)
     merge_events: list[dict[str, str]] = Field(default_factory=list)
@@ -266,6 +266,7 @@ class DealDecision(BaseModel):
     engine_version: str = "3.0.0"
     decision_id: str | None = None
     decision_subject_id: str | None = None
+    vehicle_id: str | None = None
     content_hash: str | None = None
     financial_config_version: str = "provisional-2026-07-v1"
     verification_version: str | None = None

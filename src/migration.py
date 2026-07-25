@@ -14,7 +14,7 @@ from src.domain.ids import canonical_hash, migration_id
 from src.domain.models import ListingSnapshot
 from src.storage import snapshot_hash
 
-MIGRATION_TOOL_VERSION = "1.1.1"
+MIGRATION_TOOL_VERSION = "1.2.0"
 TARGET_SCHEMA_VERSION = "2"
 KNOWN_SCHEMA_VERSIONS = {
     None,
@@ -69,6 +69,7 @@ class FirestoreMigrator:
         "raw_snapshots",
         "listing_current",
         "decision_current",
+        "current_decisions",
         "verification_evidence",
         "delivery_outbox",
         "saved_searches",
@@ -333,6 +334,7 @@ class FirestoreMigrator:
     ) -> None:
         targets = {
             "decision_current": {"migration_invalidated": True, "active": False},
+            "current_decisions": {"migration_invalidated": True, "active": False},
             "normalized_vehicles": {"rebuild_required": True},
             "vehicle_identities": {"rebuild_required": True},
         }

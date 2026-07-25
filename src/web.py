@@ -954,7 +954,7 @@ async def process_listing_task(
     if evaluated is None or not is_publishable(evaluated.decision, settings):
         return {"ok": True}
     current_decision_id = evaluated.decision.decision_id or task.listing_id
-    vehicle_id = evaluated.decision.decision_subject_id or task.listing_id
+    vehicle_id = evaluated.decision.vehicle_id or task.listing_id
     event_id = publication_event_id(
         decision_id_value=current_decision_id,
         vehicle_id=vehicle_id,

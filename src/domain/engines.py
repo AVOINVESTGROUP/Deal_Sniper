@@ -21,7 +21,7 @@ from src.domain.models import (
 MONEY_STEP = Decimal("0.01")
 INTERMEDIATE_STEP = Decimal("0.0001")
 PERCENT_STEP = Decimal("0.1")
-DECISION_ENGINE_VERSION = "3.0.0"
+DECISION_ENGINE_VERSION = "3.1.0"
 FINANCIAL_CONFIG_VERSION = "provisional-2026-07-v1"
 ADJUSTMENT_VERSION = "comparable-adjustments/v2"
 

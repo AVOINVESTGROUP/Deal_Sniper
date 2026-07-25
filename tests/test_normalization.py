@@ -16,6 +16,7 @@ def snapshot(
     mileage: int = 40_000,
     price: str = "80000",
     trim: str = "SE",
+    vin: str | None = None,
 ) -> ListingSnapshot:
     return ListingSnapshot(
         source=source,
@@ -31,12 +32,16 @@ def snapshot(
         mileage_km=mileage,
         specification="GCC",
         seller_type=SellerType.DEALER,
+        vin=vin,
     )
 
 
 def test_cross_source_identity_and_comparable_deduplication() -> None:
-    target = normalize_listing(snapshot("cars24", "1"))
-    duplicate = normalize_listing(snapshot("carswitch", "2", mileage=40_100, price="81000"))
+    vin = "JTDKN3DU0A0123456"
+    target = normalize_listing(snapshot("cars24", "1", vin=vin))
+    duplicate = normalize_listing(
+        snapshot("carswitch", "2", mileage=40_100, price="81000", vin=vin)
+    )
     peer = normalize_listing(snapshot("dubicars", "3", mileage=55_000, price="85000"))
     assert target is not None
     assert duplicate is not None
@@ -50,6 +55,15 @@ def test_cross_source_identity_and_comparable_deduplication() -> None:
     assert [item.listing_id for item in comparables] == [peer.listing_id]
     assert comparables[0].adjusted_price_aed is not None
     assert comparables[0].adjustments
+
+
+def test_invalid_vin_does_not_trigger_cross_source_auto_merge() -> None:
+    first = normalize_listing(snapshot("cars24", "1", vin="N/A"))
+    second = normalize_listing(snapshot("carswitch", "2", vin="00000000000000000"))
+    assert first is not None and second is not None
+    identities, mapping = resolve_vehicle_identities([first, second])
+    assert len(identities) == 2
+    assert mapping[first.listing_id] != mapping[second.listing_id]
 
 
 def test_comparable_selection_rejects_different_year_and_trim() -> None:

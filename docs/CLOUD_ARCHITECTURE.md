@@ -34,7 +34,7 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 
 ## Данные
 
-Ключевые коллекции: `listings`, вложенные `snapshots`, `listing_current`, `verification_evidence`, `vehicle_identities`, `normalized_vehicles`, `decisions`, `decision_current`, `delivery_outbox`, `telegram_updates`, `user_settings`, `saved_searches`, `user_actions`, `outcomes`, `publication_events`, `migration_ledger`, `migration_replay_requests`.
+Ключевые коллекции: `listings`, вложенные `snapshots`, `listing_current`, `verification_evidence`, `vehicle_identities`, `normalized_vehicles`, `decisions`, `current_decisions`, `delivery_outbox`, `telegram_updates`, `user_settings`, `saved_searches`, `user_actions`, `outcomes`, `publication_events`, `migration_ledger`, `migration_replay_requests`.
 
 Immutable сущности создаются по каноническому ID; operational freshness и leases обновляются отдельно. Старый current pointer не удаляет историю.
 
