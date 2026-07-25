@@ -128,7 +128,7 @@ class Settings:
             tma_url=os.getenv("TMA_URL", "").strip(),
             free_teaser_image_url=os.getenv("FREE_TEASER_IMAGE_URL", "").strip(),
             schema_version=os.getenv("SCHEMA_VERSION", "2").strip(),
-            migration_tool_version=os.getenv("MIGRATION_TOOL_VERSION", "1.0.0").strip(),
+            migration_tool_version=os.getenv("MIGRATION_TOOL_VERSION", "1.1.0").strip(),
             git_commit=os.getenv("GIT_COMMIT", "unknown").strip(),
             runtime_image_digest=os.getenv("RUNTIME_IMAGE_DIGEST", "unknown").strip(),
             collector_job_prefix=os.getenv("COLLECTOR_JOB_PREFIX", "deal-sniper-collector").strip(),

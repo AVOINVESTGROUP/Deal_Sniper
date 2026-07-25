@@ -11,8 +11,10 @@ from datetime import UTC, datetime
 from google.cloud import firestore
 
 from src.domain.ids import canonical_hash, migration_id
+from src.domain.models import ListingSnapshot
+from src.storage import snapshot_hash
 
-MIGRATION_TOOL_VERSION = "1.0.0"
+MIGRATION_TOOL_VERSION = "1.1.0"
 TARGET_SCHEMA_VERSION = "2"
 KNOWN_SCHEMA_VERSIONS = {None, "1", "2", "listing-current/v2", "deal-decision/v2"}
 
@@ -61,7 +63,7 @@ class FirestoreMigrator:
     def run(self, *, dry_run: bool, cutover_at: str, export_watermark: str) -> MigrationReport:
         watermark = datetime.fromisoformat(export_watermark.replace("Z", "+00:00"))
         stable_id = migration_id(
-            f"legacy-v1@{cutover_at}",
+            f"legacy-v1@{cutover_at}:tool-{MIGRATION_TOOL_VERSION}",
             TARGET_SCHEMA_VERSION,
             watermark,
         )
@@ -92,6 +94,7 @@ class FirestoreMigrator:
             )
         report.checkpoints.append("schema-validation-complete")
         if not dry_run:
+            self._rekey_snapshots_and_current(report)
             self._upgrade_top_level_documents(report)
             self._upgrade_nested_snapshots(report)
             self._close_legacy_notifications(report)
@@ -101,6 +104,7 @@ class FirestoreMigrator:
             report.checkpoints.extend(
                 [
                     "documents-upgraded",
+                    "canonical-snapshots-rekeyed",
                     "nested-snapshots-upgraded",
                     "legacy-notifications-closed",
                     "derived-state-invalidated",
@@ -171,7 +175,8 @@ class FirestoreMigrator:
             updated = 0
             for document in self.client.collection(collection).stream():
                 data = document.to_dict() or {}
-                if data.get("schema_version") in {"2", f"{collection}/v2"}:
+                schema = data.get("schema_version")
+                if schema == "2" or str(schema).endswith("/v2"):
                     continue
                 batch.set(
                     document.reference,
@@ -192,13 +197,97 @@ class FirestoreMigrator:
                 batch.commit()
             report.updated_counts[collection] = updated
 
+    def _rekey_snapshots_and_current(self, report: MigrationReport) -> None:
+        """Создаёт canonical v2 snapshot IDs и переводит current на точную новую версию."""
+        batch = self.client.batch()
+        operations = 0
+        rekeyed = 0
+
+        def flush_if_needed() -> None:
+            nonlocal batch, operations
+            if operations >= 390:
+                batch.commit()
+                batch = self.client.batch()
+                operations = 0
+
+        for document in self.client.collection_group("snapshots").stream():
+            data = document.to_dict() or {}
+            payload = data.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            canonical_content_hash = snapshot_hash(ListingSnapshot.model_validate(payload))
+            if canonical_content_hash == document.id:
+                continue
+            canonical_reference = document.reference.parent.document(canonical_content_hash)
+            batch.set(
+                canonical_reference,
+                {
+                    **data,
+                    "content_hash": canonical_content_hash,
+                    "schema_version": "listing-snapshot/v2",
+                    "migrated_from_content_hash": document.id,
+                    "migrated_at": firestore.SERVER_TIMESTAMP,
+                    "migration_tool_version": MIGRATION_TOOL_VERSION,
+                },
+                merge=False,
+            )
+            operations += 1
+            rekeyed += 1
+            flush_if_needed()
+
+        for listing in self.client.collection("listings").stream():
+            data = listing.to_dict() or {}
+            payload = data.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            canonical_content_hash = snapshot_hash(ListingSnapshot.model_validate(payload))
+            previous_hash = str(data.get("content_hash") or "")
+            if canonical_content_hash != previous_hash:
+                previous_reference = listing.reference.collection("snapshots").document(
+                    previous_hash
+                )
+                if not previous_reference.get().exists:
+                    canonical_reference = listing.reference.collection("snapshots").document(
+                        canonical_content_hash
+                    )
+                    batch.set(
+                        canonical_reference,
+                        {
+                            "payload": payload,
+                            "content_hash": canonical_content_hash,
+                            "schema_version": "listing-snapshot/v2",
+                            "migrated_from_content_hash": previous_hash,
+                            "migrated_at": firestore.SERVER_TIMESTAMP,
+                            "migration_tool_version": MIGRATION_TOOL_VERSION,
+                        },
+                        merge=False,
+                    )
+                    operations += 1
+                    flush_if_needed()
+            batch.set(
+                listing.reference,
+                {
+                    "content_hash": canonical_content_hash,
+                    "lifecycle": data.get("lifecycle") or "active",
+                    "schema_version": "listing-current/v2",
+                    "migration_tool_version": MIGRATION_TOOL_VERSION,
+                },
+                merge=True,
+            )
+            operations += 1
+            flush_if_needed()
+        if operations:
+            batch.commit()
+        report.updated_counts["canonical_snapshot_rekeys"] = rekeyed
+
     def _upgrade_nested_snapshots(self, report: MigrationReport) -> None:
         batch = self.client.batch()
         operations = 0
         updated = 0
         for document in self.client.collection_group("snapshots").stream():
             data = document.to_dict() or {}
-            if data.get("schema_version") in {"2", "listing-snapshot/v2"}:
+            schema = data.get("schema_version")
+            if schema == "2" or str(schema).endswith("/v2"):
                 continue
             batch.set(
                 document.reference,

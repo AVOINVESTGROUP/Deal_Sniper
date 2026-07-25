@@ -114,10 +114,23 @@ async def run_migration_replay_direct(
                 merge=True,
             )
             try:
-                await service.process_listing(
-                    str(data["listing_id"]),
-                    str(data["content_hash"]),
-                )
+                listing_id = str(data["listing_id"])
+                content_hash = str(data["content_hash"])
+                snapshot = service.repository.get_snapshot(listing_id, content_hash)
+                if (
+                    snapshot is None
+                    or not service.repository.is_current_snapshot(listing_id, content_hash)
+                ):
+                    reference.set(
+                        {
+                            "state": "rejected",
+                            "error_type": "SnapshotNotCurrentOrMissing",
+                            "updated_at": firestore.SERVER_TIMESTAMP,
+                        },
+                        merge=True,
+                    )
+                    return "skipped"
+                await service.process_listing(listing_id, content_hash)
             except Exception as error:
                 reference.set(
                     {
