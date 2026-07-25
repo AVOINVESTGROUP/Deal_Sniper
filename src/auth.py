@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl
 
+from google.auth.exceptions import GoogleAuthError
 from google.auth.transport.requests import Request
 from google.oauth2 import id_token
 
@@ -32,9 +33,12 @@ def verify_firebase_bearer(
     token = authorization.removeprefix("Bearer ").strip()
     if not token or not project_id:
         raise PermissionError("Firebase authentication не настроена")
-    claims = id_token.verify_firebase_token(  # type: ignore[no-untyped-call]
-        token, Request(), audience=project_id
-    )
+    try:
+        claims = id_token.verify_firebase_token(  # type: ignore[no-untyped-call]
+            token, Request(), audience=project_id
+        )
+    except (GoogleAuthError, ValueError) as error:
+        raise PermissionError("Некорректный Firebase ID token") from error
     if not claims or not claims.get("sub"):
         raise PermissionError("Некорректный Firebase ID token")
     email = str(claims.get("email", "")).casefold() or None

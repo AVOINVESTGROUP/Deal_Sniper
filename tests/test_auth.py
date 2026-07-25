@@ -7,8 +7,9 @@ import time
 from urllib.parse import urlencode
 
 import pytest
+from google.auth import exceptions
 
-from src.auth import verify_telegram_init_data
+from src.auth import verify_firebase_bearer, verify_telegram_init_data
 
 
 def signed_init_data(bot_token: str, user_id: int) -> str:
@@ -35,3 +36,12 @@ def test_tampered_telegram_init_data_is_rejected() -> None:
             signed_init_data("test-token", 42).replace("query-1", "query-2"),
             "test-token",
         )
+
+
+def test_malformed_firebase_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_token(*args: object, **kwargs: object) -> None:
+        raise exceptions.MalformedError("invalid token")
+
+    monkeypatch.setattr("src.auth.id_token.verify_firebase_token", reject_token)
+    with pytest.raises(PermissionError, match="Некорректный Firebase ID token"):
+        verify_firebase_bearer("Bearer invalid", "project", frozenset())

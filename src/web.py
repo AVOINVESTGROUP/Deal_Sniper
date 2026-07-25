@@ -75,14 +75,14 @@ app.add_middleware(
 async def restore_gateway_authorization(request: Any, call_next: Any) -> Any:
     """Восстанавливает Firebase bearer, сохранённый API Gateway при backend OIDC."""
     forwarded = request.headers.get("x-forwarded-authorization")
+    headers = [
+        (name, value)
+        for name, value in request.scope.get("headers", [])
+        if name.lower() != b"authorization"
+    ]
     if forwarded:
-        headers = [
-            (name, value)
-            for name, value in request.scope.get("headers", [])
-            if name.lower() != b"authorization"
-        ]
         headers.append((b"authorization", forwarded.encode("latin-1")))
-        request.scope["headers"] = headers
+    request.scope["headers"] = headers
     return await call_next(request)
 
 
