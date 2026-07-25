@@ -16,6 +16,7 @@ Execution gates:
 | `0.11R` | стратегия веток/PR и GitHub username независимого reviewer |
 | `0.11A` | SLA reconciliation для delivery `unknown` |
 | `0.11B` | канонические финансовые коэффициенты при уже утверждённой формуле |
+| `0.11MI` | scope мигратора, schema transition и migration test matrix до начала реализации |
 | `0.11RC` | freeze точного commit и runtime/migration image digests после staging rehearsal |
 | `0.11M` | окно миграции, retention, место export и допустимая точка необратимости |
 | `0.11D` | production cutover и rollback decision |
@@ -78,7 +79,7 @@ Draft до завершения repository gate и независимой про
 | WhatsApp | отсутствует | официальный Business API для opt-in получателей; Channel — только при появлении официального API |
 | Проверки | unit, Ruff, mypy, CI и production smoke tests | добавить integration/E2E для новых каналов и панели |
 
-Рабочая ветка является аварийно развёрнутым кандидатом baseline, но не утверждённым источником production-кода. После утверждения плана последовательно выполняются отдельно разрешённый `0.11-STOP`, repository gate `0.11R`, стабилизация `0.11A–0.11C`, immutable release candidate `0.11RC`, миграция `0.11M`, baseline `0.11D` и официальный пилот `0.11P`; только после их приёмки начинаются продуктовые релизы `0.12+`.
+Рабочая ветка является аварийно развёрнутым кандидатом baseline, но не утверждённым источником production-кода. После утверждения плана последовательно выполняются отдельно разрешённый `0.11-STOP`, repository gate `0.11R`, стабилизация `0.11A–0.11C`, реализация мигратора `0.11MI`, immutable release candidate `0.11RC`, эксплуатационная миграция `0.11M`, baseline `0.11D` и официальный пилот `0.11P`; только после их приёмки начинаются продуктовые релизы `0.12+`.
 
 ## 4. Принципы реализации
 
@@ -404,7 +405,7 @@ Vertex AI подключается через `google-genai` только пос
 
 Задачи:
 
-- создать tracking issues для `0.11-STOP`, `0.11R`, `0.11A`, `0.11B`, `0.11C`, `0.11RC`, `0.11M`, `0.11D` и `0.11P`;
+- создать tracking issues для `0.11-STOP`, `0.11R`, `0.11A`, `0.11B`, `0.11C`, `0.11MI`, `0.11RC`, `0.11M`, `0.11D` и `0.11P`;
 - защитить `main`: запретить прямой push, включить обязательные checks и approving review;
 - назначить независимого reviewer, который не является автором изменений;
 - выбрать и записать стратегию: последовательные PR к `main` либо stacked PR с явно указанными base/head;
@@ -468,12 +469,12 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 Задачи:
 
 - проверять цену detail page до попадания объявления в `normalized_vehicles` и рынок аналогов, а не только перед публикацией кандидата;
-- хранить статус проверки, detail-page checksum, проверенную цену, валюту, время и причину отказа;
+- хранить статус проверки, detail-page checksum, проверенную цену, валюту, причину отказа, immutable `evidence_created_at` и operational `last_checked_at`, `valid_until`, `freshness_status`;
 - определить `verification_key` как SHA-256 canonical JSON объекта `verification-key/v1` с `source`, `listing_id`, `content_hash`, `extractor_version` и состояния `pending/verified/temporary_error/permanent_invalid/expired`;
 - задать verification TTL, freshness threshold, extractor version, кеширование по snapshot, source-specific rate limit и circuit breaker;
 - повторно проверять цену перед публикацией, если TTL истёк; временная недоступность блокирует публикацию и создаёт retry, а не удаляет кандидата;
 - при изменении detail price создавать новый snapshot либо неизменяемую verified-price revision, не переписывая старую версию;
-- разделить immutable evidence revision и operational freshness: `last_checked_at`, attempt, latency и TTL refresh обновляются отдельно и не меняют evidence ID при той же цене, валюте, snapshot и extractor version;
+- разделить immutable evidence revision и operational freshness: `evidence_created_at` неизменяем, а `last_checked_at`, `valid_until`, `freshness_status`, attempt и latency обновляются отдельно и не меняют evidence ID при той же цене, валюте, snapshot и extractor version;
 - измерять долю рынка, потерянную из-за temporary/permanent verification failures;
 - реализовать source-specific привязку JSON-LD offer к конкретному автомобилю; не выбирать произвольный ближайший `offers` со страницы;
 - запретить общую эвристику «любое положительное USD выше 5 000 AED» без подтверждённого price field данного listing;
@@ -495,25 +496,25 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 - определить `decision_subject_id = listing_id`: финансовое решение всегда относится к конкретному объявлению и его asking price; `vehicle_id` связывает cross-source объявления и помогает дедупликации, но не заменяет subject решения;
 - определить `decision_id` как SHA-256 canonical JSON объекта `decision-id/v1` с `listing_id`, `content_hash`, `engine_version`, `financial_config_version`, `verification_version` и `market_fingerprint`;
 - строить `market_fingerprint` как SHA-256 canonical JSON объекта `market-fingerprint/v1`, включающего для аналога `listing_id`, `content_hash` или immutable evidence revision ID, подтверждённую цену, валюту, source role, extractor/config/adjustment versions и accepted/rejected status;
-- не включать в fingerprint `last_checked_at`, обычный refresh timestamp, attempt number, latency и operational status, не изменяющий доказательство цены; `verified_at` допускается только как время создания новой immutable evidence revision;
+- не включать в fingerprint `last_checked_at`, `valid_until`, `freshness_status`, обычный refresh timestamp, attempt number, latency и operational status, не изменяющий доказательство цены; `evidence_created_at` допускается только как время создания новой immutable evidence revision;
 - определить `verification_version` как ID immutable semantic evidence revision, а не freshness timestamp или номер попытки;
 - при изменении verified market bucket ставить processing tasks всем затронутым активным `decision_subject_id`;
 - перед выдачей и delivery вычислять текущий fingerprint: несовпадение блокирует старое решение и ставит target на пересчёт;
 - хранить отдельный `current_decisions/{decision_subject_id}` pointer; одной Firestore transaction с precondition записывать новое решение, переключать pointer и устанавливать предыдущему `superseded_by`;
 - каждое новое решение помечает предыдущее того же `decision_subject_id` как superseded; выдача читает current pointer индексируемым запросом, а не полным scan и клиентской сортировкой;
-- выдавать только решение текущего snapshot, Engine, financial config, verification и market fingerprint; исключать `stale`, `removed`, `quarantined` и истёкшую verification;
+- выдавать только решение текущего snapshot, Engine, financial config, verification и market fingerprint; исключать `stale`, `removed`, `quarantined` и evidence с `freshness_status != active` либо `valid_until <= now`;
 - запрещать старому `CONTACT/INSPECT` оставаться текущим после нового `REJECT/INSUFFICIENT_DATA`.
 
 Критерий приёмки:
 
 - ни одно неподтверждённое объявление не участвует в рынке аналогов;
 - контрольные `Price on request` и служебные USD-значения не становятся ценой;
-- в verified market входят только записи `verified` с неистёкшим `verified_at`;
+- в verified market входят только записи `verified` с immutable semantic evidence revision, `freshness_status = active` и `valid_until > now`;
 - ожидаемая прибыль, ROI и все расходы воспроизводятся по fixture до каждого вычета;
 - сильно недооценённое объявление сравнивается с независимым рыночным диапазоном, а не исключает дорогие аналоги своим asking price;
 - hard stop всегда имеет приоритет над недостатком аналогов;
 - изменение аналога при неизменившемся snapshot объявления создаёт новое актуальное решение и supersedes старое;
-- повторная detail verification при неизменившихся цене, валюте, snapshot и extractor version обновляет freshness/TTL, но не меняет evidence revision, `market_fingerprint`, `decision_id`, `delivery_id` и не создаёт публикацию;
+- повторная detail verification при неизменившихся цене, валюте, snapshot и extractor version обновляет `last_checked_at`, `valid_until` и `freshness_status`, но не меняет `evidence_created_at`, evidence revision, `market_fingerprint`, `decision_id`, `delivery_id` и не создаёт публикацию;
 - изменение цены, валюты, snapshot, extractor version либо semantic verification result создаёт новую immutable evidence revision и новый fingerprint;
 - два параллельных пересчёта с одинаковой исходной precondition оставляют ровно один current decision; проигравший пересчитывает состояние либо безопасно завершается без второго current;
 - regression-набор содержит положительные и отрицательные примеры VIN/entity resolution на разных языках.
@@ -549,9 +550,34 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 - чистый checkout фиксированного commit собирает тот же dependency graph и проходит container smoke test.
 - отдельный docs job проходит `git diff --check`, markdownlint, link checks и проверку обязательных release headings.
 
+### Релиз 0.11MI. Реализация migration tooling
+
+Статус: кодовый релиз после приёмки `0.11A–0.11C` и до freeze `0.11RC`. Здесь реализуется весь мигратор; в эксплуатационном `0.11M` изменение кода запрещено.
+
+Задачи:
+
+- реализовать schema-versioned readers/writers для listings, snapshots, normalized vehicles, identities, decisions, notifications, telegram updates, user actions и outbox;
+- реализовать декларативный migration plan, однозначно определяющий, какие данные мигрируются, пересоздаются из raw, архивируются или признаются недостоверными;
+- реализовать rebuild verified market и vehicle identity clusters;
+- реализовать invalidation старых decisions и пересчёт с новым `decision_id`/market fingerprint;
+- реализовать закрытие старых notifications без повторной массовой публикации и отклонение Cloud Tasks старого payload/identity;
+- реализовать owner-scoped миграцию `telegram_updates` и `user_actions`;
+- реализовать deterministic migration ID, dry-run, resumable batches, checkpoints, reconciliation report и безопасный повтор после прерывания;
+- реализовать raw replay/catch-up tooling для заданного watermark range без delivery;
+- реализовать forward-compatible rollback reader либо явный irreversible checkpoint, после которого старый runtime запрещён;
+- добавить unit/integration tests мигратора на fixtures и восстановленной копии production export, включая отказ при неизвестной schema version.
+
+Критерий приёмки:
+
+- migration image собирается из принятого кода и выполняет dry-run без production-записей;
+- повтор одного migration ID не дублирует документы, решения или уведомления;
+- прерывание и продолжение с checkpoint дают тот же результат, что непрерывный запуск;
+- test matrix покрывает каждую исходную/целевую schema version, archive/rebuild path, старые Tasks и rollback boundary;
+- все операции, которые позднее запускает `0.11M`, уже реализованы и протестированы; `0.11M` не требует изменения кода, зависимостей, schema logic или build context.
+
 ### Релиз 0.11RC. Immutable release candidate
 
-Статус: обязательный gate после review и приёмки `0.11A–0.11C`, до любого изменения production-данных в `0.11M`.
+Статус: обязательный gate после review и приёмки `0.11A–0.11C` и migration tooling `0.11MI`, до любого изменения production-данных в `0.11M`.
 
 Задачи:
 
@@ -577,21 +603,16 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 
 Задачи:
 
-- добавить `schema_version` для listings, snapshots, normalized vehicles, identities, decisions, notifications, telegram updates, user actions и outbox;
+- запретить любые изменения кода, зависимостей, schema logic и build context; при необходимости изменения вернуться в `0.11MI` и повторить `0.11RC`;
 - проверить manifest `0.11RC` и разрешить production-миграцию только записанному `migration_image_digest`; runtime для catch-up запускается только из записанного `runtime_image_digest`;
 - зафиксировать `migration_cutover_at`, `export_watermark`, `raw_replay_from`, `raw_replay_to` и позднее `catch_up_completed_at`;
 - выполнить export на фиксированном watermark и migration dry run без записей с отчётом количества документов по каждой операции;
 - сопоставить фактический export и dry-run counts с test restore/rehearsal report из `0.11RC`; любое несовместимое расхождение останавливает миграцию;
-- определить, какие данные мигрируются, какие пересоздаются из raw, какие архивируются и какие признаются недостоверными;
-- построить заново verified market и vehicle identity clusters;
-- инвалидировать прежние decisions и пересчитать их с новым `decision_id` и market fingerprint;
-- закрыть старые notification records так, чтобы смена ID не вызвала повторную массовую публикацию;
-- удалить либо безопасно отклонить Cloud Tasks старого payload/identity после сохранения inventory;
-- мигрировать `telegram_updates` и `user_actions` с owner scope;
-- установить checkpoints, resumable batches и детерминированный migration ID;
+- выполнить утверждённый migration plan из `0.11MI`: schema-versioned transformation/archive/rebuild, verified market и identity rebuild, decision invalidation/recalculation, notification closure, rejection старых Tasks и owner-scoped user data migration;
+- использовать уже реализованные checkpoints, resumable batches и детерминированный migration ID;
 - после основной миграции replay raw snapshots в диапазоне `(export_watermark, raw_replay_to]`, выполнить catch-up processing без delivery и записать `catch_up_completed_at`;
-- после финального reconciliation возобновлять контур поэтапно: raw/collectors, затем processing с контролем ошибок, и только последней — delivery;
-- подготовить forward-compatible rollback reader либо запретить rollback старого образа после необратимого checkpoint;
+- удерживать `delivery_enabled=false`; после catch-up и reconciliation не возобновлять production collectors, обычный processing или delivery — они остаются остановленными либо работают только в изолированном maintenance-режиме до `0.11D`;
+- применить заранее реализованный forward-compatible rollback reader либо зафиксировать irreversible checkpoint, после которого старый runtime запрещён;
 - выполнить reconciliation counts, выборочную проверку provenance и отчёт расхождений после каждого этапа.
 
 Критерий приёмки:
@@ -599,12 +620,13 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 - dry run и фактическая миграция дают согласованные counts;
 - production migration и catch-up выполнены только digest из утверждённого `0.11RC` manifest;
 - test restore и rehearsal report из `0.11RC` соответствуют фактической schema/tool version и export contract;
-- все raw snapshots после export watermark либо replayed до `raw_replay_to`, либо перечислены как блокирующие расхождения; catch-up reconciliation завершён до возобновления delivery;
+- все raw snapshots после export watermark либо replayed до `raw_replay_to`, либо перечислены как блокирующие расхождения; catch-up reconciliation завершён при выключенной delivery;
 - ни одно старое решение не считается текущим без нового fingerprint и verification;
 - миграция не создаёт повторные исторические публикации;
 - owner-scoped данные после миграции изолированы;
 - rollback совместимость либо точка необратимости доказана и зафиксирована до production cutover;
 - итоговый migration report утверждён независимым reviewer.
+- после завершения `0.11M` production остаётся остановленным/maintenance-only, `delivery_enabled=false`; resume разрешён только в `0.11D`.
 
 ### Релиз 0.11D. Формирование воспроизводимого production-baseline
 
@@ -614,6 +636,8 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 - после migration reconciliation сделать `main` указателем ровно на `release_candidate_commit` из `0.11RC`; новый merge/squash/rebuild commit запрещён;
 - проверить, что `/version`, deployment metadata и Artifact Registry связывают `main` с теми же `release_candidate_commit` и `runtime_image_digest`;
 - продвинуть в production ровно тот `runtime_image_digest`, который прошёл staging в `0.11RC`; повторная сборка запрещена;
+- проверить `/version`, schema compatibility, queue state и health уже развёрнутого RC runtime при `delivery_enabled=false`;
+- выполнить staged resume только здесь: сначала collectors, затем processing; после контроля ошибок, backlog и current decisions последней включить delivery и `delivery_enabled=true`;
 - проверить rollback предыдущего digest и задокументировать процедуру;
 - проверять rollback только с учётом schema compatibility и migration checkpoint из `0.11M`;
 - синхронизировать README и `.env.example` с командами чистого checkout.
@@ -625,6 +649,7 @@ ID contract фиксирует: Unicode NFC и отсутствие whitespace; 
 - `/version`, Cloud Run revision и Git commit однозначно связаны;
 - `git rev-parse main` равен `release_candidate_commit`, а production использует тот же `runtime_image_digest` из `0.11RC`;
 - изменение кода после rehearsal не прошло незамеченным: оно аннулирует RC и блокирует cutover до повторной приёмки;
+- до успешных `/version`/health/schema checks ни один production send path не активен; staged resume проходит collectors → processing → delivery с зафиксированными checkpoints и rollback decision;
 - PR #1 не остаётся единственным непроверяемым пакетом всех подсистем.
 
 ### Релиз 0.11P. Официальный пилот и калибровка
@@ -894,16 +919,17 @@ Firebase Hosting: admin frontend
 4. выполнить `0.11A`: точные версии, изоляция пользователей, роли, retry и outbox;
 5. выполнить `0.11B`: достоверность цен, аналогов, decision identity, рисков и финансовой модели;
 6. выполнить `0.11C`: lifecycle, масштабирование, конфигурация, IaC и воспроизводимая сборка;
-7. выполнить `0.11RC`: заморозить точный commit, runtime/migration digests и пройти staging/rehearsal;
-8. выполнить `0.11M`: watermark, миграцию утверждённым digest, raw replay и reconciliation;
-9. выполнить `0.11D`: сделать `main` указателем на точный RC commit и продвинуть тот же runtime digest;
-10. выполнить официальный пилот `0.11P` на воспроизводимом baseline;
-11. выпустить разделение `Free teaser / Pro full card`;
-12. выпустить пользовательский `/find` и подписки на новые совпадения;
-13. выпустить административную панель на Firebase Hosting/Auth;
-14. выпустить информационный модуль в режиме предварительного согласования;
-15. перейти к автоматическим информационным публикациям после ручной проверки шаблонов;
-16. подключить официальный WhatsApp Business adapter после предоставления Meta-реквизитов;
-17. провести контрольный запуск монетизации и только затем возвращаться к TMA.
+7. выполнить `0.11MI`: реализовать и протестировать migration tooling, schema readers/writers, dry-run, checkpoints и replay;
+8. выполнить `0.11RC`: заморозить точный commit, runtime/migration digests и пройти staging/rehearsal;
+9. выполнить `0.11M`: без изменения кода провести watermark migration утверждённым digest, raw replay и reconciliation, сохранив production остановленным;
+10. выполнить `0.11D`: сделать `main` указателем на точный RC commit, продвинуть тот же runtime digest и staged resume collectors → processing → delivery;
+11. выполнить официальный пилот `0.11P` на воспроизводимом baseline;
+12. выпустить разделение `Free teaser / Pro full card`;
+13. выпустить пользовательский `/find` и подписки на новые совпадения;
+14. выпустить административную панель на Firebase Hosting/Auth;
+15. выпустить информационный модуль в режиме предварительного согласования;
+16. перейти к автоматическим информационным публикациям после ручной проверки шаблонов;
+17. подключить официальный WhatsApp Business adapter после предоставления Meta-реквизитов;
+18. провести контрольный запуск монетизации и только затем возвращаться к TMA.
 
 Каждый релиз выполняется отдельным pull request либо небольшой серией pull request. Следующий релиз не начинается, пока не выполнены критерии приёмки предыдущего или письменно не зафиксировано исключение.

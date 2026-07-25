@@ -215,3 +215,13 @@
 - [x] Operational verification freshness исключена из `market_fingerprint`; неизменившийся refresh не создаёт decision/delivery/publication.
 - [x] Создан `docs/PLAN_REVIEW_2026-07-25-R4.md` с результатами четвёртой проверки.
 - [ ] План остаётся Draft и требует повторной проверки; `0.11-STOP`, код и production не изменялись.
+
+## Фаза 20: Полный сквозной аудит плана
+
+- [x] Перед `0.11RC` добавлен кодовый релиз `0.11MI`, реализующий schema-versioned migration tooling, dry-run, checkpoints, replay и rollback boundary.
+- [x] `0.11M` оставлен только эксплуатационным выполнением замороженного мигратора; изменение кода, зависимостей и build context запрещено.
+- [x] Возобновление collectors, processing и delivery перенесено из `0.11M` в `0.11D` после привязки `main`, deployment того же runtime digest и проверки `/version`.
+- [x] Verification freshness разделена на immutable `evidence_created_at` и operational `last_checked_at`, `valid_until`, `freshness_status`.
+- [x] Verified market и delivery используют `valid_until > now`; refresh той же evidence не меняет fingerprint/decision/delivery.
+- [x] Создан `docs/PLAN_REVIEW_2026-07-25-R5.md` с итогом полного сквозного аудита.
+- [ ] План остаётся Draft до следующего явного утверждения; `0.11-STOP`, код и production не изменялись.

@@ -10,7 +10,7 @@ GitHub: `https://github.com/AVOINVESTGROUP/Deal_Sniper` (public).
 - Draft PR #1 является крупным монолитным изменением кода, Terraform и документации; он не утверждён и не должен сливаться.
 - Google Cloud временно использует образ из неслитой ветки с известными дефектами snapshot provenance, owner scope, ролей, verified market и delivery.
 - Зелёный CI подтверждает текущие Ruff/mypy/pytest/Terraform checks, но не подтверждает экономическую корректность, конкурентность Firestore, изоляцию пользователей и документацию.
-- Канонический следующий порядок: после утверждения плана отдельно разрешить `0.11-STOP`, затем выполнить `0.11R`, `0.11A`, `0.11B`, `0.11C`, immutable candidate `0.11RC`, миграцию `0.11M`, baseline `0.11D` и официальный пилот `0.11P`.
+- Канонический следующий порядок: после утверждения плана отдельно разрешить `0.11-STOP`, затем выполнить `0.11R`, `0.11A`, `0.11B`, `0.11C`, migration implementation `0.11MI`, immutable candidate `0.11RC`, эксплуатационную миграцию `0.11M`, baseline/resume `0.11D` и официальный пилот `0.11P`.
 - Код следующих релизов и состояние production не изменяются без утверждения плана и отдельного разрешения на `0.11-STOP`.
 
 ## Known blockers
@@ -31,6 +31,7 @@ GitHub: `https://github.com/AVOINVESTGROUP/Deal_Sniper` (public).
 - протокол второй проверки и открытые решения владельца сохранены в `docs/PLAN_REVIEW_2026-07-24.md`.
 - третья проверка не утвердила план; исправления approval gates, repository gate, STOP watermark, migration replay, canonical ID и pilot order сохранены в `docs/PLAN_REVIEW_2026-07-24-R3.md`.
 - четвёртая проверка также не утвердила план; инфраструктурный STOP, immutable `0.11RC`, разделение decision subject/recipient и semantic fingerprint описаны в `docs/PLAN_REVIEW_2026-07-25-R4.md`.
+- полный сквозной аудит оставил три блокера; `0.11MI`, перенос resume в `0.11D` и operational `valid_until` описаны в `docs/PLAN_REVIEW_2026-07-25-R5.md`.
 
 ## Historical implementation log — SUPERSEDED как описание текущего состояния
 
@@ -136,5 +137,5 @@ C:\Dev\Deal_Sniper
 - До явного утверждения владельцем код этих функций не изменяется.
 - Официальный WhatsApp Business Cloud API поддерживает индивидуальных получателей, но не публикацию в WhatsApp Channel; допустимый план — opt-in рассылка через официальный API и отдельный channel-adapter только при появлении официальной возможности Meta.
 - Проверка draft PR #1 подтвердила, что `main` остаётся legacy, PR является крупным монолитным изменением, а развёрнутый production собран из неслитой рабочей ветки. Динамические количества коммитов и файлов здесь намеренно не фиксируются.
-- До Free/Pro, поиска и панели обязательны отдельно разрешённый `0.11-STOP`, repository gate `0.11R`, `0.11A–0.11C`, immutable candidate `0.11RC`, миграция `0.11M`, baseline `0.11D` и официальный пилот `0.11P`.
+- До Free/Pro, поиска и панели обязательны отдельно разрешённый `0.11-STOP`, repository gate `0.11R`, `0.11A–0.11C`, migration implementation `0.11MI`, immutable candidate `0.11RC`, миграция `0.11M`, baseline/resume `0.11D` и официальный пилот `0.11P`.
 - Строгая exactly-once Telegram-доставка не заявляется: используется outbox и состояние `unknown` для неоднозначного результата без слепого повтора.

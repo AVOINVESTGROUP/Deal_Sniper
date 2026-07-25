@@ -155,11 +155,11 @@ flowchart TD
 
 Результат содержит нижнюю, медианную и верхнюю оценку, количество уникальных аналогов, свежесть данных и уровень покрытия.
 
-В Comparable Engine допускаются только объявления с неистёкшей detail-page проверкой. `verification_key` является SHA-256 canonical JSON объекта `verification-key/v1` с полями `source`, `listing_id`, `content_hash` и `extractor_version`; состояния: `pending`, `verified`, `temporary_error`, `permanent_invalid`, `expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
+В Comparable Engine допускаются только объявления со статусом `verified`, immutable semantic evidence revision, `freshness_status = active` и `valid_until > now`. `verification_key` является SHA-256 canonical JSON объекта `verification-key/v1` с полями `source`, `listing_id`, `content_hash` и `extractor_version`; состояния проверки: `pending`, `verified`, `temporary_error`, `permanent_invalid`, а operational freshness — `active/expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
 
-`market_fingerprint` включает только семантически значимые evidence: `listing_id`, `content_hash` либо immutable verified-price revision ID, подтверждённую цену, валюту, source role, extractor/config/adjustment versions и accepted/rejected status. В него не входят `last_checked_at`, время обычного refresh, attempt number, latency и operational status, не меняющий доказательство цены. `verified_at` входит только как время создания новой immutable evidence revision. Изменение verified market bucket ставит затронутые `decision_subject_id` на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
+`market_fingerprint` включает только семантически значимые evidence: `listing_id`, `content_hash` либо immutable verified-price revision ID, подтверждённую цену, валюту, source role, extractor/config/adjustment versions и accepted/rejected status. В него не входят `last_checked_at`, `valid_until`, `freshness_status`, attempt number, latency и operational status, не меняющий доказательство цены. `evidence_created_at` входит только как неизменяемое время создания новой evidence revision. Изменение verified market bucket ставит затронутые `decision_subject_id` на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
 
-Повторная detail verification при неизменившихся цене, валюте, snapshot и extractor version обновляет freshness/TTL, но сохраняет evidence revision, `market_fingerprint`, `decision_id` и `delivery_id`. Она не создаёт новую публикацию. Изменение цены, валюты, snapshot, extractor version либо semantic verification result создаёт новую immutable evidence revision и новый fingerprint.
+Повторная detail verification при неизменившихся цене, валюте, snapshot и extractor version обновляет `last_checked_at`, `valid_until` и `freshness_status`, но сохраняет `evidence_created_at`, evidence revision, `market_fingerprint`, `decision_id` и `delivery_id`. Она не создаёт новую публикацию. Изменение цены, валюты, snapshot, extractor version либо semantic verification result создаёт новую immutable evidence revision и новый fingerprint.
 
 `verification_version` в `decision_id` равен ID immutable semantic evidence revision. Он не меняется от `last_checked_at`, TTL refresh, номера попытки или latency.
 
@@ -520,10 +520,11 @@ delivery_id        = sha256(canonical_json({schema: delivery-id/v1,
 3. `0.11A` — исправить provenance, owner scope, роли, retry и outbox.
 4. `0.11B` — исправить verified market, decision identity, финансовую модель, риски и identity resolution.
 5. `0.11C` — исправить lifecycle, запросы, конфигурацию, IAM, IaC и CI.
-6. `0.11RC` — заморозить точный release candidate commit, runtime/migration image digests и пройти staging/rehearsal.
-7. `0.11M` — выполнить утверждённым migration digest версионированную миграцию, raw catch-up и reconciliation.
-8. `0.11D` — сделать `main` указателем на тот же RC commit и развернуть тот же runtime digest.
-9. `0.11P` — заново провести официальный пилот; прежние результаты считать диагностическими.
-10. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
+6. `0.11MI` — реализовать и протестировать schema-versioned migration tooling, dry-run, checkpoints, rollback boundary и raw replay.
+7. `0.11RC` — заморозить точный release candidate commit, runtime/migration image digests и пройти staging/rehearsal.
+8. `0.11M` — без изменения кода выполнить утверждённым migration digest миграцию, raw catch-up и reconciliation, не возобновляя production.
+9. `0.11D` — сделать `main` указателем на тот же RC commit, развернуть тот же runtime digest и выполнить staged resume.
+10. `0.11P` — заново провести официальный пилот; прежние результаты считать диагностическими.
+11. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
 
 Подробные этапы и границы релизов описаны в `docs/IMPLEMENTATION_PLAN.md`, а схема ресурсов, потоков, IAM и идемпотентности — в `docs/CLOUD_ARCHITECTURE.md`.
