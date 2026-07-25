@@ -1,227 +1,34 @@
-# Журнал шагов разработки (docs/STEPS.md)
+# Журнал реализации
 
-## Фаза 1: Подготовка и документация
+## 25 июля 2026 — полный production candidate
 
-- [x] Создание структуры папок и инициализация базовых файлов документации (`SPEC.md`, `AI_CONTEXT.md`, `AGENTS.md`, `GEMINI.md`).
-- [x] Настройка переменных окружения (`.env.example`) и игнорируемых файлов (`.gitignore`).
-- [x] Определение зависимостей (`requirements.txt`).
-- [x] Создание виртуального окружения (venv) и установка зависимостей.
+- Production остановлен: schedules и Cloud Tasks paused, delivery/webhook выключены.
+- Создан защищённый STOP Firestore export и зафиксирован watermark.
+- Реализованы canonical IDs, immutable snapshots/evidence/decisions и current pointers.
+- Исправлена обработка out-of-order версий и блокировка доставки старого snapshot.
+- Реализована source-bound detail verification; `Price on request` и неподтверждённая цена не допускаются.
+- Freshness отделена от immutable evidence: `last_checked_at`, `valid_until`, `freshness_status`.
+- Реализованы deterministic Comparable, Cost, Risk и Decision Engines с Decimal.
+- Добавлены cross-source identity/dedup, market fingerprint и controlled recalculation.
+- Реализован transactional outbox personal/Free/Pro/WhatsApp и ручной reconcile `unknown`.
+- Реализованы Telegram update leases, RU/EN поиск, saved searches, favorites и outcomes.
+- Добавлены Free teaser без финансовых утечек и полная Pro-карточка.
+- Добавлены Firebase Auth, Admin Web, TMA и content pipeline.
+- Добавлен официальный WhatsApp opt-in adapter, fail-closed без credentials.
+- Реализованы migration tool v1.0/schema v2, ledger, checksums, checkpoints и replay requests.
+- Добавлен direct migration replay с `DELIVERY_ENABLED=false` без включения очередей.
+- Terraform расширен Cloud Run Jobs/Tasks/Scheduler, Firebase, IAM, secrets, monitoring и budget.
+- CI использует Python 3.11, Ruff, mypy, pytest coverage, pip-audit, Terraform, Docker и Trivy.
+- Локальный gate: Ruff — green; mypy — green; 42 теста — green; coverage 46,81%; Terraform validate — green.
+- Документация приведена к фактической реализации; добавлен release/cutover/rollback runbook.
 
-## Фаза 2: Разработка модулей
+## Следующая обязательная операция
 
-- [x] Создание моделей Pydantic в `src/models.py`.
-- [x] Разработка логики оценки сделок в `src/evaluator.py` с использованием Gemini API.
-- [x] Настройка БД дедупликации в `src/db.py`.
-- [x] Реализация парсеров в `src/scrapers/` (базовый класс и Dubizzle Mock; ранний аукционный прототип вынесен из исполняемого кода в `docs/legacy/`).
-- [x] Создание Telegram-оповещателя in `src/notifier.py`.
-- [x] Сборка единого оркестратора в `main.py`.
+Сформировать immutable RC commit и image digests; восстановить STOP export в staging named database; выполнить migration rehearsal и full catch-up с delivery disabled. Только затем разрешены production migration, merge в `main`, exact-digest deploy и staged resume.
 
-## Фаза 3: Пересмотр концепции автомобильного MVP
+## Ограничения
 
-- [x] Исключена недвижимость из концептуального контура дальнейшей разработки.
-- [x] Проведено сопоставление исходной концепции с фактической архитектурой.
-- [x] Определена целевая модель решения: максимальная цена покупки, полная себестоимость, ожидаемая прибыль, ROI, риск и уверенность.
-- [x] Подготовлен отчёт `docs/concept-cars-report.html` и его исходный артефакт `docs/concept-cars-artifact.json`.
-- [x] Сформирована карта из 15 источников и наборов ground truth: классифайды, C2B-транзакции, certified retail, проверки, расходы и собственные результаты сделок.
-- [x] Источники разделены по смыслу цены и приоритетам подключения; добавлено требование межсайтового объединения одинаковых автомобилей.
-- [x] `SPEC.md` переписан только для автомобилей с фиксированной ценой; недвижимость и аукционы исключены.
-- [x] Аукционный скрапер отключён от `main.py`; активный конвейер больше не содержит ставок, таймеров и live-мониторинга.
-
-## Фаза 4: Поэтапный пользовательский интерфейс
-
-- [x] Зафиксирована стратегия: сначала простой Telegram-бот, затем Telegram Mini App после пилота.
-- [x] В архитектуру добавлена граница Application API, отделяющая бизнес-логику от Telegram-интерфейсов.
-- [x] Определён минимальный набор команд, кнопок и данных уведомления Telegram-бота.
-- [x] Определены границы будущей TMA, её экраны и обязательная серверная проверка Telegram `initData`.
-- [x] Создан подробный план реализации `docs/IMPLEMENTATION_PLAN.md` с критериями готовности этапов и релизов.
-
-## Фаза 5: Переход документации на Firebase и Google Cloud
-
-- [x] Целевая инфраструктура заменена на Cloud Run Service/Jobs, Cloud Scheduler, Cloud Tasks, Cloud Firestore и Cloud Storage.
-- [x] Secret Manager, service accounts с минимальными IAM-ролями и Infrastructure as Code включены в обязательную архитектуру.
-- [x] Gemini-интеграция перенесена на Vertex AI и `google-genai` без production API-ключа.
-- [x] Telegram-бот определён как webhook-клиент Cloud Run, а повтор доставки — как задача Cloud Tasks.
-- [x] Будущая TMA привязана к Firebase Hosting и Firebase Authentication через серверную проверку Telegram `initData`.
-- [x] PostgreSQL, Redis, Celery и отдельный VPS исключены из первого MVP; BigQuery оставлен опциональным аналитическим слоем после пилота.
-- [x] Создан `docs/CLOUD_ARCHITECTURE.md` с ресурсами, потоками, Firestore-моделью, IAM, идемпотентностью и наблюдаемостью.
-- [x] `.env.example` приведён к Vertex AI, Firestore, Cloud Storage и Cloud Tasks; `GEMINI_API_KEY` удалён из целевой конфигурации.
-
-## Фаза 6: Публикация исходного репозитория
-
-- [x] Инициализирован локальный Git-репозиторий с основной веткой `main`.
-- [x] Создан GitHub-репозиторий `AVOINVESTGROUP/Deal_Sniper`, подключён remote `origin`, затем по решению владельца включена публичная видимость.
-- [x] Проверено исключение `.env`, виртуального окружения, локальных баз, кэшей и IDE-файлов из публикации.
-
-## Фаза 7: Пересборка порядка реализации
-
-- [x] Из требований и плана удалены нетехнические проверки источников; сохранён только технический integration audit.
-- [x] Первым этапом назначен безопасный baseline: README, отключение legacy production entrypoint, зависимости, тесты и CI.
-- [x] Domain Models, normalization, Comparable, Cost, Risk и Decision Engines перенесены перед облачной инфраструктурой.
-- [x] Vertex AI ограничен enrichment-ролью после готового детерминированного решения.
-- [x] Google Cloud, Telegram-бот, пилот, дополнительные источники и TMA выстроены как последовательные этапы после расчётного ядра.
-- [x] Полностью переписан `docs/IMPLEMENTATION_PLAN.md` с критериями готовности и границами релизов.
-
-## Фаза 8: Уточнение исполняемого плана по аудиту репозитория
-
-- [x] Зафиксировано фактическое состояние кода: mock-источник, SQLite, прямой Gemini evaluator, одиночный Telegram `chat_id` и локальный бесконечный цикл.
-- [x] План перестроен в вертикальные релизы с результатом, задачами и критериями приёмки каждого релиза.
-- [x] В план явно добавлены реальные collectors, raw snapshots, история цены, content hash, cross-source entity resolution, retries, rate limits, dead-letter обработка и наблюдаемость.
-- [x] Добавлены отдельные критерии для многопользовательского Telegram-бота, Vertex AI enrichment, пилотных KPI и TMA.
-- [x] План помечен как черновик для изучения; до подтверждения выполняется только релиз 0.1.
-
-## Фаза 9: Рабочий вертикальный срез Telegram-бота
-
-- [x] Удалён исполняемый mock/Gemini-конвейер; финансовое решение больше не зависит от LLM.
-- [x] Добавлены типизированные доменные модели, Comparable Price Engine и Decision Engine.
-- [x] Реализован реальный DubiCars collector через JSON-LD с timeout, retry и backoff.
-- [x] Реализовано локальное versioned-хранилище со стабильным listing ID, content hash, историей цены и защитой от повторной обработки.
-- [x] Реализованы Telegram-команды `/start`, `/id`, `/status`, `/scan` и `/deals`.
-- [x] Добавлен режим `publish` для идемпотентной публикации новых кандидатов в Telegram-канал.
-- [!] Аудит 24.07.2026: внешняя отправка и отметка Firestore не образуют exactly-once; результат не принят, исправление и reconciliation запланированы в `0.11A`.
-- [x] Добавлены README, Dockerfile, Ruff, mypy, pytest и GitHub Actions.
-- [x] Реальный smoke test получил 88 объявлений; повторный запуск создал 0 новых версий и 0 ложных изменений цены.
-
-## Фаза 10: Рабочий бот и канал в Google Cloud
-
-- [x] Создан отдельный Google Cloud проект `avo-deal-sniper`, подключены биллинг, Firestore, Artifact Registry, Secret Manager, Cloud Run, Cloud Scheduler и API Gateway.
-- [x] Telegram webhook опубликован через API Gateway и проверен реальным ответом бота из Google Cloud.
-- [x] Добавлен второй реальный источник CarSwitch и резервирование источников при недоступности DubiCars.
-- [x] Cloud Run Job успешно получает и обрабатывает реальные объявления; Cloud Scheduler выполняет сбор каждые 10 минут.
-- [x] Создан канал `@Dubai_Auto_Invest`, бот назначен его администратором и тестовая публикация подтверждена.
-- [x] Развёрнут Cloud Run Job `deal-sniper-publisher`; первый запуск завершён успешно и не создал повторных публикаций.
-- [x] HTTP-логи Telegram-клиента ограничены уровнем WARNING, чтобы URL с токеном не попадал в журналы следующих релизов.
-- [x] Cloud Scheduler переключён на `deal-sniper-publisher`; ручной запуск расписания успешно завершил полный облачный цикл за 24 секунды.
-- [x] README обновлён фактической production-схемой, командами проверки и корректными Docker-командами.
-
-## Фаза 11: Управляемые источники и Cars24
-
-- [x] Реестр источников перенесён в SQLite/Firestore; переключатели доступны API и фоновым задачам.
-- [x] Добавлены Telegram-команды `/sources`, `/source_on`, `/source_off`, `/source_add`, `/source_remove` и `/source_scan`.
-- [x] Подключён третий реальный источник Cars24 UAE с ценой, пробегом, изображением и стабильным ID.
-- [x] Реальный smoke test Cars24 получил 75 уникальных объявлений с валидной ценой и пробегом на трёх страницах.
-- [x] Dubizzle технически проверен, но не объявлен рабочим источником: публичная страница возвращает антибот-заглушку вместо каталога.
-- [x] Канальная публикация сортирует кандидатов по прибыли, ROI и уверенности и ограничена 10 лучшими карточками за проход.
-- [x] Повторные доставки одного Telegram webhook блокируются атомарным `update_id` в SQLite/Firestore.
-- [x] Production-проверка дважды отправила одинаковый webhook: команда выполнена один раз, повтор безопасно отклонён.
-- [x] Меню команд Telegram обновлено командами управления источниками; расписание после проверки снова включено.
-
-## Фаза 12: Нормализация, identity resolution и версия расчётного ядра
-
-- [x] Добавлены `NormalizedVehicle`, `VehicleIdentity` и `Outcome`; неизвестные признаки не заменяются догадками.
-- [x] Межсайтовые совпадения объединяются по VIN либо строгому набору марки, модели, года, пробега, цены, trim и specification.
-- [x] Comparable selector учитывает год, пробег, поколение, trim, specification, свежесть, тип продавца и исключает cross-source дубли.
-- [x] Аналоги получают детерминированные поправки за год, пробег и тип продавца до расчёта MAD/квантилей.
-- [x] Реализованы полноценные Cost и Risk Engines: инспекция, ремонт, подготовка, хранение, капитал, продажа и резерв риска.
-- [!] Аудит 24.07.2026: первая версия Cost/Risk содержит некорректные bases и неполные stop flags; результат не принят, исправление запланировано в `0.11B`.
-- [x] Решения версионированы `engine_version=2.0.0`; новый алгоритм пересчитывает snapshot, неизменный алгоритм — нет.
-- [x] Сквозной fixture-тест подтверждает `CONTACT` для выгодной машины и отсутствие повторной обработки неизменённых данных.
-
-## Фаза 13: Raw archive, фоновые задачи и персональная воронка
-
-- [x] Каждый успешный HTTP-ответ источника сохраняется до парсинга: локально в `data/raw`, в production — в Cloud Storage; checksum и provenance записываются в Repository.
-- [x] Сбор отделён от расчёта: `main.py collect --source <name>` обслуживает отдельный Cloud Run Job одной площадки.
-- [x] Новые версии ставятся в `listing-processing`, а Telegram-доставка — в `telegram-delivery`.
-- [x] Имена Cloud Tasks детерминированы, повторная постановка и повторная доставка не создают дубли.
-- [!] Аудит 24.07.2026: task identity неполна, а send/mark failure window допускает дубль или потерю; утверждение не принято до `0.11A`.
-- [x] `/scan` и `/source_scan` запускают Cloud Run Jobs и сразу освобождают Telegram webhook.
-- [x] Добавлены персональные `/settings`, бюджет, прибыль, ROI, марки, `/watchlist` и состояния `WATCH`, `CONTACTED`, `INSPECT`, `REJECT`.
-- [!] Аудит 24.07.2026: Firestore watchlist не фильтруется по владельцу, а `/deals` игнорирует персональные фильтры; результат не принят, исправление запланировано в `0.11A`.
-- [x] Созданы production bucket `avo-deal-sniper-raw-snapshots` и очереди `listing-processing`/`telegram-delivery` с retry/backoff.
-- [x] Развёрнуты отдельные jobs `deal-sniper-collector-dubicars`, `deal-sniper-collector-carswitch`, `deal-sniper-collector-cars24`.
-- [x] Cars24 и CarSwitch прошли production smoke test; DubiCars адаптирован к USD JSON-LD, пересчитывает по конфигурации AED/USD и снова прошёл job.
-- [!] Аудит 24.07.2026: общий USD fallback и проверка только финального кандидата не защищают verified market; результат DubiCars не принят до `0.11B`.
-- [x] Нормализация Firestore переведена на batch-записи; `/status` показывает здоровье каждого источника.
-- [x] Добавлен валидный Terraform production-контура и отдельная Terraform-проверка в GitHub Actions.
-- [x] Исправлён критический приоритет решения: warning больше не превращает убыточный автомобиль в `INSPECT`; `INSPECT` допустим только после прохождения прибыли, ROI и максимальной цены покупки.
-- [x] Добавлен второй защитный фильтр перед `/deals`, личной и канальной доставкой, включая старые решения; regression-набор расширен до 14 тестов.
-- [x] Версия Decision Engine включена в ID processing task; обновление правил гарантированно пересчитывает прежний snapshot и не конфликтует с retention имён Cloud Tasks.
-- [x] Production-пересчёт Engine 2.1 обработал 231 объявление: 212 `INSUFFICIENT_DATA`, 18 `REJECT`, 1 экономически валидный `INSPECT`; нарушений profit/ROI/max purchase — 0.
-- [x] Старое общее расписание остановлено; три отдельных Scheduler job включены каждые 10 минут в `Asia/Dubai`.
-- [x] Исправлена пагинация `/deals`: экономический фильтр применяется к расширенной истории, поэтому свежие `REJECT/INSUFFICIENT_DATA` не скрывают действующего кандидата; связанные снимки Firestore загружаются одним пакетным запросом, повторные версии одного объявления исключаются.
-
-## Фаза 14: Расширение рыночного покрытия
-
-- [x] Подключён четвёртый рабочий источник OpenSooq UAE; live smoke test пяти страниц получил 141 уникальное объявление.
-- [x] Проверена глубокая пагинация: десять страниц четырёх источников возвращают 1 017 уникальных автомобилей.
-- [x] Сохранение снимков Firestore переведено на пакетное чтение и запись; большой backfill ставится в Cloud Tasks с ограниченной параллельностью.
-- [x] Расчёт объявления читает только нормализованные автомобили той же марки и модели вместо полного рынка.
-- [x] Нормализованные активные объявления обновляются при каждом успешном сборе, даже если цена и описание не изменились.
-- [x] Decision Engine повышен до `2.2.1`, чтобы расширение рынка контролируемо пересчитало прежние объявления после завершения общего backfill.
-- [x] `/sources` показывает число зарегистрированных и включённых источников, результат последнего сбора и понятные команды управления.
-- [x] Развёрнуты четыре collector Jobs; production backfill сохранил 2 042 уникальных объявления и Decision Engine `2.2.1` рассчитал все 2 042: 1 `CONTACT`, 6 `INSPECT`, 4 `WATCH`, 427 `REJECT`, 1 604 `INSUFFICIENT_DATA`; нарушений profit/ROI/max purchase — 0.
-- [x] `/deals` сначала выбирает только `CONTACT/INSPECT` из полной истории, а затем применяет лимит и загружает связанные снимки; крупный поток `REJECT` больше не скрывает покупаемые автомобили.
-- [x] Служебная Cloud Run Job публикации закреплена в Terraform со всеми обязательными Firestore, Cloud Storage и Telegram параметрами; production-конфигурация приведена к тому же состоянию.
-- [x] Канальные карточки переведены на английский; личный Telegram-бот сохраняет `language_code` пользователя и автоматически выбирает русский интерфейс для русской локали устройства, английский — для остальных локалей.
-- [x] Команда `/id` показывает отдельные chat ID и user ID, чтобы безопасно подключать закрытый Pro-канал без догадок по Telegram-идентификатору.
-
-## Фаза 15: Монетизация
-
-- [x] Добавлен отдельный `TELEGRAM_PRO_CHANNEL_ID`; при его наличии полные мгновенные карточки направляются только в закрытый Pro-канал, публичный канал остаётся бесплатной витриной.
-- [!] Аудит 24.07.2026: отдельные `PublicTeaser` и `ProDealCard` фактически не реализованы; бесплатная витрина не принята, исправление запланировано в `0.12`.
-- [x] Publisher после обновления рынка выбирает лучшие действующие решения из Firestore, поэтому новый Pro-канал получает текущих кандидатов, а журнал уведомлений предотвращает повторы.
-- [!] Аудит 24.07.2026: правило текущего решения и notification identity неполны, журнал не закрывает failure window; результат не принят до `0.11A/0.11B`.
-- [x] После инцидента `Price on request` добавлены минимальная цена, ratio-guard, detail-page verification, блокировка устаревших задач и Decision Engine `2.3.0`; доказательства и критерии возобновления сохранены в `docs/DATA_QUALITY_INCIDENT_2026-07-24.md`.
-- [x] Полный production-пересчёт обработал 2 374 нормализуемых объявления из 2 381; 7 записей с недопустимой ценой исключены до принятия решения.
-- [x] Финальный аудит нашёл 9 публикуемых кандидатов; актуальная detail page подтвердила цену каждого из 9, неподтверждённых кандидатов — 0.
-- [x] Очереди обработки и Telegram-доставки возвращены в рабочий режим; лимит processing-очереди восстановлен до 10 одновременных и 20 запросов в секунду.
-- [x] Расписания DubiCars, CarSwitch, Cars24 и OpenSooq снова включены. Устаревшее общее расписание `deal-sniper-collector-every-10m` оставлено остановленным во избежание двойного сбора.
-- [x] Семь прежних записей с ценой ниже 5 000 AED помечены карантином и удалены из `normalized_vehicles`; raw snapshots и исходные listing-документы сохранены для аудита.
-- [x] Контрольный production-запуск `deal-sniper-collector-dubicars` успешно завершён после исправления и не создал новых записей с ложной ценой.
-
-## Фаза 16: Документация следующего продуктового релиза
-
-- [x] В `SPEC.md` зафиксировано обязательное разделение короткого публичного тизера и полной Pro-карточки.
-- [x] Описаны пользовательский `/find`, сохранённые поисковые запросы и подписки на новые совпадения.
-- [x] Описана отдельная административная панель на Firebase Hosting/Auth с Admin API и audit log.
-- [x] Описан информационный модуль с market pulse, price drops, обзорами и контролем происхождения каждого факта.
-- [x] Зафиксировано техническое ограничение: официальный WhatsApp Business Cloud API доставляет сообщения отдельным получателям и не предоставляет публикацию в WhatsApp Channel; в план включён только официальный opt-in adapter.
-- [ ] Новая редакция плана должна быть проверена и явно утверждена владельцем до изменения кода.
-- [x] Внешняя проверка выявила блокирующие дефекты draft PR #1: provenance snapshot, изоляция watchlist, гонка current listing, доставка, retry verification, роли, качество аналогов и расхождение `main`/production.
-- [x] В первой редакции перед `0.12` были добавлены `0.11A–0.11D`; последующие проверки расширили gate этапами `0.11-STOP`, `0.11R`, `0.11M` и `0.11P`. Код по замечаниям ещё не изменялся.
-- [x] README больше не создаёт ложного впечатления, что default-ветка `main` воспроизводит работающий Google Cloud контур.
-
-## Фаза 17: Вторая проверка плана стабилизации
-
-- [x] Добавлен аварийный этап `0.11-STOP`; его эксплуатационное выполнение требует отдельного подтверждения владельца.
-- [x] Добавлена отдельная миграция `0.11M` со schema versions, backup, dry run, invalidation, reconciliation и rollback compatibility.
-- [x] Определены полный `decision_id`, fan-out пересчёта рынка, правило current/superseded и `delivery_id` через decision ID.
-- [x] Определены outbox reconciliation, verification TTL/extractor/rate policy и owner-scoped `/deals`.
-- [x] Синхронизирована каноническая финансовая формула без двойного risk reserve.
-- [x] В плане определены identity split/merge, серверный порядок версий, обязательный docs CI и независимый review; их реализация и фактическая приёмка ещё не выполнены.
-- [x] Прежние pilot/backfill результаты помечены диагностическими; официальный пилот выделен в `0.11P` после migration reconciliation `0.11M` и baseline `0.11D`.
-- [x] Создан `docs/PLAN_REVIEW_2026-07-24.md` для связи второй проверки с PR и будущими tracking issues.
-- [ ] План остаётся Draft и требует новой независимой проверки; код и production по этой редакции не изменялись.
-
-## Фаза 18: Третья проверка плана стабилизации
-
-- [x] Разделены утверждение архитектурного плана и execution gates отдельных релизов.
-- [x] Перед разработкой добавлен repository gate `0.11R` с issues, branch strategy, protected `main` и независимым reviewer.
-- [x] `0.11-STOP` перестроен в согласованную последовательность с kill switch, in-flight фиксацией и единым watermark.
-- [x] В `0.11M` добавлены test restore, export watermark, raw replay, catch-up и повторный reconciliation.
-- [x] Составные ID переведены в контракт canonical JSON + schema tag + SHA-256; реализация ещё не выполнена.
-- [x] Переключение current/superseded decision определено одной Firestore transaction с concurrency test.
-- [x] Зафиксированы единицы rate, Decimal precision, rounding и поведение отрицательной максимальной цены покупки.
-- [x] Официальный пилот физически перенесён после `0.11D` и переименован в `0.11P`; SPEC синхронизирован по защите Free-изображений.
-- [x] Создан `docs/PLAN_REVIEW_2026-07-24-R3.md` с результатами третьей проверки.
-- [ ] План остаётся Draft и требует повторной проверки; `0.11-STOP`, код и production не изменялись.
-
-## Фаза 19: Четвёртая проверка плана стабилизации
-
-- [x] Из `0.11-STOP` удалена зависимость от отсутствующего code-level feature flag; gate использует существующие publisher/Scheduler/queue/secret/Telegram permission controls.
-- [x] Application `delivery_enabled` перенесён в `0.11A`, а его Settings/Terraform wiring — в `0.11C`.
-- [x] Перед production-миграцией добавлен immutable release candidate `0.11RC` с точным commit, runtime/migration digests, schema/tool versions и rehearsal.
-- [x] `0.11M` разрешено выполнять только утверждёнными digests; `0.11D` должен сделать `main` указателем на тот же commit и продвинуть тот же runtime digest.
-- [x] Разделены `decision_subject_id = listing_id`, `vehicle_id` и `delivery_recipient_id`.
-- [x] Operational verification freshness исключена из `market_fingerprint`; неизменившийся refresh не создаёт decision/delivery/publication.
-- [x] Создан `docs/PLAN_REVIEW_2026-07-25-R4.md` с результатами четвёртой проверки.
-- [ ] План остаётся Draft и требует повторной проверки; `0.11-STOP`, код и production не изменялись.
-
-## Фаза 20: Полный сквозной аудит плана
-
-- [x] Перед `0.11RC` добавлен кодовый релиз `0.11MI`, реализующий schema-versioned migration tooling, dry-run, checkpoints, replay и rollback boundary.
-- [x] `0.11M` оставлен только эксплуатационным выполнением замороженного мигратора; изменение кода, зависимостей и build context запрещено.
-- [x] Возобновление collectors, processing и delivery перенесено из `0.11M` в `0.11D` после привязки `main`, deployment того же runtime digest и проверки `/version`.
-- [x] Verification freshness разделена на immutable `evidence_created_at` и operational `last_checked_at`, `valid_until`, `freshness_status`.
-- [x] Verified market и delivery используют `valid_until > now`; refresh той же evidence не меняет fingerprint/decision/delivery.
-- [x] Создан `docs/PLAN_REVIEW_2026-07-25-R5.md` с итогом полного сквозного аудита.
-- [ ] План остаётся Draft до следующего явного утверждения; `0.11-STOP`, код и production не изменялись.
+- Существующий draft PR #1 не сливать и не использовать как production baseline.
+- Terraform apply до import существующих ресурсов запрещён.
+- WhatsApp включать только после внешних Meta credentials/template approval/opt-in.
+- Любое изменение build context после staging rehearsal требует нового RC и повторного rehearsal.

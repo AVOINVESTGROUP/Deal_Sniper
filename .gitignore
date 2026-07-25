@@ -29,5 +29,6 @@ ui-debug.log
 # Логи и временные файлы
 *.log
 .pytest_cache/
+.coverage
 .idea/
 .vscode/

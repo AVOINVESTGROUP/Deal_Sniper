@@ -246,7 +246,7 @@ class DealBot:
         await update.effective_message.reply_text(f"{source_name}: {report.summary()}")
 
 
-def format_card(
+def _format_card_legacy(
     listing: ListingSnapshot,
     decision: DealDecision,
     language: str = "ru",
@@ -278,6 +278,73 @@ def format_card(
         f"ID: <code>{html.escape(listing_id)}</code>\n"
         f"/watch {html.escape(listing_id)}"
     )
+
+
+def format_card(
+    listing: ListingSnapshot,
+    decision: DealDecision,
+    language: str = "ru",
+) -> str:
+    """Полная Pro-карточка с финансовой трассировкой и версиями расчёта."""
+    market = decision.market
+    market_text = (
+        f"{market.low_aed:,.0f}–{market.high_aed:,.0f} AED"
+        if market
+        else localized(language, "недостаточно данных", "insufficient data")
+    )
+    def value(item: Decimal | None) -> str:
+        return f"{item:,.0f} AED" if item is not None else "—"
+    roi = f"{decision.roi_percent}%" if decision.roi_percent is not None else "—"
+    risk_flags = [*decision.risks.stop_flags, *decision.risks.warnings]
+    risks = ", ".join(html.escape(item) for item in risk_flags) or "none"
+    reasons = "; ".join(html.escape(item) for item in decision.reasons) or "—"
+    comparables = (
+        ", ".join(html.escape(item) for item in market.comparable_ids)
+        if market and market.comparable_ids
+        else "—"
+    )
+    listing_id = f"{listing.source}:{listing.source_listing_id}"
+    return (
+        f"<b>{html.escape(decision.action.value)}</b>\n"
+        f"<b>{html.escape(listing.title)}</b>\n"
+        f"{localized(language, 'Цена', 'Price')}: <b>{listing.price_aed:,.0f} AED</b>\n"
+        f"{localized(language, 'Рынок', 'Market')}: {market_text}\n"
+        f"{localized(language, 'Максимальная цена покупки', 'Max purchase')}: "
+        f"{value(decision.max_purchase_price_aed)}\n"
+        f"{localized(language, 'Расходы и резерв', 'Costs and reserve')}: "
+        f"{value(decision.costs.total_aed)}\n"
+        f"{localized(language, 'Ожидаемая прибыль', 'Expected profit')}: "
+        f"{value(decision.expected_profit_aed)}\n"
+        f"ROI: {roi}\n"
+        f"{localized(language, 'Уверенность', 'Confidence')}: {decision.confidence:.0%}\n"
+        f"{localized(language, 'Риски', 'Risks')}: {risks}\n"
+        f"{localized(language, 'Причины', 'Reasons')}: {reasons}\n"
+        f"{localized(language, 'Аналоги', 'Comparables')}: {comparables}\n"
+        f"Engine: <code>{html.escape(decision.engine_version)}</code> · "
+        f"Config: <code>{html.escape(decision.financial_config_version)}</code>\n"
+        f"Market fingerprint: <code>{html.escape(decision.market_fingerprint or '—')}</code>\n"
+        f'<a href="{html.escape(str(listing.url), quote=True)}">'
+        f"{localized(language, 'Открыть объявление', 'Open listing')}</a>\n"
+        f"ID: <code>{html.escape(listing_id)}</code>\n"
+        f"/watch {html.escape(listing_id)}"
+    )
+
+
+def format_public_teaser(listing: ListingSnapshot, language: str = "en") -> str:
+    """Free teaser без идентификатора, ссылки и финансовых параметров Pro."""
+    title_parts = [listing.make, listing.model, str(listing.year) if listing.year else None]
+    title = " ".join(part for part in title_parts if part) or "Verified used car"
+    signal = localized(
+        language,
+        "Найден подтверждённый рыночный сигнал.",
+        "Verified market opportunity detected.",
+    )
+    cta = localized(
+        language,
+        "Получить полную оценку и ссылку: /find",
+        "Get the full analysis and listing: /find",
+    )
+    return f"<b>{html.escape(title)}</b>\n{signal}\n\n{cta}"
 
 
 def format_sources(service: DealService, language: str = "ru") -> str:

@@ -17,6 +17,7 @@ from src.domain.models import (
     CostEstimate,
     DecisionAction,
     ListingSnapshot,
+    MarketEstimate,
     RiskAssessment,
     SellerType,
 )
@@ -149,6 +150,42 @@ def test_warning_returns_inspect_only_for_profitable_listing() -> None:
     assert decision.expected_profit_aed is not None
     assert decision.expected_profit_aed > 0
     assert decision.action is DecisionAction.INSPECT
+
+
+def test_canonical_cost_and_max_purchase_formula_fixture() -> None:
+    cost_policy = CostPolicy()
+    costs = CostEngine(cost_policy).estimate(
+        Decimal("65000"), RiskAssessment(), Decimal("95000")
+    )
+    market = MarketEstimate(
+        low_aed=Decimal("100000"),
+        median_aed=Decimal("105000"),
+        high_aed=Decimal("110000"),
+        coverage_score=Decimal("1"),
+    )
+    decision = DecisionEngine(DecisionPolicy(), cost_policy).decide(
+        Decimal("65000"), market, costs
+    )
+
+    assert costs.registration_aed == Decimal("800.00")
+    assert costs.capital_aed == Decimal("718.03")
+    assert costs.selling_aed == Decimal("1900.00")
+    assert costs.risk_reserve_aed == Decimal("3500.00")
+    assert costs.total_aed == Decimal("16168.03")
+    assert decision.expected_profit_aed == Decimal("13831.97")
+    assert decision.max_purchase_price_aed == Decimal("73333")
+    assert decision.roi_percent == Decimal("17.0")
+
+
+def test_hard_stop_precedes_missing_market() -> None:
+    decision = DecisionEngine().decide(
+        asking_price_aed=Decimal("70000"),
+        market=None,
+        costs=CostEstimate(),
+        risks=RiskAssessment(stop_flags=["flood"]),
+    )
+    assert decision.action is DecisionAction.REJECT
+    assert decision.max_purchase_price_aed == Decimal("0")
 
 
 def test_telegram_card_uses_channel_english_and_device_russian() -> None:

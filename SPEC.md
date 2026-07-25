@@ -1,530 +1,91 @@
-# Спецификация проекта: Dubai Deal Sniper
+# Спецификация Dubai Deal Sniper
 
-## 1. Назначение и границы
+## 1. Назначение
 
-**Dubai Deal Sniper** — сервис мониторинга объявлений о продаже подержанных автомобилей с фиксированной ценой в ОАЭ. Система находит новые и подешевевшие автомобили, сопоставляет их с рыночными аналогами, рассчитывает допустимую цену покупки и отправляет пользователю объяснимое уведомление.
+Сервис находит автомобили с фиксированной ценой в ОАЭ, которые потенциально можно купить ниже подтверждённого рынка с заданной прибылью и ROI. Пользователь получает объяснимое решение `CONTACT`, `INSPECT`, `WATCH`, `REJECT` либо `INSUFFICIENT_DATA`.
 
-Первый пользовательский интерфейс продукта — простой Telegram-бот. После проверки качества сигналов backend расширяется Telegram Mini App (TMA), которая использует тот же API и ту же базу данных. TMA не входит в первый технический MVP.
+В продукт не входят недвижимость, аукционы, ставки, автоматическая покупка и автоматическое общение с продавцом.
 
-В продукт не входят:
+## 2. Результат расчёта
 
-- недвижимость;
-- автомобильные аукционы и автоматические ставки;
-- покупка автомобиля без решения пользователя;
-- использование ответа LLM как единственного источника рыночной цены.
+Полное решение содержит:
 
-### Целевая аудитория
+- точную версию объявления и подтверждённую цену;
+- нижнюю, медианную и верхнюю границы рынка;
+- максимальную цену покупки;
+- inspection, registration, preparation, repair, holding, capital, selling и risk costs;
+- ожидаемую прибыль и ROI;
+- риски, причины решения, уверенность и использованные аналоги;
+- версии движка/конфигурации и semantic market fingerprint.
 
-- перекупщики и небольшие автомобильные трейдеры;
-- покупатели, ищущие недооценённый автомобиль для личного использования.
+Финансовая арифметика выполняется `Decimal`-алгоритмами. Одинаковые канонические входы дают одинаковый decision ID. LLM может только обогащать текст и не участвует в финансовом решении.
 
-### Главный вопрос продукта
+## 3. Источники и достоверность
 
-> До какой цены автомобиль безопасно покупать, чтобы после всех расходов сохранить требуемую прибыль при допустимом риске?
+Production-адаптеры: DubiCars, CarSwitch, Cars24 UAE, OpenSooq UAE. Каждый источник имеет независимые настройки, health и переключатель. Коллектор обязан сохранить raw HTML/JSON в Cloud Storage до parsing.
 
-Главный результат — не бинарный `is_deal`, а структурированное решение:
+Объявление допускается к расчёту только если:
 
-- максимальная допустимая цена покупки;
-- консервативный диапазон цены перепродажи;
-- полная себестоимость;
-- ожидаемая чистая прибыль и ROI;
-- уровень уверенности и причины риска;
-- действие: `contact`, `watch`, `inspect` или `reject`.
+1. имеет фиксированную цену в AED;
+2. detail page принадлежит заявленному источнику и listing;
+3. подтверждённая цена отличается от snapshot не более чем на 3%;
+4. `freshness_status=active` и `valid_until > now`;
+5. версия остаётся current.
 
----
+`Price on request`, неверная валюта, несовпадающая страница, подозрительно низкая цена и постоянная ошибка переводят запись в quarantine/reject. Временная ошибка повторяется по retry policy, но не создаёт сигнал.
 
-## 2. Источники данных
+Semantic evidence revision неизменяема. Повторная успешная проверка той же цены обновляет только `last_checked_at` и `valid_until`, не меняя evidence, decision и delivery IDs.
 
-Источники разделяются по смыслу цены. Asking price частника, дилерская цена с гарантией, C2B-предложение и фактическая цена собственной сделки не должны усредняться без поправок.
+## 4. Версионирование и идентичность
 
-### Первая волна
+- raw snapshot и исторические версии неизменяемы;
+- current pointer меняется транзакционно по серверной последовательности и tie-breaker;
+- запоздавшая версия сохраняется, но не становится current;
+- task всегда адресует `listing_id + content_hash`;
+- старый snapshot не рассчитывается и не доставляется;
+- cross-source дубли объединяются до построения рынка;
+- отсутствие объявления на первой странице не равно удалению.
 
-1. **Dubizzle** — новые объявления, изменения asking price, частные и дилерские предложения.
-2. **DubiCars** — дополнительные рыночные аналоги и лиды.
-3. **YallaMotor** — used, new и certified предложения для расширения покрытия.
-4. **BuyAnyCar Historical Values** — ориентиры исторических C2B-транзакций после проверки доступности и покрытия.
-5. **RTA Vehicle Status / Inspection** — ручная проверка истории и состояния для отобранных автомобилей.
-6. **Собственные результаты** — цена покупки, ремонт, продажа и срок экспозиции как ground truth.
+Канонические ID используют UTF-8/NFC, отсортированные ключи JSON, точное представление Decimal/UTC и SHA-256 lowercase. `null` и отсутствующее поле различаются.
 
-### Вторая волна
+## 5. Рынок и решение
 
-- CarSwitch;
-- Cars24 UAE;
-- OpenSooq;
-- Al-Futtaim Automall;
-- Al Tayer Pre-Owned;
-- SellAnyCar как ориентир быстрой ликвидации;
-- PartSouq как ориентир стоимости деталей;
-- CarReport для дополнительной VIN-проверки после валидации покрытия.
+Comparable Engine использует только verified/current/fresh аналоги того же нормализованного make/model, затем применяет ограничения year, mileage, trim/specification и robust-очистку MAD. Один физический автомобиль учитывается один раз.
 
-Перед подключением каждого внешнего источника проверяются формат данных, авторизация, лимиты, частота обновления, стабильность схемы и стоимость интеграции.
+Решение не публикуется, если аналогов меньше настроенного минимума, данные просрочены, прибыль/ROI ниже порога, цена выше максимальной покупки либо сработал hard-stop риска. `INSPECT` означает финансово подходящий автомобиль, которому нужна проверка, а не отрицательную сделку.
 
----
+При изменении объявления пересчитываются current-решения затронутого make/model, потому что market fingerprint изменился.
 
-## 3. Архитектура
+## 6. Доставка
 
-Целевой backend строится на Firebase и Google Cloud без отдельного VPS и постоянно работающего локального процесса.
+Delivery строится через transactional outbox. Идентичность subject/recipient разделена: одно решение независимо доставляется пользователю, Free и Pro каналам. Состояния: `pending`, `sending`, `sent`, `failed`, `unknown`.
 
-```mermaid
-flowchart TD
-    A[Cloud Scheduler] --> B[Cloud Run Job: Collectors]
-    B --> C[Cloud Storage: raw snapshots]
-    B --> D[Cloud Firestore]
-    D --> E[Cloud Tasks]
-    E --> F[Cloud Run Service: Processing API]
-    F --> G[Нормализация и matching]
-    G --> H[Comparable Price Engine]
-    H --> I[Cost, Risk and Decision Engine]
-    I --> J[Vertex AI Gemini enrichment]
-    J --> D
-    F --> K[Telegram Bot webhook — MVP]
-    L[Firebase Hosting: TMA после пилота] --> F
-    L --> M[Firebase Authentication]
-    N[Secret Manager] --> B
-    N --> F
-```
+После неоднозначного timeout запись становится `unknown` и автоматически не повторяется. Администратор выполняет reconcile: `mark_sent`, `mark_failed` или единственный `retry_once`. Перед отправкой повторно проверяется current snapshot.
 
-### 3.1. Source Registry
+Free teaser не раскрывает цену, ссылку, ID, рынок, прибыль или ROI. Pro-карточка содержит полный audit trail. WhatsApp разрешён только для opt-in получателей через официальный Cloud API; без Meta credentials fail-closed.
 
-Для каждого источника хранит:
+## 7. Пользовательские функции
 
-- роль и тип цены;
-- способ и частоту доступа;
-- доступные поля;
-- уровень доверия;
-- правила дедупликации;
-- время последней успешной проверки;
-- состояние схемы и адаптера.
+Telegram-бот и TMA используют один Application API. Поддерживаются RU/EN запросы по make/model, бюджету, году, mileage, specification, body type, profit и ROI. Неизвестные параметры не выдумываются: бот показывает распознанные фильтры для подтверждения. Saved searches, settings, favorites и outcomes изолированы по owner ID.
 
-### 3.2. Marketplace Collectors
+Admin Web использует Firebase Authentication и admin claim/allowlist. Панель показывает состояние источников/pipeline, previews, контент и outbox reconciliation, но никогда не показывает секреты.
 
-Получают объявления с фиксированной ценой. Рекомендуемая базовая частота — раз в 5–15 минут с техническим ограничением частоты запросов. Коллектор сохраняет исходные данные до нормализации и не вызывает Gemini.
+## 8. Контент
 
-Запрещено незаметно заменять недоступный источник тестовыми объявлениями. Mock-режим должен включаться только явной конфигурацией разработки.
+Плановые форматы: Market Pulse, price drop, weekly review, deal analysis и audience poll. Каждый материал имеет период, выборку, provenance, template version и PublicationEvent. Финансовые утверждения строятся только из verified данных.
 
-### 3.3. Снимки и версии
+## 9. Нефункциональные требования
 
-Одно объявление может изменяться. Для него сохраняются версии:
+- Python 3.11 и type hints;
+- Firebase/Google Cloud без обязательного VPS;
+- Firestore и Cloud Storage вместо локального production-файла;
+- идемпотентные Jobs/Tasks, retry/backoff/rate limits;
+- Secret Manager и минимальные service-account permissions;
+- structured logs, metrics, alerts и budget alerts;
+- immutable image digest от staging до production;
+- migration ledger, checkpoints, checksums, rehearsal и rollback export;
+- CI: Ruff, mypy, pytest, coverage, pip-audit, Terraform validate и Trivy.
 
-- asking price;
-- описание и характеристики;
-- фотографии;
-- статус доступности;
-- время наблюдения.
+## 10. Критерий production-ready
 
-Повторная оценка запускается только для нового объявления или материального изменения. Простая повторная загрузка той же версии не должна вызывать Gemini.
-
-Каждая processing task адресует точную версию `listing_id + content_hash`. Обработчик загружает именно этот snapshot и отказывается от расчёта при его отсутствии. Snapshot раздельно хранит `source_observed_at`, `fetched_at` и серверный `ingested_at`. Указатель current обновляется транзакционно по серверному `version_sequence`/precondition и детерминированному tie-breaker; приложение не полагается только на собственный `observed_at`. Запоздавшая версия сохраняется в истории, но не становится current.
-
-Жизненный цикл объявления содержит `active`, `changed`, `stale`, `removed` и `quarantined`, а также `first_seen_at` и `last_seen_at`. Исчезновение с первых страниц поиска само по себе не доказывает удаление; состояние `removed` требует подтверждения detail page либо устойчивого правила источника.
-
-### 3.4. Межсайтовое объединение
-
-Один автомобиль может одновременно размещаться на нескольких сайтах. До расчёта рынка записи объединяются по:
-
-1. VIN;
-2. телефону продавца;
-3. устойчивому хешу фотографий;
-4. сочетанию марки, модели, года, комплектации, пробега, цвета и описания.
-
-Дубли не считаются независимыми рыночными аналогами.
-
-### 3.5. Нормализация
-
-Минимальные нормализованные признаки:
-
-- марка, модель и поколение;
-- год и комплектация;
-- двигатель, привод и коробка передач;
-- GCC/import specification;
-- пробег;
-- тип продавца;
-- эмират;
-- история ДТП и признаки повреждений;
-- сервисная история и гарантия, если доступны.
-
-### 3.6. Comparable Price Engine
-
-Детерминированно строит диапазон цены по сопоставимым автомобилям. Отдельно учитывает:
-
-- private asking;
-- dealer asking;
-- certified retail;
-- C2B/быструю ликвидацию;
-- собственные фактические продажи.
-
-Результат содержит нижнюю, медианную и верхнюю оценку, количество уникальных аналогов, свежесть данных и уровень покрытия.
-
-В Comparable Engine допускаются только объявления со статусом `verified`, immutable semantic evidence revision, `freshness_status = active` и `valid_until > now`. `verification_key` является SHA-256 canonical JSON объекта `verification-key/v1` с полями `source`, `listing_id`, `content_hash` и `extractor_version`; состояния проверки: `pending`, `verified`, `temporary_error`, `permanent_invalid`, а operational freshness — `active/expired`. TTL, rate limit и circuit breaker задаются отдельно для источника. Типы `private`, `dealer`, `certified` и `C2B` рассчитываются раздельно. Отбор аналогов не ограничивается отношением к asking price оцениваемого автомобиля; причины принятия и отклонения каждого аналога сохраняются.
-
-`market_fingerprint` включает только семантически значимые evidence: `listing_id`, `content_hash` либо immutable verified-price revision ID, подтверждённую цену, валюту, source role, extractor/config/adjustment versions и accepted/rejected status. В него не входят `last_checked_at`, `valid_until`, `freshness_status`, attempt number, latency и operational status, не меняющий доказательство цены. `evidence_created_at` входит только как неизменяемое время создания новой evidence revision. Изменение verified market bucket ставит затронутые `decision_subject_id` на пересчёт; перед выдачей и delivery несовпадающий fingerprint блокирует старое решение.
-
-Повторная detail verification при неизменившихся цене, валюте, snapshot и extractor version обновляет `last_checked_at`, `valid_until` и `freshness_status`, но сохраняет `evidence_created_at`, evidence revision, `market_fingerprint`, `decision_id` и `delivery_id`. Она не создаёт новую публикацию. Изменение цены, валюты, snapshot, extractor version либо semantic verification result создаёт новую immutable evidence revision и новый fingerprint.
-
-`verification_version` в `decision_id` равен ID immutable semantic evidence revision. Он не меняется от `last_checked_at`, TTL refresh, номера попытки или latency.
-
-### 3.7. Cost and Risk Engine
-
-Расходы хранятся диапазонами `low/expected/high`. Для решения используется явно версионированный консервативный `repair_basis`, по умолчанию `repair_high`. Канонические обозначения:
-
-```text
-R = market_low × (1 - liquidity_discount_rate)
-P = цена покупки: asking для оценки либо неизвестная величина для max purchase
-repair_basis = repair_high
-c = annual_capital_rate × hold_days / 365
-r = risk_rate
-
-base_fixed = inspection + registration + repair_basis + preparation + holding
-selling = R × selling_rate
-capital(P) = (P + inspection + registration + repair_basis + preparation) × c
-risk_reserve(P) = (P + repair_basis) × r
-non_purchase_cost(P) = base_fixed + selling + capital(P) + risk_reserve(P)
-```
-
-`selling` считается от консервативной цены перепродажи. Стоимость капитала считается от реально вложенного до продажи капитала. Basis резерва риска фиксируется конфигурацией; в первой канонической версии это `P + repair_basis`. Резерв риска входит в `non_purchase_cost` ровно один раз.
-
-Стоп-факторы переводят автомобиль в `inspect` или `reject`: неизвестные документы, повреждение шасси, признаки затопления, критически неполные характеристики, неподтверждённый VIN и недостаток сопоставимых автомобилей.
-
-### 3.8. Decision Engine
-
-```text
-expected_profit = R - asking - non_purchase_cost(asking)
-invested_capital = asking + non_purchase_cost(asking)
-roi = expected_profit / invested_capital
-
-constant = base_fixed
-           + selling
-           + c × (inspection + registration + repair_basis + preparation)
-           + r × repair_basis
-max_purchase_price = (R - target_profit - constant) / (1 + c + r)
-```
-
-Формула `max_purchase_price` является алгебраическим решением зависимости расходов от цены покупки; детерминированная итерация не требуется. Все rate-поля хранятся Decimal-долями `0..1`; процентное представление допускается только в UI. Денежные значения сериализуются десятичными строками AED, binary float запрещён. Промежуточная точность — не менее `0.0001 AED`, итоговые денежные поля округляются `ROUND_HALF_UP` до `0.01 AED`, а максимальная цена покупки — вниз до целого AED. При необрезанном значении `max_purchase_price <= 0` публикуемая максимальная цена равна нулю и решение не может быть `CONTACT/INSPECT`. Финансовая арифметика выполняется приложением, а не LLM. Версия коэффициентов, repair basis, единиц rate, rounding policy и формулы входит в `financial_config_version`.
-
-### 3.9. LLM Enrichment
-
-LLM применяется только после сохранения новой версии объявления и дешёвой предварительной фильтрации. Допустимые задачи:
-
-- извлечение повреждений и комплектации из текста;
-- классификация неструктурированных рисков;
-- краткое объяснение уже рассчитанного решения.
-
-LLM не является источником окончательной рыночной цены и не пересчитывается при неизменившейся версии объявления.
-
-### 3.10. Пользовательские интерфейсы
-
-Backend работает постоянно и не зависит от того, открыт ли Telegram. Коллекторы, расчёты и повторная доставка выполняются фоновыми задачами. Telegram-бот и будущая TMA являются клиентами прикладного API, а не местом выполнения сбора и финансовых расчётов.
-
-#### 3.10.1. Telegram-бот — первый MVP
-
-Telegram-уведомление отправляется при:
-
-- появлении нового подходящего автомобиля;
-- снижении цены, изменившем решение;
-- переходе в `contact` или `inspect`;
-- существенном изменении риска.
-
-Алерт содержит asking price, максимальную цену покупки, рыночный диапазон, расходы, прибыль, ROI, confidence, риски и ссылку для связи с продавцом.
-
-Минимальные команды и действия бота:
-
-- `/start` — регистрация пользователя и краткое объяснение продукта;
-- `/settings` — просмотр активных параметров поиска;
-- `/status` — состояние мониторинга и время последней успешной проверки;
-- кнопка «Открыть объявление»;
-- кнопка «В избранное»;
-- кнопки «Связаться», «Осмотреть», «Отклонить» для записи реакции пользователя.
-
-Настройки первого MVP допускается хранить в `.env` для одного пользователя. До подключения нескольких пользователей конфигурация переносится в базу данных и связывается с `telegram_user_id`.
-
-#### 3.10.2. Telegram Mini App — развитие после пилота
-
-TMA добавляется только после подтверждения качества рыночной оценки и полезности Telegram-сигналов. Она использует существующий Application API и предоставляет:
-
-- ленту новых и подешевевших автомобилей;
-- фильтры поиска и управление бизнес-порогами;
-- полную карточку решения с аналогами и историей цены;
-- избранное и статусы работы с автомобилем;
-- ввод результатов осмотра, покупки, ремонта и продажи;
-- агрегированную статистику фактической прибыли и ROI.
-
-Авторизация TMA выполняется через проверку подписанных Telegram `initData` на backend. Нельзя доверять переданному клиентом `telegram_user_id` без криптографической проверки. Добавление TMA не должно менять коллекторы, ценовой движок и Decision Engine.
-
-После успешной проверки `initData` backend создаёт Firebase custom token с UID, производным от Telegram user ID. TMA входит через Firebase Authentication и получает доступ только к разрешённым данным пользователя.
-
-#### 3.10.3. Бесплатный и Pro-каналы
-
-Публичный канал и закрытый Pro-канал являются разными продуктами и получают разные представления одного проверенного решения.
-
-Публичный канал получает короткий англоязычный тизер:
-
-- марка, модель, год и защищённое изображение: crop/blur/watermark, нейтральное изображение модели либо тизер с задержкой;
-- тип сигнала без точной финансовой модели;
-- ориентировочная величина скидки только при достаточной уверенности;
-- призыв открыть Telegram-бота или присоединиться к Pro;
-- без ID объявления, прямой ссылки продавца, полного диапазона рынка, прибыли, ROI, максимальной цены покупки и списка аналогов; остаточная discoverability через внешний поиск признаётся и измеряется.
-
-Pro-канал получает полную проверенную карточку: цену и ссылку продавца, рынок, максимальную цену покупки, детализацию расходов, прибыль, ROI, confidence, risk flags, причины решения, размер выборки, использованные и отклонённые аналоги, версию Engine и дату рыночного среза. Одна версия объявления имеет независимые notification ID для публичного, Pro и персонального получателя.
-
-Новые публикации обязаны использовать разделение контента. Старые полные сообщения в публичном канале очищаются отдельной операцией: Telegram Bot API не позволяет получить полную историю канала, поэтому без заранее сохранённых `message_id` требуется ручное удаление владельцем.
-
-#### 3.10.4. Подбор автомобиля по запросу пользователя
-
-Личный Telegram-бот открыт пользователям для поиска, но административные команды доступны только роли `admin`. Пользователь может написать `/find` и запрос на русском или английском, например: `Toyota Prado, 2020+, GCC, до 180000 AED, пробег до 100000 км`.
-
-Backend преобразует запрос в проверяемую структуру `SearchRequest`:
-
-- марка и модель;
-- минимальный и максимальный год;
-- максимальная цена и пробег;
-- specification, кузов и другие поддерживаемые признаки;
-- минимальная прибыль и ROI для инвестиционного режима;
-- язык, статус и срок действия запроса.
-
-Извлечение параметров может использовать Vertex AI только как parser текста. Перед поиском результат показывается пользователю для подтверждения; неизвестные значения не додумываются. Поиск выполняется по текущим нормализованным объявлениям, а цена каждого результата повторно проверяется на detail page. При отсутствии результата запрос становится подпиской на новые совпадения.
-
-#### 3.10.5. Панель управления
-
-Отдельная административная панель размещается на Firebase Hosting и обращается к Admin API в Cloud Run. Вход выполняется через Firebase Authentication; backend проверяет Firebase ID token и роль `admin`. Telegram allowlist не заменяет авторизацию панели.
-
-Первая версия панели предоставляет:
-
-- обзор состояния источников, очередей, планировщиков и последних ошибок;
-- включение, отключение и ручной запуск зарегистрированных источников;
-- просмотр кандидатов, карантина, проверок цены и истории публикаций;
-- управление версионированными порогами прибыли, ROI и качества данных;
-- настройку публичного, Pro и информационного расписаний;
-- просмотр пользователей, поисковых запросов и подписок без отображения секретов;
-- предварительный просмотр публикации и ручное подтверждение спорного материала;
-- неизменяемый журнал административных действий.
-
-Токены и ключи не показываются и не редактируются в панели: они остаются в Secret Manager. Изменение финансовых порогов создаёт новую версию конфигурации и не переписывает старые решения.
-
-#### 3.10.6. Информационный контент для аудитории
-
-Контентный модуль поддерживает интерес аудитории только фактами из проверенной базы:
-
-- ежедневный market pulse по числу новых машин и изменениям цены;
-- крупнейшие подтверждённые price drops;
-- недельные обзоры моделей, диапазонов цены и ликвидности;
-- объяснение отдельного предложения и используемых аналогов;
-- опросы и призывы сформировать персональный запрос в боте.
-
-Каждая публикация содержит период данных и размер выборки. LLM может улучшить формулировку, но не создаёт числа и факты. Материал с недостаточной выборкой не публикуется. Частота, рубрики и режим `draft/automatic` управляются из панели.
-
-#### 3.10.7. WhatsApp
-
-Система формирует независимое событие `PublicationEvent`, которое может доставляться несколькими адаптерами. В [официальной коллекции Meta](https://www.postman.com/meta/whatsapp-business-platform/folder/o48mro7/messages) WhatsApp Business Cloud API описана отправка сообщений клиентам, а `recipient_type` в операциях отправки ограничен отдельным получателем; отдельного Channels endpoint в опубликованной коллекции нет. Поэтому автоматическая публикация в WhatsApp Channel не заявляется как доступная функция, а неофициальная автоматизация WhatsApp Web в план не включается.
-
-Поддерживаемый официальный вариант — рассылка подписавшимся получателям через WhatsApp Business Cloud API после настройки WABA, business phone number, шаблонов и секретов. Адаптер включается только после предоставления владельцем рабочих Meta-реквизитов и успешной тестовой доставки. Если Meta выпустит официальный Channels API, к `PublicationEvent` добавляется отдельный channel-adapter без изменения расчётного ядра.
-
-### 3.11. Google Cloud backend
-
-Целевая инфраструктура:
-
-- **Cloud Run Service** — Python 3.11 + FastAPI, Telegram webhook, Application API, обработчики Cloud Tasks и будущий API TMA;
-- **Cloud Run Jobs** — конечные запуски коллекторов классифайдов;
-- **Cloud Scheduler** — запуск каждого коллектора по расписанию;
-- **Cloud Firestore Native mode** — оперативные сущности, версии объявлений, решения, настройки и действия пользователей;
-- **Cloud Tasks** — надёжная обработка новых версий, ограничение частоты и повтор Telegram-уведомлений;
-- **Cloud Storage** — исходные HTML/JSON-снимки и крупные технические объекты, которые не следует помещать в Firestore;
-- **Vertex AI Gemini через `google-genai`** — LLM enrichment с авторизацией service account;
-- **Secret Manager** — Telegram token и другие секреты;
-- **Cloud Logging и Cloud Monitoring** — логи, ошибки, задержки и алерты;
-- **Firebase Hosting** — frontend административной панели, будущей TMA и проксирование `/api/**` в Cloud Run;
-- **Firebase Authentication** — административная сессия панели и пользовательская сессия TMA после серверной проверки Telegram `initData`;
-- **BigQuery** — необязательный аналитический слой после накопления истории; не входит в первый MVP.
-
-В первом MVP не используются VPS, PostgreSQL, Redis и Celery. Масштабирование выполняют управляемые сервисы Google Cloud. Все ресурсы размещаются в одном согласованном регионе, если источник или сервис не требует иного.
-
-Коллектор не выполняется внутри HTTP-запроса пользователя. Cloud Run Job получает данные источника, сохраняет сырой снимок и Firestore-метаданные, после чего создаёт идемпотентную Cloud Task для обработки новой версии.
-
----
-
-## 4. Состояния обработки
-
-```text
-discovered
-→ persisted
-→ matched
-→ normalized
-→ priced
-→ risk_checked
-→ contact / watch / inspect / reject
-→ alerted
-→ outcome_recorded
-```
-
-Сохранение `persisted` выполняется до Gemini. Состояние отправки Telegram хранится независимо, чтобы повтор уведомления не требовал повторной оценки.
-
-Доставка через внешний API имеет outbox-состояния `pending`, `sending`, `sent`, `failed` и `unknown`. Строгая гарантия exactly-once не заявляется, поскольку Telegram не принимает клиентский idempotency key. При неоднозначном результате внешнего вызова запись переводится в `unknown` для сверки и не отправляется повторно вслепую.
-
----
-
-## 5. Минимальные модели данных Firestore
-
-Рекомендуемые пути документов:
-
-```text
-sources/{source_id}
-listings/{listing_id}
-listings/{listing_id}/snapshots/{content_hash}
-listings/{listing_id}/verifications/{verification_key}
-vehicles/{vehicle_id}
-decisions/{decision_id}
-current_decisions/{decision_subject_id}
-users/{telegram_user_id}/settings/current
-users/{telegram_user_id}/favorites/{vehicle_id}
-notifications/{notification_id}
-outcomes/{outcome_id}
-search_requests/{request_id}
-publication_events/{event_id}
-delivery_attempts/{delivery_id}
-content_posts/{post_id}
-admin_audit/{event_id}
-migrations/{migration_id}
-```
-
-### Канонический контракт идентификаторов
-
-Составные идентификаторы не создаются конкатенацией строк. Исходный объект содержит поле `schema`, сериализуется в UTF-8 canonical JSON и хешируется SHA-256; Firestore document ID — lowercase hexadecimal из 64 символов. Для Cloud Task используется допустимый префикс типа и тот же hex hash.
-
-Canonical JSON contract:
-
-- ключи объектов сортируются лексикографически, whitespace отсутствует, строки нормализуются Unicode NFC;
-- денежные Decimal сериализуются строкой с двумя знаками, rate — строкой с шестью знаками, exponent и binary float запрещены;
-- timestamps сериализуются в UTC RFC 3339 с миллисекундами: `YYYY-MM-DDTHH:mm:ss.SSSZ`;
-- null/отсутствующее поле различаются по версии schema; произвольное удаление пустых полей запрещено;
-- массив-множество сортируется по явно заданному schema key, а массив с доменно значимым порядком сохраняет порядок;
-- изменение правил требует нового schema tag и поэтому нового hash.
-
-Доменные объекты идентичности:
-
-```text
-verification_key   = sha256(canonical_json({schema: verification-key/v1, ...}))
-market_fingerprint = sha256(canonical_json({schema: market-fingerprint/v1, ...}))
-decision_id        = sha256(canonical_json({schema: decision-id/v1,
-                         listing_id, content_hash, engine_version,
-                         financial_config_version, verification_version,
-                         market_fingerprint}))
-delivery_id        = sha256(canonical_json({schema: delivery-id/v1,
-                         decision_id, delivery_recipient_id,
-                         template_version, format}))
-```
-
-Тот же контракт применяется к operation ID, migration ID, publication event ID и Cloud Task name. Golden fixtures обязаны давать одинаковые hashes в Python, migration tooling и любом будущем runtime.
-
-`decision_subject_id = listing_id`: финансовое решение относится к конкретному объявлению, snapshot и asking price. `vehicle_id` является cross-source identity для связи и дедупликации объявлений, но не подменяет listing-specific решение; два объявления одного автомобиля с разными asking price имеют разные decision subjects. `delivery_recipient_id` однозначно описывает Telegram user/chat/channel либо получателя другого адаптера и не используется как subject финансового решения.
-
-Согласованные изменения состояния выполняются Firestore transaction либо compare-and-set с precondition. Новое решение и переключение `current_decisions/{decision_subject_id}` записываются одной транзакцией: pointer указывает ровно на одно решение, а прежнее получает `superseded_by`. Выдача читает pointer индексируемым запросом и не определяет current полным scan или клиентской сортировкой.
-
-### ListingSnapshot
-
-- `source`;
-- `external_id`;
-- `url`;
-- `observed_at`;
-- `asking_price_aed`;
-- `title` и `raw_description`;
-- исходные характеристики и фотографии;
-- `content_hash`;
-- `availability_status`.
-
-### VehicleIdentity
-
-- нормализованные марка, модель, поколение, год и trim;
-- VIN при наличии;
-- пробег и specification;
-- связи со снимками разных источников;
-- confidence межсайтового совпадения.
-- стабильный `vehicle_id`, `identity_version` и `cluster_status`;
-- evidence каждой связи, merge/split events и audit trail;
-- запрет транзитивного auto-merge без попарной совместимости.
-
-### DealDecision
-
-- `decision_subject_id` (`listing_id`);
-- `vehicle_id` для cross-source связи и отдельной политики дедупликации публикаций;
-- `market_price_low_aed`;
-- `market_price_median_aed`;
-- `market_price_high_aed`;
-- `max_purchase_price_aed`;
-- `total_cost_aed`;
-- `expected_profit_aed`;
-- `roi_percent`;
-- `confidence`;
-- `action`;
-- `risk_flags`;
-- список использованных аналогов и происхождение данных.
-- `content_hash`, `engine_version`, `financial_config_version`, `verification_version` и `market_fingerprint`;
-- `superseded_by` и признак current; выдача исключает stale, removed, quarantined и истёкшую verification.
-
----
-
-## 6. Конфигурация и секреты
-
-Локально параметры читаются из `.env`. В Google Cloud несекретная конфигурация передаётся как environment variables Cloud Run, а секреты подключаются из Secret Manager. Service account JSON запрещено включать в образ или репозиторий: Cloud Run использует Application Default Credentials и отдельные service accounts с минимальными IAM-ролями.
-
-Минимальный набор несекретных параметров:
-
-- `TARGET_PROFIT_AED`;
-- `MIN_ROI_PERCENT`;
-- `MAX_HOLD_DAYS`;
-- `RISK_RESERVE_PERCENT`;
-- `MIN_COMPARABLES_COUNT`;
-- `AED_TO_USD_RATE`;
-- `GOOGLE_CLOUD_PROJECT`;
-- `GOOGLE_CLOUD_REGION`;
-- `FIRESTORE_DATABASE`;
-- имена Cloud Tasks queues и Cloud Storage bucket;
-- Vertex AI location и имя модели;
-- явный флаг `ENABLE_MOCK_SOURCES=false`.
-
-Частота сбора задаётся расписанием Cloud Scheduler в Infrastructure as Code, а не бесконечным циклом и не переменной процесса Cloud Run.
-
-В Secret Manager хранятся Telegram bot token и учетные данные внешних источников, если они потребуются. Для Telegram-бота задаётся разрешённый `TELEGRAM_USER_ID` или список пользователей. `TMA_URL` добавляется только на этапе Mini App.
-
-Для панели в конфигурации хранится список разрешённых Firebase UID или custom claim `admin`. Для официальной WhatsApp Business-доставки в Secret Manager хранятся access token и webhook secret; phone number ID и версия Graph API являются несекретной конфигурацией. До настройки этих параметров WhatsApp-адаптер выключен.
-
-Индексы Firestore, Firebase Security Rules, конфигурация Hosting и описание ресурсов Google Cloud хранятся в репозитории. Рекомендуемый способ воспроизводимого развёртывания — Terraform либо эквивалентный Infrastructure as Code.
-
-Пороговые значения утверждаются после фиксации капитала, целевого сегмента и результатов пилота.
-
----
-
-## 7. Метрики качества
-
-1. Доля проверенных сигналов, сохранивших требуемую прибыль после осмотра.
-2. Ошибка прогноза цены продажи.
-3. Ошибка оценки ремонта.
-4. Фактическая чистая прибыль и ROI завершённых сделок.
-5. Время от публикации до полезного уведомления.
-6. Доля межсайтовых дублей.
-7. Число обращений к LLM на одну версию объявления.
-8. Потерянные и повторные Telegram-уведомления.
-9. Конверсия публичного тизера в запуск бота и подписку Pro.
-10. Число активных поисковых запросов и доля запросов с найденным результатом.
-11. Доля информационных публикаций, прошедших проверку достаточности данных.
-12. Успешность доставки по каждому каналу независимо.
-
----
-
-## 8. Порядок реализации
-
-Канонический порядок и критерии находятся в `docs/IMPLEMENTATION_PLAN.md`; этот раздел не дублирует динамический release backlog.
-
-Обязательный текущий gate:
-
-1. `0.11-STOP` — после отдельного подтверждения владельца ограничить небезопасный production и сохранить backup/deployment manifest.
-2. `0.11R` — до разработки создать issues/replacement PR strategy, защитить `main` и назначить независимого reviewer.
-3. `0.11A` — исправить provenance, owner scope, роли, retry и outbox.
-4. `0.11B` — исправить verified market, decision identity, финансовую модель, риски и identity resolution.
-5. `0.11C` — исправить lifecycle, запросы, конфигурацию, IAM, IaC и CI.
-6. `0.11MI` — реализовать и протестировать schema-versioned migration tooling, dry-run, checkpoints, rollback boundary и raw replay.
-7. `0.11RC` — заморозить точный release candidate commit, runtime/migration image digests и пройти staging/rehearsal.
-8. `0.11M` — без изменения кода выполнить утверждённым migration digest миграцию, raw catch-up и reconciliation, не возобновляя production.
-9. `0.11D` — сделать `main` указателем на тот же RC commit, развернуть тот же runtime digest и выполнить staged resume.
-10. `0.11P` — заново провести официальный пилот; прежние результаты считать диагностическими.
-11. Только после этого начинать `0.12+`: Free/Pro, поиск, панель, контент, официальный WhatsApp Business adapter и TMA.
-
-Подробные этапы и границы релизов описаны в `docs/IMPLEMENTATION_PLAN.md`, а схема ресурсов, потоков, IAM и идемпотентности — в `docs/CLOUD_ARCHITECTURE.md`.
+Production разрешено возобновить только когда один RC commit собран в immutable runtime/migration digests, тот же migration digest прошёл staging restore/rehearsal, production migration завершена с delivery disabled, `main` указывает на RC, runtime digest развёрнут и `/version` подтверждает commit/digest/schema. Resume выполняется collectors → processing → delivery; затем проходит пилот 100–300 объявлений без ложных цен, утечек Free и неконтролируемых дублей.

@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 
 from src.config import Settings
-from src.domain.models import DecisionAction, ListingSnapshot, SellerType
+from src.domain.models import DecisionAction, ListingSnapshot, SellerType, VerificationStatus
 from src.service import DealService
 from src.storage import LocalRepository
+from src.verification import PriceVerification
 
 
 class FixtureSource:
@@ -21,6 +22,16 @@ class FixtureSource:
 
     async def fetch(self) -> list[ListingSnapshot]:
         return self.listings
+
+
+async def verify_fixture(listing: ListingSnapshot) -> PriceVerification:
+    return PriceVerification(
+        VerificationStatus.VERIFIED,
+        listing.price_aed,
+        "fixture verified",
+        checksum_sha256="a" * 64,
+        currency="AED",
+    )
 
 
 def camry(index: int, price: int) -> ListingSnapshot:
@@ -56,6 +67,7 @@ async def test_pipeline_is_versioned_and_does_not_reprocess_unchanged_data(
         settings,
         LocalRepository(settings.database_path),
         {"fixture": FixtureSource(listings)},
+        verifier=verify_fixture,
     )
 
     first = await service.scan()
@@ -67,3 +79,54 @@ async def test_pipeline_is_versioned_and_does_not_reprocess_unchanged_data(
     assert second.new == 0
     assert second.changed == 0
     assert second.decisions == []
+
+
+@pytest.mark.asyncio
+async def test_processing_rejects_missing_exact_snapshot(tmp_path: Path) -> None:
+    settings = replace(
+        Settings.from_env(),
+        storage_backend="local",
+        database_path=tmp_path / "missing.db",
+    )
+    repository = LocalRepository(settings.database_path)
+    service = DealService(
+        settings,
+        repository,
+        {"fixture": FixtureSource([])},
+        verifier=verify_fixture,
+    )
+
+    result = await service.process_listing("fixture:missing", "not-a-real-content-hash")
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_market_change_recalculates_existing_vehicle(tmp_path: Path) -> None:
+    settings = replace(
+        Settings.from_env(),
+        storage_backend="local",
+        database_path=tmp_path / "recalculation.db",
+        min_comparables_count=5,
+    )
+    source = FixtureSource(
+        [camry(0, 60_000)]
+        + [camry(index, 100_000 + index * 1_000) for index in range(1, 7)]
+    )
+    service = DealService(
+        settings,
+        LocalRepository(settings.database_path),
+        {"fixture": source},
+        verifier=verify_fixture,
+    )
+    first = await service.scan()
+    original = next(item for item in first.decisions if item.listing.source_listing_id == "0")
+
+    source.listings[1] = camry(1, 130_000)
+    second = await service.scan()
+    recalculated = next(
+        item for item in second.decisions if item.listing.source_listing_id == "0"
+    )
+
+    assert original.decision.market_fingerprint != recalculated.decision.market_fingerprint
+    assert original.decision.decision_id != recalculated.decision.decision_id

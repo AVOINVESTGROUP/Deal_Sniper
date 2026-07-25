@@ -2,17 +2,24 @@
 
 import asyncio
 import logging
+import os
+from collections.abc import AsyncIterator
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, Header, HTTPException
+from httpx import TimeoutException, TransportError
+from pydantic import BaseModel, Field
 from telegram import Bot
 from telegram.constants import ParseMode
+from telegram.error import NetworkError, TimedOut
 
+from src.admin_cloud import cloud_runtime_status
+from src.auth import Principal, verify_firebase_bearer, verify_telegram_init_data
 from src.bot import (
     format_card,
+    format_public_teaser,
     format_sources,
     is_publishable,
     localized,
@@ -21,11 +28,28 @@ from src.bot import (
 )
 from src.cloud_jobs import CloudJobLauncher
 from src.config import Settings
-from src.domain.models import UserAction, UserSettings
+from src.content import audience_poll, deal_analysis, market_pulse, price_drop, weekly_review
+from src.domain.ids import (
+    delivery_id,
+    operation_id,
+    publication_event_id,
+    verification_key,
+)
+from src.domain.models import (
+    OutboxRecord,
+    OutboxState,
+    Outcome,
+    ProcessingState,
+    PublicationEvent,
+    UserAction,
+    UserSettings,
+)
+from src.search import build_saved_search, parse_search
 from src.service import DealService, EvaluatedListing
 from src.storage import snapshot_hash
 from src.tasks import CloudTaskDispatcher
-from src.verification import verify_listing_price
+from src.verification import EXTRACTOR_VERSION, evidence_is_active
+from src.whatsapp import WhatsAppAdapter, WhatsAppConfig
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -43,11 +67,115 @@ class ProcessingTask(BaseModel):
 
 
 class DeliveryTask(BaseModel):
+    delivery_id: str
+    decision_id: str
     target_id: str
     listing_id: str
     content_hash: str
     text: str
     engine_version: str | None = None
+    template_version: str = "pro/v1"
+    format: str = "telegram"
+    image_url: str | None = None
+
+
+class SourceAdminRequest(BaseModel):
+    enabled: bool
+
+
+class OutboxReconciliationRequest(BaseModel):
+    action: str
+
+
+class TmaAuthRequest(BaseModel):
+    init_data: str
+
+
+class OutcomeRequest(BaseModel):
+    listing_id: str
+    decision_content_hash: str
+    status: str
+    purchase_price_aed: Decimal | None = None
+    actual_cost_aed: Decimal | None = None
+    sale_price_aed: Decimal | None = None
+    hold_days: int | None = None
+
+
+class FavoriteRequest(BaseModel):
+    listing_id: str
+    favorite: bool = True
+
+
+class ContentDeliveryTask(BaseModel):
+    delivery_id: str
+    publication_event_id: str
+    target_id: str
+    text: str
+    template_version: str = "content/v1"
+
+
+class WhatsAppDeliveryTask(BaseModel):
+    delivery_id: str
+    publication_event_id: str
+    recipient: str
+    template_name: str
+    language_code: str = "en_US"
+    components: list[dict[str, Any]] = Field(default_factory=list)
+    opted_in: bool
+
+
+async def telegram_update_lease(
+    update: dict[str, Any],
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> AsyncIterator[bool]:
+    """Фиксирует processing/completed/failed и допускает повтор после истечения lease."""
+    expected = settings.telegram_webhook_secret
+    update_id = update.get("update_id")
+    if (
+        not settings.delivery_enabled
+        or (expected and x_telegram_bot_api_secret_token != expected)
+        or not isinstance(update_id, int)
+    ):
+        yield True
+        return
+    claimed = await asyncio.to_thread(
+        service.repository.claim_telegram_update,
+        update_id,
+        os.getenv("K_REVISION", "local-webhook"),
+    )
+    if not claimed:
+        yield False
+        return
+    try:
+        yield True
+    except Exception as error:
+        await asyncio.to_thread(
+            service.repository.finish_telegram_update,
+            update_id,
+            ProcessingState.FAILED,
+            f"{type(error).__name__}: {error}",
+        )
+        raise
+    else:
+        await asyncio.to_thread(
+            service.repository.finish_telegram_update,
+            update_id,
+            ProcessingState.COMPLETED,
+        )
+
+
+def firebase_principal(authorization: str | None, *, require_admin: bool) -> Principal:
+    try:
+        principal = verify_firebase_bearer(
+            authorization,
+            settings.google_cloud_project,
+            settings.admin_emails,
+        )
+    except PermissionError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+    if require_admin and not principal.admin:
+        raise HTTPException(status_code=403, detail="Требуется роль администратора")
+    return principal
 
 
 def require_internal_task(secret: str | None, task_name: str | None) -> None:
@@ -117,7 +245,22 @@ def user_accepts(value: UserSettings, item: EvaluatedListing) -> bool:
     if decision.roi_percent is None or decision.roi_percent < value.min_roi_percent:
         return False
     allowed_makes = {make.casefold() for make in value.makes}
-    return not allowed_makes or (item.listing.make or "").casefold() in allowed_makes
+    if allowed_makes and (item.listing.make or "").casefold() not in allowed_makes:
+        return False
+    allowed_models = {model.casefold() for model in value.models}
+    if allowed_models and (item.listing.model or "").casefold() not in allowed_models:
+        return False
+    if value.min_year is not None and (item.listing.year or 0) < value.min_year:
+        return False
+    if value.max_year is not None and (item.listing.year or 9999) > value.max_year:
+        return False
+    if (
+        value.max_mileage_km is not None
+        and (item.listing.mileage_km is None or item.listing.mileage_km > value.max_mileage_km)
+    ):
+        return False
+    specifications = {item.casefold() for item in value.specifications}
+    return not specifications or (item.listing.specification or "").casefold() in specifications
 
 
 @app.get("/health")
@@ -129,32 +272,338 @@ async def health() -> dict[str, str]:
 @app.get("/ready")
 async def ready() -> dict[str, str]:
     """Проверка обязательной production-конфигурации."""
-    if not settings.telegram_bot_token or not settings.google_cloud_project:
+    if settings.storage_backend == "firestore" and not settings.google_cloud_project:
         raise HTTPException(status_code=503, detail="Обязательная конфигурация отсутствует")
-    return {"status": "ready"}
+    if settings.delivery_enabled and not settings.telegram_bot_token:
+        raise HTTPException(status_code=503, detail="Delivery включена без Telegram token")
+    actual_schema = await asyncio.to_thread(service.repository.schema_version)
+    if actual_schema != settings.schema_version:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Несовместимая схема: runtime={settings.schema_version}, data={actual_schema}",
+        )
+    return {"status": "ready", "schema_version": actual_schema}
 
 
 @app.get("/version")
 async def version() -> dict[str, str]:
     """Версия API и детерминированного движка для smoke checks."""
-    return {"api": "0.6.0", "decision_engine": service.decision_engine.version}
+    return {
+        "git_commit": settings.git_commit,
+        "runtime_image_digest": settings.runtime_image_digest,
+        "api_version": "1.0.0",
+        "engine_version": service.decision_engine.version,
+        "schema_version": settings.schema_version,
+        "financial_config_version": settings.financial_config_version,
+    }
+
+
+@app.get("/admin/overview")
+async def admin_overview(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Безопасный агрегат панели без секретных значений."""
+    firebase_principal(authorization, require_admin=True)
+    cloud = await asyncio.to_thread(
+        cloud_runtime_status, settings.google_cloud_project, settings.google_cloud_region
+    )
+    return {
+        "snapshot_count": await asyncio.to_thread(service.repository.count_snapshots),
+        "sources": await asyncio.to_thread(service.repository.source_health),
+        "source_switches": service.source_statuses(),
+        "delivery_enabled": settings.delivery_enabled,
+        "whatsapp_status": "ready"
+        if settings.whatsapp_enabled
+        and settings.whatsapp_access_token
+        and settings.whatsapp_phone_number_id
+        else "disabled",
+        "schema_version": settings.schema_version,
+        "operations": await asyncio.to_thread(service.repository.admin_summary),
+        "cloud": cloud,
+        "financial_config": {
+            "version": settings.financial_config_version,
+            "target_profit_aed": str(settings.target_profit_aed),
+            "min_roi_percent": str(settings.min_roi_percent),
+            "min_comparables": settings.min_comparables_count,
+        },
+    }
+
+
+@app.post("/admin/sources/{source_name}")
+async def admin_source(
+    source_name: str,
+    request: SourceAdminRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str | bool]:
+    principal = firebase_principal(authorization, require_admin=True)
+    stable_operation_id = operation_id(
+        "source-toggle",
+        {"source": source_name, "enabled": request.enabled, "actor": principal.subject},
+    )
+    try:
+        await asyncio.to_thread(service.set_source_enabled, source_name, request.enabled)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_source_toggle",
+        {
+            "operation_id": stable_operation_id,
+            "source": source_name,
+            "enabled": request.enabled,
+            "actor": principal.subject,
+        },
+    )
+    return {"ok": True, "operation_id": stable_operation_id}
+
+
+@app.post("/admin/outbox/{delivery_id}/reconcile")
+async def admin_reconcile_outbox(
+    delivery_id: str,
+    request: OutboxReconciliationRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str | bool]:
+    """Явно разрешает mark_sent, mark_failed или единственный retry_once."""
+    principal = firebase_principal(authorization, require_admin=True)
+    if request.action not in {"mark_sent", "mark_failed", "retry_once"}:
+        raise HTTPException(status_code=422, detail="Недопустимое действие reconciliation")
+    stable_operation_id = operation_id(
+        "outbox-reconciliation",
+        {
+            "delivery_id": delivery_id,
+            "action": request.action,
+            "actor": principal.subject,
+        },
+    )
+    existing = await asyncio.to_thread(service.repository.get_outbox, delivery_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Outbox запись не найдена")
+    if request.action == "retry_once" and not existing.payload:
+        raise HTTPException(
+            status_code=409,
+            detail="Legacy outbox не содержит воспроизводимый payload",
+        )
+    try:
+        record = await asyncio.to_thread(
+            service.repository.reconcile_outbox,
+            delivery_id,
+            request.action,
+            stable_operation_id,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    if record is None:
+        raise HTTPException(status_code=404, detail="Outbox запись не найдена")
+    if request.action == "retry_once":
+        payload = dict(record.payload)
+        payload["_task_identity"] = stable_operation_id
+        dispatcher = CloudTaskDispatcher(settings)
+        if record.format == "telegram-content":
+            await dispatcher.enqueue_content_delivery(payload)
+        else:
+            await dispatcher.enqueue_delivery(payload)
+    return {
+        "ok": True,
+        "operation_id": stable_operation_id,
+        "state": record.state.value,
+    }
+
+
+@app.get("/admin/outbox")
+async def admin_outbox(
+    state: str | None = None,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    firebase_principal(authorization, require_admin=True)
+    try:
+        parsed_state = OutboxState(state) if state else None
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="Неизвестное состояние outbox") from error
+    records = await asyncio.to_thread(service.repository.list_outbox, parsed_state, 100)
+    return {
+        "items": [
+            {
+                "delivery_id": item.delivery_id,
+                "state": item.state.value,
+                "template_version": item.template_version,
+                "format": item.format,
+                "last_attempt_at": item.last_attempt_at,
+                "last_error": item.last_error,
+                "retry_once_used": item.retry_once_used,
+            }
+            for item in records
+        ]
+    }
+
+
+@app.get("/admin/preview")
+async def admin_preview(
+    authorization: str | None = Header(default=None),
+) -> dict[str, str | None]:
+    firebase_principal(authorization, require_admin=True)
+    decisions = await asyncio.to_thread(service.repository.latest_decisions, 1)
+    if not decisions:
+        return {"free": None, "pro": None}
+    listing, decision = decisions[0]
+    return {
+        "free": format_public_teaser(listing, "en"),
+        "pro": format_card(listing, decision, "en"),
+    }
+
+
+@app.get("/content/market-pulse")
+async def content_market_pulse() -> dict[str, Any]:
+    report = await asyncio.to_thread(market_pulse, service.repository)
+    return {
+        "kind": report.kind,
+        "period_from": report.period_from.isoformat(),
+        "period_to": report.period_to.isoformat(),
+        "sample_size": report.sample_size,
+        "facts": report.facts,
+        "provenance": report.provenance,
+        "template_version": report.template_version,
+    }
+
+
+@app.get("/content/{kind}")
+async def content_report(kind: str) -> dict[str, Any]:
+    factories = {
+        "price-drop": price_drop,
+        "weekly-review": weekly_review,
+        "deal-analysis": deal_analysis,
+    }
+    if kind == "poll":
+        return audience_poll()
+    factory = factories.get(kind)
+    if factory is None:
+        raise HTTPException(status_code=404, detail="Неизвестный формат контента")
+    report = await asyncio.to_thread(factory, service.repository)
+    return {
+        "kind": report.kind,
+        "period_from": report.period_from.isoformat(),
+        "period_to": report.period_to.isoformat(),
+        "sample_size": report.sample_size,
+        "facts": report.facts,
+        "provenance": report.provenance,
+        "template_version": report.template_version,
+    }
+
+
+@app.post("/tma/auth")
+async def tma_auth(request: TmaAuthRequest) -> dict[str, str]:
+    try:
+        principal = verify_telegram_init_data(request.init_data, settings.require_bot_token())
+    except PermissionError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=401, detail="Telegram user отсутствует")
+    import firebase_admin  # type: ignore[import-untyped]
+    from firebase_admin import auth as firebase_auth
+
+    try:
+        firebase_admin.get_app()
+    except ValueError:
+        firebase_admin.initialize_app()
+    token = firebase_auth.create_custom_token(
+        f"telegram:{principal.telegram_user_id}",
+        {"telegram_user_id": principal.telegram_user_id},
+    )
+    return {"firebase_custom_token": token.decode("utf-8")}
+
+
+@app.get("/tma/feed")
+async def tma_feed(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    user_settings = await asyncio.to_thread(
+        service.repository.get_user_settings, principal.telegram_user_id
+    )
+    decisions = await asyncio.to_thread(service.repository.latest_decisions, 100)
+    feed = []
+    for listing, decision in select_publishable_decisions(decisions, settings, limit=50):
+        evaluated = EvaluatedListing(
+            listing=listing,
+            content_hash=decision.content_hash or snapshot_hash(listing),
+            decision=decision,
+        )
+        if user_settings is not None and not user_accepts(user_settings, evaluated):
+            continue
+        feed.append(
+            {
+                "listing": listing.model_dump(mode="json"),
+                "decision": decision.model_dump(mode="json"),
+            }
+        )
+    return {"owner": principal.telegram_user_id, "items": feed}
+
+
+@app.get("/tma/outcomes")
+async def tma_outcomes(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    outcomes = await asyncio.to_thread(
+        service.repository.user_outcomes, principal.telegram_user_id
+    )
+    return {"items": [item.model_dump(mode="json") for item in outcomes]}
+
+
+@app.post("/tma/outcomes")
+async def tma_save_outcome(
+    request: OutcomeRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, bool]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    outcome = Outcome(user_id=principal.telegram_user_id, **request.model_dump())
+    await asyncio.to_thread(service.repository.save_outcome, outcome)
+    return {"ok": True}
+
+
+@app.get("/tma/favorites")
+async def tma_favorites(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    items = await asyncio.to_thread(
+        service.repository.user_watchlist, principal.telegram_user_id
+    )
+    return {"items": items}
+
+
+@app.post("/tma/favorites")
+async def tma_save_favorite(
+    request: FavoriteRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, bool]:
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    await asyncio.to_thread(
+        service.repository.save_user_action,
+        UserAction(
+            user_id=principal.telegram_user_id,
+            listing_id=request.listing_id,
+            action="WATCH" if request.favorite else "REMOVED",
+        ),
+    )
+    return {"ok": True}
 
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(
     update: dict[str, Any],
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
+    update_claimed: bool = Depends(telegram_update_lease),
 ) -> dict[str, bool]:
     """Принимает Telegram Update с проверкой webhook secret."""
     expected = settings.telegram_webhook_secret
     if expected and x_telegram_bot_api_secret_token != expected:
         raise HTTPException(status_code=403, detail="Неверный webhook secret")
-
-    update_id = update.get("update_id")
-    if isinstance(update_id, int):
-        claimed = await asyncio.to_thread(service.repository.claim_telegram_update, update_id)
-        if not claimed:
-            return {"ok": True}
+    if not settings.delivery_enabled:
+        return {"ok": True}
+    if not update_claimed:
+        return {"ok": True}
 
     message = update.get("message") or update.get("channel_post")
     if not isinstance(message, dict):
@@ -175,6 +624,21 @@ async def telegram_webhook(
     if chat_id is None:
         return {"ok": True}
 
+    admin_commands = {
+        "/scan",
+        "/source_scan",
+        "/source_on",
+        "/source_off",
+        "/source_add",
+        "/source_remove",
+        "/sources",
+        "/status",
+    }
+    if text in admin_commands and user_id not in settings.telegram_admin_user_ids:
+        async with Bot(settings.require_bot_token()) as bot:
+            await bot.send_message(chat_id=chat_id, text=tr("Недостаточно прав.", "Forbidden."))
+        return {"ok": True}
+
     async with Bot(settings.require_bot_token()) as bot:
         if text == "/id":
             await bot.send_message(
@@ -185,7 +649,10 @@ async def telegram_webhook(
                 ),
             )
             return {"ok": True}
-        if user_id not in settings.telegram_allowed_user_ids:
+        if (
+            settings.telegram_allowed_user_ids
+            and user_id not in settings.telegram_allowed_user_ids
+        ):
             await bot.send_message(
                 chat_id=chat_id,
                 text=tr("Доступ к боту не настроен.", "Bot access is not configured."),
@@ -213,7 +680,9 @@ async def telegram_webhook(
                     "/status — show system status\n"
                     "/sources — manage sources\n"
                     "/settings — personal filters\n"
-                    "/watchlist — saved cars",
+                    "/watchlist — saved cars\n"
+                    "/find — create a car search\n"
+                    "/my_searches — saved searches",
                 ),
             )
         elif text == "/status":
@@ -254,8 +723,15 @@ async def telegram_webhook(
                     text=tr("Подходящих вариантов пока нет.", "No suitable cars yet."),
                 )
             for listing, decision in recent_candidates:
-                verification = await verify_listing_price(listing)
-                if not verification.verified:
+                listing_id = f"{listing.source}:{listing.source_listing_id}"
+                content_hash = decision.content_hash or snapshot_hash(listing)
+                key = verification_key(
+                    listing.source, listing_id, content_hash, EXTRACTOR_VERSION
+                )
+                evidence = await asyncio.to_thread(
+                    service.repository.get_verification_evidence, key
+                )
+                if evidence is None or not evidence_is_active(evidence):
                     continue
                 await bot.send_message(
                     chat_id=chat_id,
@@ -271,6 +747,65 @@ async def telegram_webhook(
             await bot.send_message(
                 chat_id=chat_id,
                 text=format_user_settings(user_settings, language),
+            )
+        elif text == "/find":
+            if not arguments:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=tr(
+                        "Пример: /find Toyota Camry 2020-2023 бюджет 100000 "
+                        "пробег 80000 GCC прибыль 5000 ROI 10",
+                        "Example: /find Toyota Camry 2020-2023 budget 100000 "
+                        "mileage 80000 GCC profit 5000 ROI 10",
+                    ),
+                )
+                return {"ok": True}
+            query = " ".join(arguments)
+            parsed = parse_search(query, user_id, language)
+            search = build_saved_search(query, parsed)
+            await asyncio.to_thread(service.repository.save_search, search)
+            recognized = "\n".join(f"• {item}" for item in parsed.recognized) or "—"
+            unknown = ", ".join(parsed.unknown) or "—"
+            await bot.send_message(
+                chat_id=chat_id,
+                text=tr(
+                    f"Распознано:\n{recognized}\n\nНе интерпретировано: {unknown}\n\n"
+                    f"Подтвердите: /confirm_search {search.search_id}",
+                    f"Recognized:\n{recognized}\n\nNot interpreted: {unknown}\n\n"
+                    f"Confirm: /confirm_search {search.search_id}",
+                ),
+            )
+        elif text == "/confirm_search":
+            saved = bool(arguments) and await asyncio.to_thread(
+                service.repository.set_search_enabled, user_id, arguments[0], True
+            )
+            await bot.send_message(
+                chat_id=chat_id,
+                text=tr("Поиск включён.", "Search enabled.")
+                if saved
+                else tr("Поиск не найден.", "Search not found."),
+            )
+        elif text == "/my_searches":
+            searches = await asyncio.to_thread(service.repository.user_searches, user_id)
+            lines = [
+                f"{'✅' if item.enabled else '⏸'} {item.search_id}: {item.query_text}"
+                for item in searches
+            ]
+            await bot.send_message(
+                chat_id=chat_id,
+                text="\n".join(lines)
+                if lines
+                else tr("Сохранённых поисков нет.", "No saved searches."),
+            )
+        elif text == "/stop_search":
+            stopped = bool(arguments) and await asyncio.to_thread(
+                service.repository.set_search_enabled, user_id, arguments[0], False
+            )
+            await bot.send_message(
+                chat_id=chat_id,
+                text=tr("Поиск остановлен.", "Search stopped.")
+                if stopped
+                else tr("Поиск не найден.", "Search not found."),
             )
         elif text in {"/set_budget", "/set_profit", "/set_roi", "/set_makes"}:
             if not arguments:
@@ -418,39 +953,91 @@ async def process_listing_task(
     evaluated = await service.process_listing(task.listing_id, task.content_hash)
     if evaluated is None or not is_publishable(evaluated.decision, settings):
         return {"ok": True}
-    verification = await verify_listing_price(evaluated.listing)
-    if not verification.verified:
-        logger.warning(
-            "Кандидат %s не прошёл проверку detail page: %s",
-            task.listing_id,
-            verification.reason,
-        )
-        return {"ok": True}
-    targets: dict[str, str] = {}
+    current_decision_id = evaluated.decision.decision_id or task.listing_id
+    vehicle_id = evaluated.decision.decision_subject_id or task.listing_id
+    event_id = publication_event_id(
+        decision_id_value=current_decision_id,
+        vehicle_id=vehicle_id,
+        event_type="deal-candidate",
+    )
+    await asyncio.to_thread(
+        service.repository.save_publication_event,
+        PublicationEvent(
+            publication_event_id=event_id,
+            decision_id=current_decision_id,
+            vehicle_id=vehicle_id,
+            event_type="deal-candidate",
+            template_version="deal/v1",
+        ),
+    )
+    targets: dict[str, tuple[str, str]] = {}
     for user_id in settings.telegram_allowed_user_ids:
         user_settings = await asyncio.to_thread(
             service.repository.get_user_settings,
             user_id,
         )
-        if user_accepts(user_settings or default_user_settings(user_id), evaluated):
-            targets[str(user_id)] = telegram_language(
-                (user_settings or default_user_settings(user_id)).language_code
+        effective_settings = user_settings or default_user_settings(user_id)
+        if user_accepts(effective_settings, evaluated):
+            targets[str(user_id)] = (
+                telegram_language(effective_settings.language_code),
+                "personal-pro/v1"
+                if effective_settings.tariff.casefold() == "pro"
+                else "personal-free/v1",
             )
-    delivery_channel_id = settings.telegram_pro_channel_id or settings.telegram_channel_id
-    if delivery_channel_id:
-        targets[delivery_channel_id] = "en"
+    active_searches = await asyncio.to_thread(service.repository.active_searches)
+    for saved_search in active_searches:
+        if user_accepts(saved_search.filters, evaluated):
+            template = (
+                "personal-pro/v1"
+                if saved_search.filters.tariff.casefold() == "pro"
+                else "personal-free/v1"
+            )
+            targets[str(saved_search.user_id)] = (
+                telegram_language(saved_search.filters.language_code),
+                template,
+            )
+    if settings.telegram_pro_channel_id:
+        targets[settings.telegram_pro_channel_id] = ("en", "pro/v1")
+    if settings.telegram_channel_id:
+        targets[settings.telegram_channel_id] = ("en", "free/v1")
     dispatcher = CloudTaskDispatcher(settings)
-    for target_id, target_language in targets.items():
-        card = format_card(evaluated.listing, evaluated.decision, target_language)
-        await dispatcher.enqueue_delivery(
-            {
-                "target_id": target_id,
-                "listing_id": task.listing_id,
-                "content_hash": task.content_hash,
-                "text": card,
-                "engine_version": evaluated.decision.engine_version,
-            }
+    for target_id, (target_language, template_version) in targets.items():
+        card = (
+            format_public_teaser(evaluated.listing, target_language)
+            if template_version in {"free/v1", "personal-free/v1"}
+            else format_card(evaluated.listing, evaluated.decision, target_language)
         )
+        stable_delivery_id = delivery_id(
+            decision_id_value=current_decision_id,
+            recipient_id=target_id,
+            template_version=template_version,
+            format_name="telegram",
+        )
+        delivery_payload: dict[str, object] = {
+            "delivery_id": stable_delivery_id,
+            "decision_id": current_decision_id,
+            "target_id": target_id,
+            "listing_id": task.listing_id,
+            "content_hash": task.content_hash,
+            "text": card,
+            "engine_version": evaluated.decision.engine_version,
+            "template_version": template_version,
+            "format": "telegram",
+        }
+        if template_version in {"free/v1", "personal-free/v1"}:
+            delivery_payload["image_url"] = settings.free_teaser_image_url
+        await asyncio.to_thread(
+            service.repository.put_outbox,
+            OutboxRecord(
+                delivery_id=stable_delivery_id,
+                decision_id=current_decision_id,
+                recipient=target_id,
+                template_version=template_version,
+                format="telegram",
+                payload=delivery_payload,
+            ),
+        )
+        await dispatcher.enqueue_delivery(delivery_payload)
     return {"ok": True}
 
 
@@ -462,32 +1049,170 @@ async def deliver_telegram_task(
 ) -> dict[str, bool]:
     """Доставляет Telegram-карточку ровно один раз на получателя и версию."""
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
+    if not settings.delivery_enabled:
+        return {"ok": True}
     if task.engine_version != service.decision_engine.version:
         return {"ok": True}
-    latest = await asyncio.to_thread(service.repository.latest_snapshot, task.listing_id)
-    if latest is None or snapshot_hash(latest) != task.content_hash:
+    latest = await asyncio.to_thread(
+        service.repository.get_snapshot, task.listing_id, task.content_hash
+    )
+    current = await asyncio.to_thread(
+        service.repository.is_current_snapshot, task.listing_id, task.content_hash
+    )
+    if latest is None or not current or snapshot_hash(latest) != task.content_hash:
         return {"ok": True}
-    verification = await verify_listing_price(latest)
-    if not verification.verified:
+    key = verification_key(latest.source, task.listing_id, task.content_hash, EXTRACTOR_VERSION)
+    evidence = await asyncio.to_thread(service.repository.get_verification_evidence, key)
+    if evidence is None or not evidence_is_active(evidence):
         return {"ok": True}
-    if await asyncio.to_thread(
-        service.repository.notification_sent,
-        task.target_id,
-        task.listing_id,
-        task.content_hash,
-    ):
+    lease_owner = os.getenv("K_REVISION", "local-delivery")
+    claimed = await asyncio.to_thread(
+        service.repository.claim_outbox, task.delivery_id, lease_owner
+    )
+    if claimed is None:
         return {"ok": True}
-    async with Bot(settings.require_bot_token()) as bot:
-        await bot.send_message(
-            chat_id=task.target_id,
-            text=task.text,
-            parse_mode=ParseMode.HTML,
+    try:
+        async with Bot(settings.require_bot_token()) as bot:
+            if task.image_url:
+                sent = await bot.send_photo(
+                    chat_id=task.target_id,
+                    photo=task.image_url,
+                    caption=task.text,
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                sent = await bot.send_message(
+                    chat_id=task.target_id,
+                    text=task.text,
+                    parse_mode=ParseMode.HTML,
+                )
+    except (TimedOut, NetworkError) as error:
+        await asyncio.to_thread(
+            service.repository.update_outbox,
+            task.delivery_id,
+            OutboxState.UNKNOWN,
+            error=f"{type(error).__name__}: {error}",
         )
+        return {"ok": True}
+    except Exception as error:
+        await asyncio.to_thread(
+            service.repository.update_outbox,
+            task.delivery_id,
+            OutboxState.FAILED,
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise
     await asyncio.to_thread(
-        service.repository.mark_notification_sent,
-        task.target_id,
-        task.listing_id,
-        task.content_hash,
+        service.repository.update_outbox,
+        task.delivery_id,
+        OutboxState.SENT,
+        telegram_message_id=str(sent.message_id),
+    )
+    return {"ok": True}
+
+
+@app.post("/tasks/deliver-content")
+async def deliver_content_task(
+    task: ContentDeliveryTask,
+    x_internal_task_secret: str | None = Header(default=None),
+    x_cloudtasks_taskname: str | None = Header(default=None),
+) -> dict[str, bool]:
+    require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
+    if not settings.delivery_enabled:
+        return {"ok": True}
+    claimed = await asyncio.to_thread(
+        service.repository.claim_outbox,
+        task.delivery_id,
+        os.getenv("K_REVISION", "local-content-delivery"),
+    )
+    if claimed is None:
+        return {"ok": True}
+    try:
+        async with Bot(settings.require_bot_token()) as bot:
+            sent = await bot.send_message(
+                chat_id=task.target_id,
+                text=task.text,
+                parse_mode=ParseMode.HTML,
+            )
+    except (TimedOut, NetworkError) as error:
+        await asyncio.to_thread(
+            service.repository.update_outbox,
+            task.delivery_id,
+            OutboxState.UNKNOWN,
+            error=f"{type(error).__name__}: {error}",
+        )
+        return {"ok": True}
+    except Exception as error:
+        await asyncio.to_thread(
+            service.repository.update_outbox,
+            task.delivery_id,
+            OutboxState.FAILED,
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise
+    await asyncio.to_thread(
+        service.repository.update_outbox,
+        task.delivery_id,
+        OutboxState.SENT,
+        telegram_message_id=str(sent.message_id),
+    )
+    return {"ok": True}
+
+
+@app.post("/tasks/deliver-whatsapp")
+async def deliver_whatsapp_task(
+    task: WhatsAppDeliveryTask,
+    x_internal_task_secret: str | None = Header(default=None),
+    x_cloudtasks_taskname: str | None = Header(default=None),
+) -> dict[str, bool]:
+    """Официальный Meta Cloud API path; при отсутствии credentials всегда fail-closed."""
+    require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
+    if not settings.delivery_enabled or not settings.whatsapp_enabled:
+        return {"ok": True}
+    claimed = await asyncio.to_thread(
+        service.repository.claim_outbox,
+        task.delivery_id,
+        os.getenv("K_REVISION", "local-whatsapp-delivery"),
+    )
+    if claimed is None:
+        return {"ok": True}
+    adapter = WhatsAppAdapter(
+        WhatsAppConfig(
+            enabled=settings.whatsapp_enabled,
+            access_token=settings.whatsapp_access_token,
+            phone_number_id=settings.whatsapp_phone_number_id,
+            api_version=settings.whatsapp_api_version,
+        )
+    )
+    try:
+        message_id = await adapter.send_template(
+            task.recipient,
+            task.template_name,
+            task.language_code,
+            task.components,
+            opted_in=task.opted_in,
+        )
+    except (TimeoutException, TransportError) as error:
+        await asyncio.to_thread(
+            service.repository.update_outbox,
+            task.delivery_id,
+            OutboxState.UNKNOWN,
+            error=f"{type(error).__name__}: {error}",
+        )
+        return {"ok": True}
+    except Exception as error:
+        await asyncio.to_thread(
+            service.repository.update_outbox,
+            task.delivery_id,
+            OutboxState.FAILED,
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise
+    await asyncio.to_thread(
+        service.repository.update_outbox,
+        task.delivery_id,
+        OutboxState.SENT,
+        provider_message_id=message_id,
     )
     return {"ok": True}
 

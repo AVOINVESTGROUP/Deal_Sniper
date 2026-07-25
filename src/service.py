@@ -1,6 +1,9 @@
 """Оркестрация сбора, истории и детерминированного решения."""
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from decimal import Decimal
 from time import perf_counter
 
 from src.config import Settings
@@ -13,7 +16,13 @@ from src.domain.engines import (
     DecisionPolicy,
     RiskEngine,
 )
-from src.domain.models import DealDecision, ListingSnapshot
+from src.domain.ids import decision_id, verification_key
+from src.domain.models import (
+    DealDecision,
+    FreshnessStatus,
+    ListingSnapshot,
+    VerificationStatus,
+)
 from src.domain.normalization import normalize_listing, resolve_vehicle_identities
 from src.raw_storage import (
     GcsRawSnapshotArchive,
@@ -25,7 +34,17 @@ from src.sources.cars24 import Cars24Source
 from src.sources.carswitch import CarSwitchSource
 from src.sources.dubicars import DubiCarsSource
 from src.sources.opensooq import OpenSooqSource
-from src.storage import LocalRepository, Repository
+from src.storage import LocalRepository, Repository, snapshot_hash
+from src.verification import (
+    EXTRACTOR_VERSION,
+    PriceVerification,
+    TemporaryVerificationError,
+    build_evidence,
+    evidence_is_active,
+    verify_listing_price,
+)
+
+PriceVerifier = Callable[[ListingSnapshot], Awaitable[PriceVerification]]
 
 
 @dataclass(slots=True)
@@ -62,30 +81,38 @@ class DealService:
         settings: Settings,
         repository: Repository,
         sources: dict[str, SourceAdapter],
+        verifier: PriceVerifier = verify_listing_price,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.sources = sources
+        self.verifier = verifier
         self.market_engine = ComparablePriceEngine()
         self.risk_engine = RiskEngine()
-        self.cost_engine = CostEngine(
-            CostPolicy(
-                inspection_aed=settings.inspection_cost_aed,
-                preparation_aed=settings.preparation_cost_aed,
-                base_repair_reserve_aed=settings.base_repair_reserve_aed,
-                holding_cost_per_day_aed=settings.holding_cost_per_day_aed,
-                expected_hold_days=settings.expected_hold_days,
-                annual_capital_percent=settings.annual_capital_percent,
-                selling_cost_percent=settings.selling_cost_percent,
-                risk_reserve_percent=settings.risk_reserve_percent,
-            )
+        cost_policy = CostPolicy(
+            inspection_aed=settings.inspection_cost_aed,
+            registration_aed=settings.registration_cost_aed,
+            preparation_aed=settings.preparation_cost_aed,
+            repair_low_aed=settings.repair_low_aed,
+            repair_expected_aed=settings.repair_expected_aed,
+            repair_high_aed=settings.repair_high_aed,
+            holding_cost_per_day_aed=settings.holding_cost_per_day_aed,
+            expected_hold_days=settings.expected_hold_days,
+            annual_capital_rate=settings.annual_capital_rate,
+            selling_rate=settings.selling_rate,
+            risk_rate=settings.risk_rate,
+            version=settings.financial_config_version,
         )
+        self.cost_engine = CostEngine(cost_policy)
         self.decision_engine = DecisionEngine(
             DecisionPolicy(
                 target_profit_aed=settings.target_profit_aed,
                 min_roi_percent=settings.min_roi_percent,
                 min_comparables=settings.min_comparables_count,
-            )
+                liquidity_discount_rate=settings.liquidity_discount_rate,
+                version=settings.financial_config_version,
+            ),
+            cost_policy,
         )
 
     @classmethod
@@ -94,7 +121,9 @@ class DealService:
         if settings.storage_backend == "firestore":
             from src.firestore_storage import FirestoreRepository
 
-            repository: Repository = FirestoreRepository(settings.google_cloud_project)
+            repository: Repository = FirestoreRepository(
+                settings.google_cloud_project, settings.firestore_database
+            )
             archive = GcsRawSnapshotArchive(
                 settings.google_cloud_project,
                 settings.raw_snapshots_bucket,
@@ -146,7 +175,17 @@ class DealService:
     async def scan(self, source_name: str | None = None) -> ScanReport:
         """Локальный вертикальный запуск: сбор и обработка изменившихся версий."""
         report = await self.collect(source_name)
-        for listing_id, content_hash in report.pending:
+
+        def pending_price(item: tuple[str, str]) -> Decimal:
+            snapshot = self.repository.get_snapshot(item[0], item[1])
+            return snapshot.price_aed if snapshot is not None else Decimal(0)
+
+        pending = sorted(
+            report.pending,
+            key=pending_price,
+            reverse=True,
+        )
+        for listing_id, content_hash in pending:
             evaluated = await self.process_listing(listing_id, content_hash)
             if evaluated is not None:
                 report.decisions.append(evaluated)
@@ -158,6 +197,8 @@ class DealService:
             source_key = source_name.strip().casefold()
             if source_key not in self.sources:
                 raise ValueError(f"Неизвестный источник: {source_name}")
+            if not self.repository.source_enabled(source_key, default=True):
+                raise RuntimeError(f"Источник {source_key} отключён")
             source: SourceAdapter = self.sources[source_key]
         else:
             enabled = [
@@ -184,22 +225,37 @@ class DealService:
             raise
         report = ScanReport(fetched=len(fetched))
         saved = self.repository.save_snapshots(fetched)
-        for listing, is_new, price_changed, content_hash in saved:
+        affected_make_models: set[tuple[str, str]] = set()
+        for listing, is_new, price_changed, _content_hash in saved:
             report.new += int(is_new)
             report.changed += int(price_changed)
+            if is_new or price_changed:
+                affected_make_models.add(
+                    ((listing.make or "").casefold(), (listing.model or "").casefold())
+                )
+        if affected_make_models:
+            report.pending = [
+                (
+                    f"{listing.source}:{listing.source_listing_id}",
+                    snapshot_hash(listing),
+                )
+                for listing in self.repository.latest_snapshots()
+                if ((listing.make or "").casefold(), (listing.model or "").casefold())
+                in affected_make_models
+            ]
+        pending_set = set(report.pending)
+        for listing, _is_new, _price_changed, content_hash in saved:
             listing_id = f"{listing.source}:{listing.source_listing_id}"
-            if not self.repository.decision_exists(
+            key = verification_key(
+                listing.source,
                 listing_id,
                 content_hash,
-                self.decision_engine.version,
-            ):
-                report.pending.append((listing_id, content_hash))
-
-        normalized_fetched = [
-            vehicle for listing in fetched if (vehicle := normalize_listing(listing)) is not None
-        ]
-        if normalized_fetched:
-            self.repository.save_normalized_market(normalized_fetched, [])
+                EXTRACTOR_VERSION,
+            )
+            evidence = self.repository.get_verification_evidence(key)
+            if evidence is None or not evidence_is_active(evidence):
+                pending_set.add((listing_id, content_hash))
+        report.pending = sorted(pending_set)
 
         self.repository.record_source_run(
             metric_name,
@@ -221,23 +277,96 @@ class DealService:
         content_hash: str,
     ) -> EvaluatedListing | None:
         """Идемпотентно рассчитывает одну версию объявления на актуальном рынке."""
-        if self.repository.decision_exists(
+        target_listing = self.repository.get_snapshot(listing_id, content_hash)
+        is_current = self.repository.is_current_snapshot(listing_id, content_hash)
+        if (
+            target_listing is None
+            or not is_current
+            or snapshot_hash(target_listing) != content_hash
+        ):
+            self.repository.record_audit_event(
+                "processing_snapshot_missing_or_mismatched",
+                {"listing_id": listing_id, "content_hash": content_hash},
+            )
+            return None
+        key = verification_key(
+            target_listing.source,
             listing_id,
             content_hash,
-            self.decision_engine.version,
-        ):
+            EXTRACTOR_VERSION,
+        )
+        previous = self.repository.get_verification_evidence(key)
+        if previous is not None and evidence_is_active(previous):
+            evidence = previous
+        else:
+            verification = await self.verifier(target_listing)
+            if verification.retriable:
+                if previous is None:
+                    self.repository.save_verification_evidence(
+                        build_evidence(target_listing, content_hash, verification)
+                    )
+                self.repository.record_audit_event(
+                    "verification_temporary_error",
+                    {
+                        "listing_id": listing_id,
+                        "content_hash": content_hash,
+                        "reason": verification.reason,
+                    },
+                )
+                raise TemporaryVerificationError(verification.reason)
+            evidence = build_evidence(
+                target_listing,
+                content_hash,
+                verification,
+                previous=previous,
+            )
+            self.repository.save_verification_evidence(evidence)
+        if not evidence_is_active(evidence) or evidence.verified_price_aed is None:
+            self.repository.record_audit_event(
+                "processing_verification_rejected",
+                {
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "status": evidence.status.value,
+                    "reason": evidence.rejection_reason,
+                },
+            )
             return None
-
-        target_listing = self.repository.latest_snapshot(listing_id)
-        target = normalize_listing(target_listing) if target_listing is not None else None
-        if target_listing is None or target is None:
+        verified_listing = target_listing.model_copy(
+            update={"price_aed": evidence.verified_price_aed}
+        )
+        target = normalize_listing(verified_listing)
+        if target is None:
+            self.repository.record_audit_event(
+                "processing_snapshot_not_normalizable",
+                {"listing_id": listing_id, "content_hash": content_hash},
+            )
             return None
-        normalized_vehicles = self.repository.comparable_vehicles(target.make, target.model)
+        target = target.model_copy(
+            update={
+                "verification_status": evidence.status,
+                "evidence_revision_id": evidence.evidence_revision_id,
+                "valid_until": evidence.valid_until,
+                "freshness_status": evidence.freshness_status,
+            }
+        )
+        self.repository.save_normalized_vehicle(target)
+        now = datetime.now(UTC)
+        normalized_vehicles = [
+            vehicle
+            for vehicle in self.repository.comparable_vehicles(target.make, target.model)
+            if vehicle.verification_status is VerificationStatus.VERIFIED
+            and vehicle.freshness_status is FreshnessStatus.ACTIVE
+            and vehicle.valid_until is not None
+            and vehicle.valid_until > now
+        ]
         if all(vehicle.listing_id != target.listing_id for vehicle in normalized_vehicles):
             normalized_vehicles.append(target)
         identities, listing_to_vehicle = resolve_vehicle_identities(normalized_vehicles)
         target_vehicle_id = listing_to_vehicle.get(target.listing_id)
         if target_vehicle_id is not None:
+            target = target.model_copy(update={"vehicle_id": target_vehicle_id})
+            self.repository.save_normalized_vehicle(target)
             target_identity = next(
                 (identity for identity in identities if identity.vehicle_id == target_vehicle_id),
                 None,
@@ -249,17 +378,45 @@ class DealService:
             peers,
             min_comparables=self.settings.min_comparables_count,
         )
-        risks = self.risk_engine.assess(target_listing)
-        costs = self.cost_engine.estimate(target_listing.price_aed, risks)
+        risks = self.risk_engine.assess(verified_listing)
+        resale = (
+            market.low_aed * (1 - self.settings.liquidity_discount_rate)
+            if market is not None
+            else verified_listing.price_aed
+        )
+        costs = self.cost_engine.estimate(verified_listing.price_aed, risks, resale)
         decision = self.decision_engine.decide(
-            asking_price_aed=target_listing.price_aed,
+            asking_price_aed=verified_listing.price_aed,
             market=market,
             costs=costs,
             risks=risks,
         )
+        fingerprint = (
+            market.market_fingerprint
+            if market is not None and market.market_fingerprint is not None
+            else "insufficient-market"
+        )
+        stable_decision_id = decision_id(
+            listing_id=listing_id,
+            content_hash=content_hash,
+            engine_version=decision.engine_version,
+            financial_config_version=self.settings.financial_config_version,
+            verification_version=evidence.evidence_revision_id,
+            market_fingerprint_value=fingerprint,
+        )
+        decision = decision.model_copy(
+            update={
+                "decision_id": stable_decision_id,
+                "decision_subject_id": target.vehicle_id or listing_id,
+                "content_hash": content_hash,
+                "financial_config_version": self.settings.financial_config_version,
+                "verification_version": evidence.evidence_revision_id,
+                "market_fingerprint": fingerprint,
+            }
+        )
         self.repository.save_decision(listing_id, content_hash, decision)
         return EvaluatedListing(
-            listing=target_listing,
+            listing=verified_listing,
             content_hash=content_hash,
             decision=decision,
         )

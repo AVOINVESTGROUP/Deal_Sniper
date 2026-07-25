@@ -219,6 +219,23 @@ def test_repository_detects_duplicate_and_price_change(tmp_path: Path) -> None:
     repository.save_vehicle_identity(identities[0])
 
 
+def test_out_of_order_snapshot_never_replaces_newer_current(tmp_path: Path) -> None:
+    repository = LocalRepository(tmp_path / "out-of-order.db")
+    newer = listing("75000").model_copy(update={"version_sequence": 2})
+    older = listing("79000").model_copy(update={"version_sequence": 1})
+
+    newer_hash = repository.save_snapshot(newer)[2]
+    older_hash = repository.save_snapshot(older)[2]
+
+    current = repository.latest_snapshot("test:42")
+    assert current is not None
+    assert current.price_aed == Decimal("75000")
+    assert current.version_sequence == 2
+    assert repository.get_snapshot("test:42", newer_hash) is not None
+    assert repository.get_snapshot("test:42", older_hash) is not None
+    assert repository.get_snapshot("test:42", "missing") is None
+
+
 def test_latest_decisions_skips_non_candidates_before_limit(tmp_path: Path) -> None:
     repository = LocalRepository(tmp_path / "deal_sniper.db")
     candidate = listing("70000")

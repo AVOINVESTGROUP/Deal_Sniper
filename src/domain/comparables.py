@@ -31,9 +31,6 @@ def select_comparables(
             continue
         if candidate.asking_price_aed < MIN_VALID_LISTING_PRICE_AED:
             continue
-        price_ratio = candidate.asking_price_aed / target.asking_price_aed
-        if price_ratio < Decimal("0.33") or price_ratio > Decimal("3"):
-            continue
         candidate_vehicle_id = listing_to_vehicle.get(candidate.listing_id, candidate.listing_id)
         if target_vehicle_id and candidate_vehicle_id == target_vehicle_id:
             continue
@@ -104,4 +101,6 @@ def _adjust_comparable(
         mileage_km=candidate.mileage_km,
         seller_type=candidate.seller_type,
         observed_at=candidate.observed_at,
+        evidence_revision_id=candidate.evidence_revision_id,
+        adjustment_version="comparable-adjustments/v2",
     )

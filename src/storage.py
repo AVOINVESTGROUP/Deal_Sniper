@@ -1,21 +1,31 @@
 """Локальное хранилище MVP с версиями объявлений и решений."""
 
-import hashlib
 import json
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from src.domain.ids import canonical_hash
 from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
     NormalizedVehicle,
+    OutboxRecord,
+    OutboxState,
+    Outcome,
+    ProcessingState,
+    PublicationEvent,
     RawSnapshotMetadata,
+    SavedSearch,
+    TelegramUpdateRecord,
     UserAction,
     UserSettings,
     VehicleIdentity,
+    VerificationEvidence,
 )
 
 
@@ -31,7 +41,13 @@ class Repository(Protocol):
 
     def latest_snapshots(self) -> list[ListingSnapshot]: ...
 
+    def snapshot_versions(self) -> list[ListingSnapshot]: ...
+
     def latest_snapshot(self, listing_id: str) -> ListingSnapshot | None: ...
+
+    def get_snapshot(self, listing_id: str, content_hash: str) -> ListingSnapshot | None: ...
+
+    def is_current_snapshot(self, listing_id: str, content_hash: str) -> bool: ...
 
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None: ...
 
@@ -71,7 +87,13 @@ class Repository(Protocol):
 
     def source_health(self) -> dict[str, dict[str, Any]]: ...
 
-    def claim_telegram_update(self, update_id: int) -> bool: ...
+    def claim_telegram_update(
+        self, update_id: int, lease_owner: str = "local", lease_seconds: int = 120
+    ) -> bool: ...
+
+    def finish_telegram_update(
+        self, update_id: int, state: ProcessingState, error: str | None = None
+    ) -> None: ...
 
     def get_user_settings(self, user_id: int) -> UserSettings | None: ...
 
@@ -81,15 +103,74 @@ class Repository(Protocol):
 
     def user_watchlist(self, user_id: int) -> list[str]: ...
 
+    def record_audit_event(self, event_type: str, payload: dict[str, Any]) -> None: ...
+
+    def get_verification_evidence(
+        self, verification_key: str
+    ) -> VerificationEvidence | None: ...
+
+    def save_verification_evidence(self, evidence: VerificationEvidence) -> None: ...
+
+    def put_outbox(self, record: OutboxRecord) -> OutboxRecord: ...
+
+    def claim_outbox(
+        self, delivery_id: str, lease_owner: str, lease_seconds: int = 120
+    ) -> OutboxRecord | None: ...
+
+    def update_outbox(
+        self,
+        delivery_id: str,
+        state: OutboxState,
+        *,
+        error: str | None = None,
+        telegram_message_id: str | None = None,
+        provider_message_id: str | None = None,
+    ) -> None: ...
+
+    def get_outbox(self, delivery_id: str) -> OutboxRecord | None: ...
+
+    def list_outbox(
+        self, state: OutboxState | None = None, limit: int = 100
+    ) -> list[OutboxRecord]: ...
+
+    def reconcile_outbox(
+        self, delivery_id: str, action: str, operation_id: str
+    ) -> OutboxRecord | None: ...
+
+    def save_search(self, search: SavedSearch) -> None: ...
+
+    def user_searches(self, user_id: int) -> list[SavedSearch]: ...
+
+    def active_searches(self) -> list[SavedSearch]: ...
+
+    def set_search_enabled(self, user_id: int, search_id: str, enabled: bool) -> bool: ...
+
+    def save_outcome(self, outcome: Outcome) -> None: ...
+
+    def user_outcomes(self, user_id: int) -> list[Outcome]: ...
+
+    def save_publication_event(self, event: PublicationEvent) -> None: ...
+
+    def admin_summary(self) -> dict[str, Any]: ...
+
+    def schema_version(self) -> str: ...
+
 
 def snapshot_hash(snapshot: ListingSnapshot) -> str:
     """Вычисляет hash только по значимым полям объявления."""
     payload = snapshot.model_dump(
         mode="json",
-        exclude={"observed_at"},
+        exclude={
+            "observed_at",
+            "source_observed_at",
+            "fetched_at",
+            "ingested_at",
+            "version_sequence",
+            "lifecycle",
+            "correlation_id",
+        },
     )
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_hash("listing-content/v2", payload)
 
 
 class LocalRepository:
@@ -100,10 +181,15 @@ class LocalRepository:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -119,6 +205,15 @@ class LocalRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_snapshots_listing_time
                     ON snapshots(listing_id, observed_at DESC);
+                CREATE TABLE IF NOT EXISTS listing_current (
+                    listing_id TEXT PRIMARY KEY,
+                    content_hash TEXT NOT NULL,
+                    version_sequence INTEGER NOT NULL,
+                    source_observed_at TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    ingested_at TEXT NOT NULL,
+                    tie_breaker TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS decisions (
                     listing_id TEXT NOT NULL,
                     content_hash TEXT NOT NULL,
@@ -133,6 +228,23 @@ class LocalRepository:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     payload_json TEXT NOT NULL,
                     PRIMARY KEY (listing_id, content_hash, engine_version)
+                );
+                CREATE TABLE IF NOT EXISTS decisions_v3 (
+                    decision_id TEXT PRIMARY KEY,
+                    decision_subject_id TEXT NOT NULL,
+                    listing_id TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    engine_version TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    payload_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS decision_current (
+                    decision_subject_id TEXT PRIMARY KEY,
+                    decision_id TEXT NOT NULL,
+                    listing_id TEXT NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    engine_version TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS notifications (
                     target_id TEXT NOT NULL,
@@ -153,7 +265,10 @@ class LocalRepository:
                 );
                 CREATE TABLE IF NOT EXISTS telegram_updates (
                     update_id INTEGER PRIMARY KEY,
-                    claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    state TEXT NOT NULL DEFAULT 'processing',
+                    lease_expires_at TEXT,
+                    payload_json TEXT
                 );
                 CREATE TABLE IF NOT EXISTS normalized_vehicles (
                     listing_id TEXT PRIMARY KEY,
@@ -190,23 +305,102 @@ class LocalRepository:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (user_id, listing_id)
                 );
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS verification_evidence (
+                    verification_key TEXT PRIMARY KEY,
+                    evidence_revision_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    valid_until TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS delivery_outbox (
+                    delivery_id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    lease_expires_at TEXT,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS saved_searches (
+                    search_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    enabled INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_saved_searches_owner
+                    ON saved_searches(user_id, enabled);
+                CREATE TABLE IF NOT EXISTS outcomes (
+                    user_id INTEGER NOT NULL,
+                    listing_id TEXT NOT NULL,
+                    decision_content_hash TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, listing_id, decision_content_hash)
+                );
+                CREATE TABLE IF NOT EXISTS publication_events (
+                    publication_event_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
+            telegram_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(telegram_updates)").fetchall()
+            }
+            if "state" not in telegram_columns:
+                connection.execute(
+                    "ALTER TABLE telegram_updates ADD COLUMN state TEXT NOT NULL "
+                    "DEFAULT 'completed'"
+                )
+            if "lease_expires_at" not in telegram_columns:
+                connection.execute(
+                    "ALTER TABLE telegram_updates ADD COLUMN lease_expires_at TEXT"
+                )
+            if "payload_json" not in telegram_columns:
+                connection.execute("ALTER TABLE telegram_updates ADD COLUMN payload_json TEXT")
+            listing_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(listing_current)").fetchall()
+            }
+            if "last_seen_at" not in listing_columns:
+                connection.execute("ALTER TABLE listing_current ADD COLUMN last_seen_at TEXT")
 
     def save_snapshot(self, snapshot: ListingSnapshot) -> tuple[bool, bool, str]:
         """Сохраняет новую версию и сообщает new/price_changed/hash."""
         listing_id = f"{snapshot.source}:{snapshot.source_listing_id}"
         content_hash = snapshot_hash(snapshot)
         with self._connect() as connection:
-            previous = connection.execute(
+            current = connection.execute(
                 """
-                SELECT price_aed, content_hash FROM snapshots
-                WHERE listing_id = ? ORDER BY observed_at DESC LIMIT 1
+                SELECT pointer.content_hash, pointer.version_sequence, snapshots.price_aed
+                FROM listing_current AS pointer
+                JOIN snapshots ON snapshots.listing_id = pointer.listing_id
+                    AND snapshots.content_hash = pointer.content_hash
+                WHERE pointer.listing_id = ?
                 """,
                 (listing_id,),
             ).fetchone()
-            if previous is not None and previous["content_hash"] == content_hash:
+            if current is not None and current["content_hash"] == content_hash:
+                connection.execute(
+                    "UPDATE listing_current SET last_seen_at = ? WHERE listing_id = ?",
+                    (datetime.now(UTC).isoformat(), listing_id),
+                )
                 return False, False, content_hash
+            sequence = snapshot.version_sequence
+            if sequence is None:
+                sequence = int(current["version_sequence"]) + 1 if current is not None else 1
+            ingested_at = datetime.now(UTC)
+            source_observed_at = snapshot.source_observed_at or snapshot.observed_at
+            stored = snapshot.model_copy(
+                update={"version_sequence": sequence, "ingested_at": ingested_at}
+            )
             connection.execute(
                 """
                 INSERT OR IGNORE INTO snapshots
@@ -216,13 +410,57 @@ class LocalRepository:
                 (
                     listing_id,
                     content_hash,
-                    snapshot.observed_at.isoformat(),
+                    stored.observed_at.isoformat(),
                     str(snapshot.price_aed),
-                    snapshot.model_dump_json(),
+                    stored.model_dump_json(),
                 ),
             )
-        price_changed = previous is not None and previous["price_aed"] != str(snapshot.price_aed)
-        return previous is None, price_changed, content_hash
+            current_key = None
+            if current is not None:
+                pointer = connection.execute(
+                    "SELECT * FROM listing_current WHERE listing_id = ?", (listing_id,)
+                ).fetchone()
+                current_key = (
+                    int(pointer["version_sequence"]),
+                    str(pointer["source_observed_at"]),
+                    str(pointer["fetched_at"]),
+                    str(pointer["tie_breaker"]),
+                )
+            candidate_key = (
+                sequence,
+                source_observed_at.isoformat(),
+                stored.fetched_at.isoformat(),
+                content_hash,
+            )
+            if current_key is None or candidate_key > current_key:
+                connection.execute(
+                    """
+                    INSERT INTO listing_current(
+                        listing_id, content_hash, version_sequence, source_observed_at,
+                        fetched_at, ingested_at, tie_breaker, last_seen_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(listing_id) DO UPDATE SET
+                        content_hash = excluded.content_hash,
+                        version_sequence = excluded.version_sequence,
+                        source_observed_at = excluded.source_observed_at,
+                        fetched_at = excluded.fetched_at,
+                        ingested_at = excluded.ingested_at,
+                        tie_breaker = excluded.tie_breaker,
+                        last_seen_at = excluded.last_seen_at
+                    """,
+                    (
+                        listing_id,
+                        content_hash,
+                        sequence,
+                        source_observed_at.isoformat(),
+                        stored.fetched_at.isoformat(),
+                        ingested_at.isoformat(),
+                        content_hash,
+                        ingested_at.isoformat(),
+                    ),
+                )
+        price_changed = current is not None and current["price_aed"] != str(snapshot.price_aed)
+        return current is None, price_changed, content_hash
 
     def save_snapshots(
         self,
@@ -236,12 +474,18 @@ class LocalRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT payload_json FROM snapshots AS current
-                WHERE observed_at = (
-                    SELECT MAX(observed_at) FROM snapshots AS candidate
-                    WHERE candidate.listing_id = current.listing_id
-                )
+                SELECT snapshots.payload_json
+                FROM listing_current
+                JOIN snapshots ON snapshots.listing_id = listing_current.listing_id
+                    AND snapshots.content_hash = listing_current.content_hash
                 """
+            ).fetchall()
+        return [ListingSnapshot.model_validate_json(row["payload_json"]) for row in rows]
+
+    def snapshot_versions(self) -> list[ListingSnapshot]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM snapshots ORDER BY observed_at DESC"
             ).fetchall()
         return [ListingSnapshot.model_validate_json(row["payload_json"]) for row in rows]
 
@@ -249,16 +493,392 @@ class LocalRepository:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT payload_json FROM snapshots
-                WHERE listing_id = ? ORDER BY observed_at DESC LIMIT 1
+                SELECT snapshots.payload_json
+                FROM listing_current
+                JOIN snapshots ON snapshots.listing_id = listing_current.listing_id
+                    AND snapshots.content_hash = listing_current.content_hash
+                WHERE listing_current.listing_id = ?
                 """,
                 (listing_id,),
             ).fetchone()
         return ListingSnapshot.model_validate_json(row["payload_json"]) if row else None
 
+    def get_snapshot(self, listing_id: str, content_hash: str) -> ListingSnapshot | None:
+        """Возвращает только точную неизменяемую версию объявления."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT payload_json FROM snapshots
+                WHERE listing_id = ? AND content_hash = ?
+                """,
+                (listing_id, content_hash),
+            ).fetchone()
+        return ListingSnapshot.model_validate_json(row["payload_json"]) if row else None
+
+    def is_current_snapshot(self, listing_id: str, content_hash: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT content_hash FROM listing_current WHERE listing_id = ?",
+                (listing_id,),
+            ).fetchone()
+        return bool(row and row["content_hash"] == content_hash)
+
+    def get_verification_evidence(
+        self, verification_key: str
+    ) -> VerificationEvidence | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM verification_evidence WHERE verification_key = ?",
+                (verification_key,),
+            ).fetchone()
+        return VerificationEvidence.model_validate_json(row["payload_json"]) if row else None
+
+    def save_verification_evidence(self, evidence: VerificationEvidence) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO verification_evidence(
+                    verification_key, evidence_revision_id, status, valid_until, payload_json
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(verification_key) DO UPDATE SET
+                    evidence_revision_id = excluded.evidence_revision_id,
+                    status = excluded.status,
+                    valid_until = excluded.valid_until,
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    evidence.verification_key,
+                    evidence.evidence_revision_id,
+                    evidence.status.value,
+                    evidence.valid_until.isoformat(),
+                    evidence.model_dump_json(),
+                ),
+            )
+
+    def put_outbox(self, record: OutboxRecord) -> OutboxRecord:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO delivery_outbox(delivery_id, state, payload_json)
+                VALUES (?, ?, ?)
+                """,
+                (record.delivery_id, record.state.value, record.model_dump_json()),
+            )
+            row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (record.delivery_id,),
+            ).fetchone()
+        return OutboxRecord.model_validate_json(row["payload_json"])
+
+    def claim_outbox(
+        self, delivery_id: str, lease_owner: str, lease_seconds: int = 120
+    ) -> OutboxRecord | None:
+        now = datetime.now(UTC)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (delivery_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            record = OutboxRecord.model_validate_json(row["payload_json"])
+            leased = record.lease_expires_at is not None and record.lease_expires_at > now
+            if record.state in {OutboxState.SENT, OutboxState.UNKNOWN} or (
+                record.state is OutboxState.SENDING and leased
+            ):
+                return None
+            lease_until = now + timedelta(seconds=lease_seconds)
+            claimed = record.model_copy(
+                update={
+                    "state": OutboxState.SENDING,
+                    "attempt_id": f"{delivery_id}:{int(now.timestamp() * 1000)}",
+                    "lease_owner": lease_owner,
+                    "lease_expires_at": lease_until,
+                    "last_attempt_at": now,
+                    "updated_at": now,
+                }
+            )
+            connection.execute(
+                """
+                UPDATE delivery_outbox
+                SET state = ?, lease_expires_at = ?, payload_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE delivery_id = ?
+                """,
+                (
+                    claimed.state.value,
+                    lease_until.isoformat(),
+                    claimed.model_dump_json(),
+                    delivery_id,
+                ),
+            )
+        return claimed
+
+    def update_outbox(
+        self,
+        delivery_id: str,
+        state: OutboxState,
+        *,
+        error: str | None = None,
+        telegram_message_id: str | None = None,
+        provider_message_id: str | None = None,
+    ) -> None:
+        now = datetime.now(UTC)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (delivery_id,),
+            ).fetchone()
+            if row is None:
+                return
+            record = OutboxRecord.model_validate_json(row["payload_json"])
+            updated = record.model_copy(
+                update={
+                    "state": state,
+                    "last_error": error,
+                    "telegram_message_id": telegram_message_id,
+                    "provider_message_id": provider_message_id or telegram_message_id,
+                    "lease_owner": None,
+                    "lease_expires_at": None,
+                    "updated_at": now,
+                }
+            )
+            connection.execute(
+                """
+                UPDATE delivery_outbox
+                SET state = ?, lease_expires_at = NULL, payload_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE delivery_id = ?
+                """,
+                (state.value, updated.model_dump_json(), delivery_id),
+            )
+
+    def get_outbox(self, delivery_id: str) -> OutboxRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (delivery_id,),
+            ).fetchone()
+        return OutboxRecord.model_validate_json(row["payload_json"]) if row else None
+
+    def list_outbox(
+        self, state: OutboxState | None = None, limit: int = 100
+    ) -> list[OutboxRecord]:
+        with self._connect() as connection:
+            if state is None:
+                rows = connection.execute(
+                    "SELECT payload_json FROM delivery_outbox ORDER BY updated_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT payload_json FROM delivery_outbox
+                    WHERE state = ? ORDER BY updated_at DESC LIMIT ?
+                    """,
+                    (state.value, limit),
+                ).fetchall()
+        return [OutboxRecord.model_validate_json(row["payload_json"]) for row in rows]
+
+    def reconcile_outbox(
+        self, delivery_id: str, action: str, operation_id: str
+    ) -> OutboxRecord | None:
+        target_state = {
+            "mark_sent": OutboxState.SENT,
+            "mark_failed": OutboxState.FAILED,
+            "retry_once": OutboxState.PENDING,
+        }.get(action)
+        if target_state is None:
+            raise ValueError("Неизвестное действие reconciliation")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (delivery_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            record = OutboxRecord.model_validate_json(row["payload_json"])
+            if record.state is not OutboxState.UNKNOWN:
+                raise ValueError("Reconciliation разрешена только для unknown")
+            if action == "retry_once" and record.retry_once_used:
+                raise ValueError("Повторная ручная отправка уже использована")
+            now = datetime.now(UTC)
+            event = {"operation_id": operation_id, "action": action, "at": now.isoformat()}
+            updated = record.model_copy(
+                update={
+                    "state": target_state,
+                    "retry_once_used": record.retry_once_used or action == "retry_once",
+                    "last_error": None if action == "retry_once" else record.last_error,
+                    "audit_events": [*record.audit_events, event],
+                    "updated_at": now,
+                }
+            )
+            connection.execute(
+                """
+                UPDATE delivery_outbox SET state = ?, payload_json = ?,
+                    updated_at = CURRENT_TIMESTAMP WHERE delivery_id = ?
+                """,
+                (target_state.value, updated.model_dump_json(), delivery_id),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(event_type, payload_json) VALUES (?, ?)",
+                ("outbox_reconciliation", json.dumps(event, ensure_ascii=False)),
+            )
+        return updated
+
+    def save_search(self, search: SavedSearch) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO saved_searches(search_id, user_id, enabled, payload_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(search_id) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    search.search_id,
+                    search.user_id,
+                    int(search.enabled),
+                    search.model_dump_json(),
+                ),
+            )
+
+    def user_searches(self, user_id: int) -> list[SavedSearch]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM saved_searches WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        return [SavedSearch.model_validate_json(row["payload_json"]) for row in rows]
+
+    def active_searches(self) -> list[SavedSearch]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM saved_searches WHERE enabled = 1"
+            ).fetchall()
+        return [SavedSearch.model_validate_json(row["payload_json"]) for row in rows]
+
+    def set_search_enabled(self, user_id: int, search_id: str, enabled: bool) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT payload_json FROM saved_searches
+                WHERE user_id = ? AND search_id = ?
+                """,
+                (user_id, search_id),
+            ).fetchone()
+            if row is None:
+                return False
+            search = SavedSearch.model_validate_json(row["payload_json"])
+            updated = search.model_copy(update={"enabled": enabled})
+            connection.execute(
+                """
+                UPDATE saved_searches SET enabled = ?, payload_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND search_id = ?
+                """,
+                (int(enabled), updated.model_dump_json(), user_id, search_id),
+            )
+        return True
+
+    def save_outcome(self, outcome: Outcome) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO outcomes(user_id, listing_id, decision_content_hash, payload_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id, listing_id, decision_content_hash) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    outcome.user_id,
+                    outcome.listing_id,
+                    outcome.decision_content_hash,
+                    outcome.model_dump_json(),
+                ),
+            )
+
+    def user_outcomes(self, user_id: int) -> list[Outcome]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM outcomes WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        return [Outcome.model_validate_json(row["payload_json"]) for row in rows]
+
+    def save_publication_event(self, event: PublicationEvent) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO publication_events(publication_event_id, payload_json)
+                VALUES (?, ?)
+                """,
+                (event.publication_event_id, event.model_dump_json()),
+            )
+
+    def admin_summary(self) -> dict[str, Any]:
+        tables = {
+            "users": "user_settings",
+            "searches": "saved_searches",
+            "outbox": "delivery_outbox",
+            "audit_events": "audit_events",
+            "quarantine": "verification_evidence",
+            "current_decisions": "decision_current",
+            "outcomes": "outcomes",
+        }
+        with self._connect() as connection:
+            counts = {
+                name: int(
+                    connection.execute(f"SELECT COUNT(*) AS amount FROM {table}").fetchone()[
+                        "amount"
+                    ]
+                )
+                for name, table in tables.items()
+            }
+            outbox_states = {
+                row["state"]: int(row["amount"])
+                for row in connection.execute(
+                    "SELECT state, COUNT(*) AS amount FROM delivery_outbox GROUP BY state"
+                ).fetchall()
+            }
+        return {"counts": counts, "outbox_states": outbox_states}
+
+    def schema_version(self) -> str:
+        return "2"
+
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
         """Идемпотентно сохраняет решение для конкретной версии."""
         with self._connect() as connection:
+            current_decision_id = decision.decision_id or canonical_hash(
+                "legacy-decision-pointer/v1",
+                {
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "engine_version": decision.engine_version,
+                },
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO decisions_v3(
+                    decision_id, decision_subject_id, listing_id, content_hash,
+                    engine_version, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    current_decision_id,
+                    decision.decision_subject_id or listing_id,
+                    listing_id,
+                    content_hash,
+                    decision.engine_version,
+                    decision.model_dump_json(),
+                ),
+            )
             connection.execute(
                 """
                 INSERT OR IGNORE INTO decisions_v2
@@ -272,6 +892,27 @@ class LocalRepository:
                     decision.model_dump_json(),
                 ),
             )
+            connection.execute(
+                    """
+                    INSERT INTO decision_current(
+                        decision_subject_id, decision_id, listing_id,
+                        content_hash, engine_version
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(decision_subject_id) DO UPDATE SET
+                        decision_id = excluded.decision_id,
+                        listing_id = excluded.listing_id,
+                        content_hash = excluded.content_hash,
+                        engine_version = excluded.engine_version,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (
+                        decision.decision_subject_id or listing_id,
+                        current_decision_id,
+                        listing_id,
+                        content_hash,
+                        decision.engine_version,
+                    ),
+                )
 
     def decision_exists(self, listing_id: str, content_hash: str, engine_version: str) -> bool:
         with self._connect() as connection:
@@ -361,7 +1002,9 @@ class LocalRepository:
             rows = connection.execute(
                 """
                 SELECT s.payload_json AS listing_json, d.payload_json AS decision_json
-                FROM decisions_v2 d
+                FROM decisions_v3 d
+                JOIN decision_current c
+                  ON c.decision_id = d.decision_id
                 JOIN snapshots s
                   ON s.listing_id = d.listing_id AND s.content_hash = d.content_hash
                 ORDER BY d.created_at DESC
@@ -447,14 +1090,83 @@ class LocalRepository:
             ).fetchall()
         return {str(row["source_name"]): json.loads(row["payload_json"]) for row in rows}
 
-    def claim_telegram_update(self, update_id: int) -> bool:
+    def claim_telegram_update(
+        self, update_id: int, lease_owner: str = "local", lease_seconds: int = 120
+    ) -> bool:
         """Атомарно закрепляет Telegram update за единственным обработчиком."""
+        now = datetime.now(UTC)
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
         with self._connect() as connection:
-            cursor = connection.execute(
-                "INSERT OR IGNORE INTO telegram_updates(update_id) VALUES (?)",
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT state, lease_expires_at FROM telegram_updates WHERE update_id = ?",
                 (update_id,),
+            ).fetchone()
+            if row is not None:
+                lease_value = row["lease_expires_at"]
+                lease_active = bool(
+                    lease_value and datetime.fromisoformat(str(lease_value)) > now
+                )
+                if row["state"] == ProcessingState.COMPLETED.value or (
+                    row["state"] == ProcessingState.PROCESSING.value and lease_active
+                ):
+                    return False
+            record = TelegramUpdateRecord(
+                update_id=update_id,
+                state=ProcessingState.PROCESSING,
+                operation_id=canonical_hash(
+                    "telegram-update-operation/v1", {"update_id": update_id}
+                ),
+                lease_owner=lease_owner,
+                lease_expires_at=lease_expires_at,
             )
-        return cursor.rowcount == 1
+            connection.execute(
+                """
+                INSERT INTO telegram_updates(update_id, state, lease_expires_at, payload_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(update_id) DO UPDATE SET
+                    state = excluded.state,
+                    lease_expires_at = excluded.lease_expires_at,
+                    payload_json = excluded.payload_json,
+                    claimed_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    update_id,
+                    record.state.value,
+                    lease_expires_at.isoformat(),
+                    record.model_dump_json(),
+                ),
+            )
+        return True
+
+    def finish_telegram_update(
+        self, update_id: int, state: ProcessingState, error: str | None = None
+    ) -> None:
+        if state is ProcessingState.PROCESSING:
+            raise ValueError("Финальное состояние Telegram update не может быть processing")
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM telegram_updates WHERE update_id = ?", (update_id,)
+            ).fetchone()
+            if row is None or not row["payload_json"]:
+                return
+            record = TelegramUpdateRecord.model_validate_json(row["payload_json"])
+            updated = record.model_copy(
+                update={
+                    "state": state,
+                    "lease_owner": None,
+                    "lease_expires_at": None,
+                    "last_error": error,
+                    "updated_at": datetime.now(UTC),
+                }
+            )
+            connection.execute(
+                """
+                UPDATE telegram_updates SET state = ?, lease_expires_at = NULL,
+                    payload_json = ? WHERE update_id = ?
+                """,
+                (state.value, updated.model_dump_json(), update_id),
+            )
 
     def get_user_settings(self, user_id: int) -> UserSettings | None:
         with self._connect() as connection:
@@ -497,6 +1209,14 @@ class LocalRepository:
                 (user_id,),
             ).fetchall()
         return [str(row["listing_id"]) for row in rows]
+
+    def record_audit_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Записывает безопасный локальный audit trail."""
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO audit_events(event_type, payload_json) VALUES (?, ?)",
+                (event_type, json.dumps(payload, ensure_ascii=False, sort_keys=True)),
+            )
 
     def import_snapshots(self, snapshots: Iterable[ListingSnapshot]) -> int:
         """Упрощает тестовую пакетную загрузку без mock fallback."""

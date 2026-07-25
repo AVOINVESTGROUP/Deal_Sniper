@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Deal Sniper Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body><main>
+  <h1>Deal Sniper Administration</h1>
+  <div class="toolbar"><button id="login">Sign in with Google</button><button id="refresh" disabled>Refresh</button></div>
+  <p id="identity" class="muted">Authentication required.</p>
+  <section id="overview" class="grid"></section>
+  <section class="card"><h2>Sources and health</h2><div id="sources"></div></section>
+  <section class="card"><h2>Cloud runtime</h2><pre id="cloud">—</pre></section>
+  <section class="card"><h2>Operations</h2><pre id="operations">—</pre></section>
+  <section class="card"><h2>Free / Pro preview</h2><h3>Free</h3><pre id="free">—</pre><h3>Pro</h3><pre id="pro">—</pre></section>
+  <section class="card"><h2>Unknown delivery reconciliation</h2><div id="unknown"></div></section>
+  <section class="card"><h2>Market Pulse</h2><pre id="pulse">—</pre></section>
+  <section class="card"><h2>Security</h2><p>Secret values are never displayed or changed here. Every mutation is authenticated and audited.</p></section>
+  <p id="error" class="danger"></p>
+</main><script type="module" src="/admin.js"></script></body>
+</html>

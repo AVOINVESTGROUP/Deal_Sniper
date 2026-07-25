@@ -6,7 +6,7 @@ import logging
 
 from dotenv import load_dotenv
 
-from src.bot import run_bot, scan_and_publish
+from src.bot import run_bot
 from src.config import Settings
 from src.service import DealService
 
@@ -16,13 +16,20 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dubai Deal Sniper")
     parser.add_argument(
         "command",
-        choices=("bot", "scan", "collect", "publish"),
+        choices=("bot", "scan", "collect", "content", "replay"),
         help="Режим запуска",
     )
     parser.add_argument(
         "--source",
         choices=("dubicars", "carswitch", "cars24", "opensooq"),
     )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Обработать migration replay напрямую без Cloud Tasks",
+    )
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--concurrency", type=int, default=10)
     return parser.parse_args()
 
 
@@ -62,12 +69,34 @@ def main() -> None:
     args = parse_args()
     settings = Settings.from_env()
     if args.command == "bot":
+        if not settings.delivery_enabled:
+            raise RuntimeError("DELIVERY_ENABLED=false: Telegram long polling запрещён")
         run_bot(settings)
-    elif args.command == "publish":
-        sent = asyncio.run(scan_and_publish(settings))
-        print(f"Опубликовано новых кандидатов: {sent}")
+    elif args.command == "content":
+        from src.content_job import enqueue_market_pulse
+
+        event_id = asyncio.run(enqueue_market_pulse(settings))
+        print(f"PublicationEvent: {event_id or 'channel-not-configured'}")
     elif args.command == "collect":
         asyncio.run(collect_once(settings, args.source))
+    elif args.command == "replay":
+        from src.replay import enqueue_migration_replay, run_migration_replay_direct
+
+        if args.direct:
+            report = asyncio.run(
+                run_migration_replay_direct(
+                    settings,
+                    limit=args.limit,
+                    concurrency=args.concurrency,
+                )
+            )
+        else:
+            report = asyncio.run(enqueue_migration_replay(settings))
+        print(
+            f"Replay: pending={report.pending}; enqueued={report.enqueued}; "
+            f"completed={report.completed}; failed={report.failed}; "
+            f"skipped={report.skipped}"
+        )
     else:
         asyncio.run(scan_once(settings, args.source))
 

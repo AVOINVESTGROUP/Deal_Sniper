@@ -1,21 +1,29 @@
 """Production-хранилище объявлений и решений в Cloud Firestore."""
 
-import hashlib
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 
+from src.domain.ids import canonical_hash
 from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
     NormalizedVehicle,
+    OutboxRecord,
+    OutboxState,
+    Outcome,
+    ProcessingState,
+    PublicationEvent,
     RawSnapshotMetadata,
+    SavedSearch,
+    TelegramUpdateRecord,
     UserAction,
     UserSettings,
     VehicleIdentity,
+    VerificationEvidence,
 )
 from src.storage import snapshot_hash
 
@@ -33,88 +41,53 @@ class FirestoreRepository:
         content_hash = snapshot_hash(snapshot)
         listing_ref = self.client.collection("listings").document(listing_id)
         snapshot_ref = listing_ref.collection("snapshots").document(content_hash)
-        current = listing_ref.get()
-        current_data = current.to_dict() or {}
-        if current.exists and current_data.get("content_hash") == content_hash:
-            return False, False, content_hash
+        transaction = self.client.transaction()
 
-        previous_price = current_data.get("price_aed")
-        payload = snapshot.model_dump(mode="json")
-        batch = self.client.batch()
-        batch.set(
-            snapshot_ref,
-            {
-                "listing_id": listing_id,
-                "content_hash": content_hash,
-                "observed_at": snapshot.observed_at,
-                "price_aed": str(snapshot.price_aed),
-                "payload": payload,
-            },
-        )
-        batch.set(
-            listing_ref,
-            {
-                "listing_id": listing_id,
-                "source": snapshot.source,
-                "source_listing_id": snapshot.source_listing_id,
-                "content_hash": content_hash,
-                "price_aed": str(snapshot.price_aed),
-                "updated_at": snapshot.observed_at,
-                "payload": payload,
-            },
-        )
-        batch.commit()
-        price_changed = current.exists and previous_price != str(snapshot.price_aed)
-        return not current.exists, price_changed, content_hash
-
-    def save_snapshots(
-        self,
-        snapshots: list[ListingSnapshot],
-    ) -> list[tuple[ListingSnapshot, bool, bool, str]]:
-        """Пакетно читает состояние и сохраняет только новые версии объявлений."""
-        references = {
-            f"{snapshot.source}:{snapshot.source_listing_id}": self.client.collection(
-                "listings"
-            ).document(f"{snapshot.source}:{snapshot.source_listing_id}")
-            for snapshot in snapshots
-        }
-        current_by_id = {
-            document.id: document.to_dict() or {}
-            for document in self.client.get_all(list(references.values()))
-            if document.exists
-        }
-        results: list[tuple[ListingSnapshot, bool, bool, str]] = []
-        changed: list[tuple[ListingSnapshot, str, str, bool, bool]] = []
-        for snapshot in snapshots:
-            listing_id = f"{snapshot.source}:{snapshot.source_listing_id}"
-            content_hash = snapshot_hash(snapshot)
-            current = current_by_id.get(listing_id)
-            is_new = current is None
-            price_changed = current is not None and current.get("price_aed") != str(
-                snapshot.price_aed
-            )
-            results.append((snapshot, is_new, price_changed, content_hash))
-            if current is None or current.get("content_hash") != content_hash:
-                changed.append((snapshot, listing_id, content_hash, is_new, price_changed))
-
-        for offset in range(0, len(changed), 150):
-            batch = self.client.batch()
-            for snapshot, listing_id, content_hash, _is_new, _price_changed in changed[
-                offset : offset + 150
-            ]:
-                listing_ref = references[listing_id]
-                payload = snapshot.model_dump(mode="json")
-                batch.set(
-                    listing_ref.collection("snapshots").document(content_hash),
-                    {
-                        "listing_id": listing_id,
-                        "content_hash": content_hash,
-                        "observed_at": snapshot.observed_at,
-                        "price_aed": str(snapshot.price_aed),
-                        "payload": payload,
-                    },
+        @firestore.transactional
+        def persist(transaction: firestore.Transaction) -> tuple[bool, bool]:
+            current = listing_ref.get(transaction=transaction)
+            current_data = current.to_dict() or {}
+            if current.exists and current_data.get("content_hash") == content_hash:
+                transaction.set(
+                    listing_ref,
+                    {"last_seen_at": firestore.SERVER_TIMESTAMP},
+                    merge=True,
                 )
-                batch.set(
+                return False, False
+            sequence = snapshot.version_sequence
+            if sequence is None:
+                sequence = int(current_data.get("version_sequence", 0)) + 1
+            source_observed_at = snapshot.source_observed_at or snapshot.observed_at
+            current_key = (
+                int(current_data.get("version_sequence", -1)),
+                str(current_data.get("source_observed_at", "")),
+                str(current_data.get("fetched_at", "")),
+                str(current_data.get("tie_breaker", "")),
+            )
+            candidate_key = (
+                sequence,
+                source_observed_at.isoformat(),
+                snapshot.fetched_at.isoformat(),
+                content_hash,
+            )
+            stored = snapshot.model_copy(update={"version_sequence": sequence})
+            payload = stored.model_dump(mode="json")
+            transaction.set(
+                snapshot_ref,
+                {
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "source_observed_at": source_observed_at,
+                    "fetched_at": snapshot.fetched_at,
+                    "ingested_at": firestore.SERVER_TIMESTAMP,
+                    "version_sequence": sequence,
+                    "price_aed": str(snapshot.price_aed),
+                    "payload": payload,
+                    "schema_version": "listing-snapshot/v2",
+                },
+            )
+            if not current.exists or candidate_key > current_key:
+                transaction.set(
                     listing_ref,
                     {
                         "listing_id": listing_id,
@@ -122,12 +95,30 @@ class FirestoreRepository:
                         "source_listing_id": snapshot.source_listing_id,
                         "content_hash": content_hash,
                         "price_aed": str(snapshot.price_aed),
-                        "updated_at": snapshot.observed_at,
+                        "source_observed_at": source_observed_at.isoformat(),
+                        "fetched_at": snapshot.fetched_at.isoformat(),
+                        "ingested_at": firestore.SERVER_TIMESTAMP,
+                        "last_seen_at": firestore.SERVER_TIMESTAMP,
+                        "version_sequence": sequence,
+                        "tie_breaker": content_hash,
+                        "lifecycle": "changed" if current.exists else "active",
                         "payload": payload,
+                        "schema_version": "listing-current/v2",
                     },
                 )
-            batch.commit()
-        return results
+            return not current.exists, (
+                current.exists and current_data.get("price_aed") != str(snapshot.price_aed)
+            )
+
+        is_new, price_changed = persist(transaction)
+        return is_new, price_changed, content_hash
+
+    def save_snapshots(
+        self,
+        snapshots: list[ListingSnapshot],
+    ) -> list[tuple[ListingSnapshot, bool, bool, str]]:
+        """Сохраняет каждую версию транзакционно, исключая out-of-order pointer race."""
+        return [(snapshot, *self.save_snapshot(snapshot)) for snapshot in snapshots]
 
     def latest_snapshots(self) -> list[ListingSnapshot]:
         results: list[ListingSnapshot] = []
@@ -137,27 +128,410 @@ class FirestoreRepository:
                 results.append(ListingSnapshot.model_validate(data["payload"]))
         return results
 
+    def snapshot_versions(self) -> list[ListingSnapshot]:
+        results: list[ListingSnapshot] = []
+        for document in self.client.collection_group("snapshots").stream():
+            data = document.to_dict() or {}
+            if "payload" in data:
+                results.append(ListingSnapshot.model_validate(data["payload"]))
+        return sorted(results, key=lambda item: item.observed_at, reverse=True)
+
     def latest_snapshot(self, listing_id: str) -> ListingSnapshot | None:
         document = self.client.collection("listings").document(listing_id).get()
         data = document.to_dict()
         return ListingSnapshot.model_validate(data["payload"]) if data else None
 
-    def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
-        self.client.collection("decisions").document(
-            _stable_id(listing_id, content_hash, decision.engine_version)
+    def get_snapshot(self, listing_id: str, content_hash: str) -> ListingSnapshot | None:
+        """Читает точную версию, указанную processing task."""
+        document = (
+            self.client.collection("listings")
+            .document(listing_id)
+            .collection("snapshots")
+            .document(content_hash)
+            .get()
+        )
+        data = document.to_dict()
+        if not data or data.get("content_hash") != content_hash:
+            return None
+        return ListingSnapshot.model_validate(data["payload"])
+
+    def is_current_snapshot(self, listing_id: str, content_hash: str) -> bool:
+        data = self.client.collection("listings").document(listing_id).get().to_dict() or {}
+        return data.get("content_hash") == content_hash and data.get("lifecycle", "active") in {
+            "active",
+            "changed",
+        }
+
+    def get_verification_evidence(
+        self, verification_key: str
+    ) -> VerificationEvidence | None:
+        document = self.client.collection("verification_evidence").document(verification_key).get()
+        data = document.to_dict()
+        return VerificationEvidence.model_validate(data["payload"]) if data else None
+
+    def save_verification_evidence(self, evidence: VerificationEvidence) -> None:
+        self.client.collection("verification_evidence").document(
+            evidence.verification_key
         ).set(
             {
-                "listing_id": listing_id,
-                "content_hash": content_hash,
-                "engine_version": decision.engine_version,
-                "created_at": datetime.now(UTC),
-                "payload": decision.model_dump(mode="json"),
+                "verification_key": evidence.verification_key,
+                "evidence_revision_id": evidence.evidence_revision_id,
+                "status": evidence.status.value,
+                "freshness_status": evidence.freshness_status.value,
+                "valid_until": evidence.valid_until,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "payload": evidence.model_dump(mode="json"),
+                "schema_version": "verification-evidence/v1",
             }
         )
 
+    def put_outbox(self, record: OutboxRecord) -> OutboxRecord:
+        reference = self.client.collection("delivery_outbox").document(record.delivery_id)
+        try:
+            reference.create(
+                {
+                    "delivery_id": record.delivery_id,
+                    "state": record.state.value,
+                    "payload": record.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "schema_version": "outbox/v2",
+                }
+            )
+            return record
+        except AlreadyExists:
+            data = reference.get().to_dict()
+            if not data:
+                raise RuntimeError("Запись outbox исчезла после AlreadyExists") from None
+            return OutboxRecord.model_validate(data["payload"])
+
+    def claim_outbox(
+        self, delivery_id: str, lease_owner: str, lease_seconds: int = 120
+    ) -> OutboxRecord | None:
+        reference = self.client.collection("delivery_outbox").document(delivery_id)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def claim(transaction: firestore.Transaction) -> OutboxRecord | None:
+            snapshot = reference.get(transaction=transaction)
+            if not snapshot.exists:
+                return None
+            data = snapshot.to_dict() or {}
+            record = OutboxRecord.model_validate(data["payload"])
+            now = datetime.now(UTC)
+            leased = record.lease_expires_at is not None and record.lease_expires_at > now
+            if record.state in {OutboxState.SENT, OutboxState.UNKNOWN} or (
+                record.state is OutboxState.SENDING and leased
+            ):
+                return None
+            claimed = record.model_copy(
+                update={
+                    "state": OutboxState.SENDING,
+                    "attempt_id": f"{delivery_id}:{int(now.timestamp() * 1000)}",
+                    "lease_owner": lease_owner,
+                    "lease_expires_at": now + timedelta(seconds=lease_seconds),
+                    "last_attempt_at": now,
+                    "updated_at": now,
+                }
+            )
+            transaction.set(
+                reference,
+                {
+                    "state": claimed.state.value,
+                    "payload": claimed.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return claimed
+
+        return cast(OutboxRecord | None, claim(transaction))
+
+    def update_outbox(
+        self,
+        delivery_id: str,
+        state: OutboxState,
+        *,
+        error: str | None = None,
+        telegram_message_id: str | None = None,
+        provider_message_id: str | None = None,
+    ) -> None:
+        reference = self.client.collection("delivery_outbox").document(delivery_id)
+        snapshot = reference.get()
+        data = snapshot.to_dict()
+        if not data:
+            return
+        record = OutboxRecord.model_validate(data["payload"])
+        updated = record.model_copy(
+            update={
+                "state": state,
+                "last_error": error,
+                "telegram_message_id": telegram_message_id,
+                "provider_message_id": provider_message_id or telegram_message_id,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        reference.set(
+            {
+                "state": state.value,
+                "payload": updated.model_dump(mode="json"),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+    def get_outbox(self, delivery_id: str) -> OutboxRecord | None:
+        data = self.client.collection("delivery_outbox").document(delivery_id).get().to_dict()
+        return OutboxRecord.model_validate(data["payload"]) if data else None
+
+    def list_outbox(
+        self, state: OutboxState | None = None, limit: int = 100
+    ) -> list[OutboxRecord]:
+        query: Any = self.client.collection("delivery_outbox")
+        if state is not None:
+            query = query.where("state", "==", state.value)
+        return [
+            OutboxRecord.model_validate(data["payload"])
+            for document in query.limit(limit).stream()
+            if (data := document.to_dict()) and "payload" in data
+        ]
+
+    def reconcile_outbox(
+        self, delivery_id: str, action: str, operation_id: str
+    ) -> OutboxRecord | None:
+        target_state = {
+            "mark_sent": OutboxState.SENT,
+            "mark_failed": OutboxState.FAILED,
+            "retry_once": OutboxState.PENDING,
+        }.get(action)
+        if target_state is None:
+            raise ValueError("Неизвестное действие reconciliation")
+        reference = self.client.collection("delivery_outbox").document(delivery_id)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def reconcile(transaction: firestore.Transaction) -> OutboxRecord | None:
+            snapshot = reference.get(transaction=transaction)
+            data = snapshot.to_dict() or {}
+            if not snapshot.exists:
+                return None
+            record = OutboxRecord.model_validate(data["payload"])
+            if record.state is not OutboxState.UNKNOWN:
+                raise ValueError("Reconciliation разрешена только для unknown")
+            if action == "retry_once" and record.retry_once_used:
+                raise ValueError("Повторная ручная отправка уже использована")
+            now = datetime.now(UTC)
+            event = {"operation_id": operation_id, "action": action, "at": now.isoformat()}
+            updated = record.model_copy(
+                update={
+                    "state": target_state,
+                    "retry_once_used": record.retry_once_used or action == "retry_once",
+                    "last_error": None if action == "retry_once" else record.last_error,
+                    "audit_events": [*record.audit_events, event],
+                    "updated_at": now,
+                }
+            )
+            transaction.set(
+                reference,
+                {
+                    "state": target_state.value,
+                    "payload": updated.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return updated
+
+        result = cast(OutboxRecord | None, reconcile(transaction))
+        if result is not None:
+            self.record_audit_event(
+                "outbox_reconciliation",
+                {"delivery_id": delivery_id, "operation_id": operation_id, "action": action},
+            )
+        return result
+
+    def save_search(self, search: SavedSearch) -> None:
+        self.client.collection("saved_searches").document(search.search_id).set(
+            {
+                "search_id": search.search_id,
+                "user_id": search.user_id,
+                "enabled": search.enabled,
+                "payload": search.model_dump(mode="json"),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "schema_version": "saved-search/v1",
+            }
+        )
+
+    def user_searches(self, user_id: int) -> list[SavedSearch]:
+        query = self.client.collection("saved_searches").where("user_id", "==", user_id)
+        return [
+            SavedSearch.model_validate(data["payload"])
+            for document in query.stream()
+            if (data := document.to_dict()) and "payload" in data
+        ]
+
+    def active_searches(self) -> list[SavedSearch]:
+        query = self.client.collection("saved_searches").where("enabled", "==", True)
+        return [
+            SavedSearch.model_validate(data["payload"])
+            for document in query.stream()
+            if (data := document.to_dict()) and "payload" in data
+        ]
+
+    def set_search_enabled(self, user_id: int, search_id: str, enabled: bool) -> bool:
+        reference = self.client.collection("saved_searches").document(search_id)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def update(transaction: firestore.Transaction) -> bool:
+            snapshot = reference.get(transaction=transaction)
+            data = snapshot.to_dict() or {}
+            if not snapshot.exists or data.get("user_id") != user_id:
+                return False
+            search = SavedSearch.model_validate(data["payload"])
+            updated = search.model_copy(update={"enabled": enabled})
+            transaction.set(
+                reference,
+                {
+                    "enabled": enabled,
+                    "payload": updated.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return True
+
+        return cast(bool, update(transaction))
+
+    def save_outcome(self, outcome: Outcome) -> None:
+        document_id = _stable_id(
+            str(outcome.user_id), outcome.listing_id, outcome.decision_content_hash
+        )
+        self.client.collection("outcomes").document(document_id).set(
+            {
+                "user_id": outcome.user_id,
+                "listing_id": outcome.listing_id,
+                "decision_content_hash": outcome.decision_content_hash,
+                "payload": outcome.model_dump(mode="json"),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "schema_version": "outcome/v1",
+            }
+        )
+
+    def user_outcomes(self, user_id: int) -> list[Outcome]:
+        query = self.client.collection("outcomes").where("user_id", "==", user_id)
+        return [
+            Outcome.model_validate(data["payload"])
+            for document in query.stream()
+            if (data := document.to_dict()) and "payload" in data
+        ]
+
+    def save_publication_event(self, event: PublicationEvent) -> None:
+        try:
+            self.client.collection("publication_events").document(
+                event.publication_event_id
+            ).create(
+                {
+                    "publication_event_id": event.publication_event_id,
+                    "decision_id": event.decision_id,
+                    "vehicle_id": event.vehicle_id,
+                    "event_type": event.event_type,
+                    "payload": event.model_dump(mode="json"),
+                    "created_at": event.created_at,
+                    "schema_version": "publication-event/v1",
+                }
+            )
+        except AlreadyExists:
+            return
+
+    def admin_summary(self) -> dict[str, Any]:
+        collections = {
+            "users": "user_settings",
+            "searches": "saved_searches",
+            "outbox": "delivery_outbox",
+            "audit_events": "audit_events",
+            "quarantine": "verification_evidence",
+            "current_decisions": "decision_current",
+            "outcomes": "outcomes",
+        }
+        counts = {
+            name: sum(1 for _document in self.client.collection(collection).stream())
+            for name, collection in collections.items()
+        }
+        outbox_states: dict[str, int] = {}
+        for document in self.client.collection("delivery_outbox").stream():
+            state = str((document.to_dict() or {}).get("state", "unknown"))
+            outbox_states[state] = outbox_states.get(state, 0) + 1
+        return {"counts": counts, "outbox_states": outbox_states}
+
+    def schema_version(self) -> str:
+        data = self.client.collection("schema_ledger").document("current").get().to_dict()
+        return str((data or {}).get("schema_version", "legacy"))
+
+    def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
+        immutable_id = decision.decision_id or _stable_id(
+            listing_id, content_hash, decision.engine_version
+        )
+        subject_id = decision.decision_subject_id or listing_id
+        decision_ref = self.client.collection("decisions").document(immutable_id)
+        current_ref = self.client.collection("decision_current").document(subject_id)
+        processing_ref = self.client.collection("decision_processing_keys").document(
+            _stable_id(listing_id, content_hash, decision.engine_version)
+        )
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def persist(transaction: firestore.Transaction) -> None:
+            previous = current_ref.get(transaction=transaction)
+            previous_data = previous.to_dict() or {}
+            previous_id = previous_data.get("decision_id")
+            if previous_id and previous_id != immutable_id:
+                transaction.set(
+                    self.client.collection("decisions").document(str(previous_id)),
+                    {"is_current": False, "superseded_by": immutable_id},
+                    merge=True,
+                )
+            transaction.set(
+                decision_ref,
+                {
+                    "decision_id": immutable_id,
+                    "decision_subject_id": subject_id,
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "engine_version": decision.engine_version,
+                    "is_current": True,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "payload": decision.model_dump(mode="json"),
+                    "schema_version": "deal-decision/v2",
+                },
+            )
+            transaction.set(
+                current_ref,
+                {
+                    "decision_id": immutable_id,
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "engine_version": decision.engine_version,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            transaction.set(
+                processing_ref,
+                {
+                    "decision_id": immutable_id,
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "engine_version": decision.engine_version,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+
+        persist(transaction)
+
     def decision_exists(self, listing_id: str, content_hash: str, engine_version: str) -> bool:
         return (
-            self.client.collection("decisions")
+            self.client.collection("decision_processing_keys")
             .document(_stable_id(listing_id, content_hash, engine_version))
             .get()
             .exists
@@ -265,7 +639,15 @@ class FirestoreRepository:
         )
 
     def latest_decisions(self, limit: int = 10) -> list[tuple[ListingSnapshot, DealDecision]]:
-        documents = list(self.client.collection("decisions").stream())
+        current = list(self.client.collection("decision_current").stream())
+        decision_refs = []
+        for pointer in current:
+            data = pointer.to_dict() or {}
+            if data.get("decision_id"):
+                decision_refs.append(
+                    self.client.collection("decisions").document(str(data["decision_id"]))
+                )
+        documents = list(self.client.get_all(decision_refs))
 
         def created_at(document: firestore.DocumentSnapshot) -> datetime:
             data = document.to_dict() or {}
@@ -366,18 +748,78 @@ class FirestoreRepository:
                 results[document.id] = last_run
         return results
 
-    def claim_telegram_update(self, update_id: int) -> bool:
+    def claim_telegram_update(
+        self, update_id: int, lease_owner: str = "local", lease_seconds: int = 120
+    ) -> bool:
         """Атомарно блокирует повторную обработку webhook-доставки Telegram."""
-        try:
-            self.client.collection("telegram_updates").document(str(update_id)).create(
+        reference = self.client.collection("telegram_updates").document(str(update_id))
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def claim(transaction: firestore.Transaction) -> bool:
+            snapshot = reference.get(transaction=transaction)
+            data = snapshot.to_dict() or {}
+            now = datetime.now(UTC)
+            if snapshot.exists:
+                state = str(data.get("state", ProcessingState.COMPLETED.value))
+                lease_expires_at = data.get("lease_expires_at")
+                lease_active = isinstance(lease_expires_at, datetime) and lease_expires_at > now
+                if state == ProcessingState.COMPLETED.value or (
+                    state == ProcessingState.PROCESSING.value and lease_active
+                ):
+                    return False
+            record = TelegramUpdateRecord(
+                update_id=update_id,
+                state=ProcessingState.PROCESSING,
+                operation_id=canonical_hash(
+                    "telegram-update-operation/v1", {"update_id": update_id}
+                ),
+                lease_owner=lease_owner,
+                lease_expires_at=now + timedelta(seconds=lease_seconds),
+            )
+            transaction.set(
+                reference,
                 {
                     "update_id": update_id,
-                    "claimed_at": datetime.now(UTC),
-                }
+                    "state": record.state.value,
+                    "lease_expires_at": record.lease_expires_at,
+                    "payload": record.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "schema_version": "telegram-update/v2",
+                },
             )
-        except AlreadyExists:
-            return False
-        return True
+            return True
+
+        return cast(bool, claim(transaction))
+
+    def finish_telegram_update(
+        self, update_id: int, state: ProcessingState, error: str | None = None
+    ) -> None:
+        if state is ProcessingState.PROCESSING:
+            raise ValueError("Финальное состояние Telegram update не может быть processing")
+        reference = self.client.collection("telegram_updates").document(str(update_id))
+        data = reference.get().to_dict()
+        if not data or "payload" not in data:
+            return
+        record = TelegramUpdateRecord.model_validate(data["payload"])
+        updated = record.model_copy(
+            update={
+                "state": state,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "last_error": error,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        reference.set(
+            {
+                "state": state.value,
+                "lease_expires_at": None,
+                "payload": updated.model_dump(mode="json"),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
 
     def get_user_settings(self, user_id: int) -> UserSettings | None:
         document = self.client.collection("user_settings").document(str(user_id)).get()
@@ -396,13 +838,30 @@ class FirestoreRepository:
         )
 
     def user_watchlist(self, user_id: int) -> list[str]:
-        documents = self.client.collection("user_actions").stream()
+        documents = (
+            self.client.collection("user_actions")
+            .where("user_id", "==", user_id)
+            .where("action", "==", "WATCH")
+            .stream()
+        )
         return [
             str(data["listing_id"])
             for document in documents
-            if (data := document.to_dict()) and data.get("action") == "WATCH"
+            if (data := document.to_dict())
         ]
+
+    def record_audit_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """Записывает append-only audit event с серверным временем."""
+        reference = self.client.collection("audit_events").document()
+        reference.set(
+            {
+                "event_type": event_type,
+                "payload": payload,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "schema_version": "audit-event/v1",
+            }
+        )
 
 
 def _stable_id(*parts: str) -> str:
-    return hashlib.sha256("|".join(parts).encode()).hexdigest()
+    return canonical_hash("firestore-document-id/v1", {"parts": list(parts)})

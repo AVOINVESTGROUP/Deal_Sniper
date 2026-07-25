@@ -1,10 +1,10 @@
 """Детерминированная нормализация и объединение автомобилей между источниками."""
 
-import hashlib
 import re
 from collections import defaultdict
 from decimal import Decimal
 
+from src.domain.ids import canonical_hash
 from src.domain.models import (
     MIN_VALID_LISTING_PRICE_AED,
     ListingSnapshot,
@@ -66,7 +66,7 @@ def normalize_listing(listing: ListingSnapshot) -> NormalizedVehicle | None:
         seller_type=listing.seller_type,
         asking_price_aed=listing.price_aed,
         observed_at=listing.observed_at,
-        comparison_key="|".join(comparison_parts),
+        comparison_key=canonical_hash("vehicle-comparison-key/v1", {"parts": comparison_parts}),
     )
 
 
@@ -109,7 +109,14 @@ def resolve_vehicle_identities(
         confidence = (
             Decimal("1") if has_shared_vin else Decimal("0.9") if len(group) > 1 else Decimal("0.5")
         )
-        vehicle_id = hashlib.sha256("|".join(listing_ids).encode()).hexdigest()
+        vehicle_id = canonical_hash(
+            "vehicle-identity/v2",
+            {
+                "vin": group[0].vin if has_shared_vin else None,
+                "listing_ids": listing_ids,
+                "method": method,
+            },
+        )
         reasons = (
             ["Совпадает VIN"]
             if has_shared_vin
@@ -124,6 +131,14 @@ def resolve_vehicle_identities(
             confidence=confidence,
             comparison_key=group[0].comparison_key,
             reasons=reasons,
+            evidence=[
+                {
+                    "listing_id": item.listing_id,
+                    "source": item.source,
+                    "evidence_revision_id": item.evidence_revision_id or "missing",
+                }
+                for item in group
+            ],
         )
         identities.append(identity)
         for listing_id in listing_ids:

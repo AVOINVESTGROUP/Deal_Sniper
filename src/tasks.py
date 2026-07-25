@@ -1,14 +1,15 @@
 """Идемпотентная постановка обработки и Telegram-доставки в Cloud Tasks."""
 
 import asyncio
-import hashlib
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from google.api_core.exceptions import AlreadyExists
 from google.cloud import tasks_v2
 
 from src.config import Settings
+from src.domain.ids import cloud_task_name, delivery_id
 
 
 class CloudTaskDispatcher:
@@ -25,7 +26,9 @@ class CloudTaskDispatcher:
         listing_id: str,
         content_hash: str,
         engine_version: str,
+        recalculation_epoch: str | None = None,
     ) -> None:
+        epoch = recalculation_epoch or datetime.now(UTC).strftime("%Y%m%d%H")
         await self._enqueue(
             self.settings.listing_processing_queue,
             "/tasks/process-listing",
@@ -33,8 +36,17 @@ class CloudTaskDispatcher:
                 "listing_id": listing_id,
                 "content_hash": content_hash,
                 "engine_version": engine_version,
+                "recalculation_epoch": epoch,
             },
-            f"process:{engine_version}:{listing_id}:{content_hash}",
+            cloud_task_name(
+                "process",
+                {
+                    "engine_version": engine_version,
+                    "listing_id": listing_id,
+                    "content_hash": content_hash,
+                    "recalculation_epoch": epoch,
+                },
+            ),
         )
 
     async def enqueue_processing_batch(
@@ -42,23 +54,60 @@ class CloudTaskDispatcher:
         pending: list[tuple[str, str]],
         engine_version: str,
         concurrency: int = 20,
+        recalculation_epoch: str | None = None,
     ) -> None:
         """Ставит большой backfill в очередь с ограниченной параллельностью."""
         semaphore = asyncio.Semaphore(concurrency)
 
         async def enqueue(item: tuple[str, str]) -> None:
             async with semaphore:
-                await self.enqueue_processing(item[0], item[1], engine_version)
+                await self.enqueue_processing(
+                    item[0], item[1], engine_version, recalculation_epoch
+                )
 
         await asyncio.gather(*(enqueue(item) for item in pending))
 
     async def enqueue_delivery(self, payload: dict[str, Any]) -> None:
-        identity = (
-            f"deliver:{payload['target_id']}:{payload['listing_id']}:{payload['content_hash']}"
-        )
+        identity = str(payload.get("_task_identity") or delivery_id(
+            decision_id_value=str(payload.get("decision_id") or payload["listing_id"]),
+            recipient_id=str(payload["target_id"]),
+            template_version=str(payload.get("template_version", "pro/v1")),
+            format_name=str(payload.get("format", "telegram")),
+        ))
         await self._enqueue(
             self.settings.telegram_delivery_queue,
             "/tasks/deliver-telegram",
+            payload,
+            identity,
+        )
+
+    async def enqueue_content_delivery(self, payload: dict[str, Any]) -> None:
+        identity = str(payload.get("_task_identity") or delivery_id(
+            decision_id_value=str(payload["publication_event_id"]),
+            recipient_id=str(payload["target_id"]),
+            template_version=str(payload.get("template_version", "content/v1")),
+            format_name="telegram-content",
+        ))
+        await self._enqueue(
+            self.settings.telegram_delivery_queue,
+            "/tasks/deliver-content",
+            payload,
+            identity,
+        )
+
+    async def enqueue_whatsapp_delivery(self, payload: dict[str, Any]) -> None:
+        identity = str(
+            payload.get("_task_identity")
+            or delivery_id(
+                decision_id_value=str(payload["publication_event_id"]),
+                recipient_id=str(payload["recipient"]),
+                template_version=str(payload["template_name"]),
+                format_name="whatsapp-template",
+            )
+        )
+        await self._enqueue(
+            self.settings.telegram_delivery_queue,
+            "/tasks/deliver-whatsapp",
             payload,
             identity,
         )
@@ -75,8 +124,7 @@ class CloudTaskDispatcher:
             self.settings.cloud_tasks_location,
             queue_name,
         )
-        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
-        task_name = f"{parent}/tasks/{digest}"
+        task_name = f"{parent}/tasks/{identity[:63]}"
         headers = {"Content-Type": "application/json"}
         if self.settings.internal_task_secret:
             headers["X-Internal-Task-Secret"] = self.settings.internal_task_secret
