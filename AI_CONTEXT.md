@@ -115,3 +115,5 @@ Production smoke административного пути завершён: �
 Административный путь заменён на самостоятельный браузерный кабинет `/admin.html`. Он использует Google Sign-In и серверный allowlist `ADMIN_EMAILS`, не зависит от Telegram Web App и не показывается пользователям бота. Интерфейс содержит Dashboard, Sources, Cloud runtime, Publications и Subscriptions; внутренние JSON/provenance скрыты, ошибки источников не могут отображаться как успешный запуск. Установленный source adapter можно включить, приостановить и вручную запустить с аудитом. Локальный gate: Ruff, 62 теста и синтаксическая проверка JavaScript прошли.
 
 Read-only REST-запросы Admin Web к Scheduler, Tasks и Cloud Run передают явный quota project `avo-deal-sniper`; это отделяет фактический IAM-статус от ошибок отсутствующего billing/quota consumer в Application Default Credentials.
+
+API Gateway содержит отдельный защищённый маршрут `POST /admin/sources/{source_name}/run`; браузерная кнопка ручного запуска не обращается к Cloud Run напрямую.

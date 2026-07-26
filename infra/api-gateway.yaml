@@ -61,6 +61,11 @@ paths:
       - {name: source_name, in: path, required: true, type: string}
     post: {operationId: adminSource, responses: {"200": {description: Updated}}}
     options: {operationId: adminSourceOptions, responses: {"200": {description: CORS}}}
+  /admin/sources/{source_name}/run:
+    parameters:
+      - {name: source_name, in: path, required: true, type: string}
+    post: {operationId: adminRunSource, responses: {"200": {description: Started}}}
+    options: {operationId: adminRunSourceOptions, responses: {"200": {description: CORS}}}
   /admin/outbox:
     get:
       operationId: adminOutbox

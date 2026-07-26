@@ -122,3 +122,4 @@
 - Ошибка источника имеет приоритет над историческим `success=true`: в панели такой запуск всегда обозначается как требующий внимания.
 - Локальный gate: Ruff и 62 теста прошли; JavaScript-модуль прошёл синтаксическую проверку Node.js.
 - Для read-only REST-запросов панели явно передаётся Google Cloud quota project, чтобы service-account credentials не возвращали ложный `403` при наличии viewer IAM.
+- Маршрут ручного запуска `/admin/sources/{source_name}/run` добавлен в API Gateway, поэтому кнопка `Run now` работает через тот же защищённый production endpoint, что и остальная панель.
