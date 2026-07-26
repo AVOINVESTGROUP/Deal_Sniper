@@ -116,6 +116,8 @@ Production smoke административного пути завершён: �
 
 Production-релиз passwordless Admin Authentication завершён: Firebase Email provider включён, `avo-deal-sniper.firebaseapp.com` и `avo-deal-sniper.web.app` находятся в authorized domains, Hosting version `d025401af3558362` опубликована. Live smoke подтвердил HTTP 200, отсутствие Google popup-кода, наличие email-link flow и успешную отправку одноразовой ссылки на разрешённый административный адрес.
 
+Пользовательский screenshot выявил только визуальный stale error: CSS-класс `.notice` перекрывал стандартное поведение атрибута `hidden`. Исправление — глобальное `[hidden]{display:none!important}`; состояние отправки email было успешным и backend/auth flow ошибки не возвращали. Hosting version `1e168b3b11990c1a` опубликована, live CSS вернул HTTP 200, нужное правило и `Cache-Control: no-store`.
+
 Read-only REST-запросы Admin Web к Scheduler, Tasks и Cloud Run передают явный quota project `avo-deal-sniper`; это отделяет фактический IAM-статус от ошибок отсутствующего billing/quota consumer в Application Default Credentials.
 
 API Gateway содержит отдельный защищённый маршрут `POST /admin/sources/{source_name}/run`; браузерная кнопка ручного запуска не обращается к Cloud Run напрямую.

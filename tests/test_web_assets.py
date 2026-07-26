@@ -46,3 +46,4 @@ def test_admin_is_a_separate_browser_console_with_passwordless_email_auth() -> N
     assert "signInWithEmailLink" in script
     assert 'api + "/tma/auth"' not in script
     assert "/admin/sources/${button.dataset.source}/run" in script
+    assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")
