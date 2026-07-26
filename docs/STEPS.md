@@ -123,6 +123,8 @@
 - Локальный gate: Ruff и 62 теста прошли; JavaScript-модуль прошёл синтаксическую проверку Node.js.
 - Для read-only REST-запросов панели явно передаётся Google Cloud quota project, чтобы service-account credentials не возвращали ложный `403` при наличии viewer IAM.
 - Маршрут ручного запуска `/admin/sources/{source_name}/run` добавлен в API Gateway, поэтому кнопка `Run now` работает через тот же защищённый production endpoint, что и остальная панель.
+- При браузерном smoke выявлен `redirect_uri_mismatch`: Google provider был связан с IAP OAuth-клиентом, который нельзя использовать как Firebase Web client. Утверждена замена входа на одноразовую Firebase email-ссылку без пароля; запрос разрешён только для `ADMIN_EMAILS`, backend сохраняет обязательную проверку Firebase ID token и email allowlist.
+- Passwordless-вход развёрнут в production: Email provider включён, оба Hosting-домена авторизованы, релиз `d025401af3558362` опубликован. Live-проверка подтвердила новый интерфейс и успешную отправку одноразовой ссылки на разрешённый адрес администратора; Google OAuth popup полностью удалён.
 - Диагностика service-account runtime установила точную причину read-only `403`: access token запрашивался с недостаточным OAuth scope. Клиент использует полный `cloud-platform`, а фактический доступ по-прежнему ограничен viewer IAM.
 - GCS raw archive больше не делает предварительный `GET`: immutable-объект создаётся атомарно с `if_generation_match=0`, а существующий объект определяется по precondition. Collector сохраняет write-once модель и не требует чтения отсутствующего объекта.
 - Firestore source health заменяет карту `last_run` целиком. Поле `error` предыдущего запуска не сохраняется после следующего успешного запуска из-за рекурсивного `merge=True`.
