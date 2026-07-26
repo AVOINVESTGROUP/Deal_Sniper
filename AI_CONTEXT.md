@@ -119,3 +119,5 @@ Read-only REST-запросы Admin Web к Scheduler, Tasks и Cloud Run пер�
 API Gateway содержит отдельный защищённый маршрут `POST /admin/sources/{source_name}/run`; браузерная кнопка ручного запуска не обращается к Cloud Run напрямую.
 
 Production-диагностика service account показала `ACCESS_TOKEN_SCOPE_INSUFFICIENT` для Scheduler/Tasks/Run: Admin REST-клиент должен получать token с OAuth scope `cloud-platform`, тогда как полномочия остаются ограничены viewer IAM. Raw GCS archive создаёт объекты атомарным `if_generation_match=0` без предварительного `blob.exists()`; это соответствует роли Object Creator и устраняет ложный 403 на ещё не существующем checksum-объекте.
+
+Firestore `source_registry.last_run` должен заменяться целиком через явный merge field path. Рекурсивный `merge=True` запрещён для health-записи, потому что он сохраняет устаревшее поле `error` после успешного запуска и создаёт ложный красный статус.

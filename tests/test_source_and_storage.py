@@ -12,6 +12,7 @@ from src.domain.models import (
     RiskAssessment,
 )
 from src.domain.normalization import normalize_listing, resolve_vehicle_identities
+from src.firestore_storage import FirestoreRepository
 from src.raw_storage import _upload_once
 from src.sources.cars24 import parse_cars24_page
 from src.sources.carswitch import parse_carswitch_page
@@ -41,6 +42,41 @@ def test_gcs_raw_upload_is_atomic_without_preliminary_read() -> None:
             "if_generation_match": 0,
         }
     ]
+
+
+class FakeFirestoreDocument:
+    def __init__(self) -> None:
+        self.updated: object = None
+
+    def update(self, payload: object) -> None:
+        self.updated = payload
+
+
+class FakeFirestoreCollection:
+    def __init__(self, document: FakeFirestoreDocument) -> None:
+        self._document = document
+
+    def document(self, source_name: str) -> FakeFirestoreDocument:
+        return self._document
+
+
+class FakeFirestoreClient:
+    def __init__(self, document: FakeFirestoreDocument) -> None:
+        self._document = document
+
+    def collection(self, name: str) -> FakeFirestoreCollection:
+        return FakeFirestoreCollection(self._document)
+
+
+def test_source_health_replaces_last_run_map_instead_of_merging_error() -> None:
+    document = FakeFirestoreDocument()
+    repository = FirestoreRepository.__new__(FirestoreRepository)
+    repository.client = FakeFirestoreClient(document)  # type: ignore[assignment]
+
+    repository.record_source_run("cars24", {"success": True})
+
+    assert isinstance(document.updated, dict)
+    assert document.updated["last_run"] == {"success": True}
 
 SEARCH_HTML = """
 <html><head><script type="application/ld+json">

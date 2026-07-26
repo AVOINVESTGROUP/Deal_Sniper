@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from google.api_core.exceptions import AlreadyExists
+from google.api_core.exceptions import AlreadyExists, NotFound
 from google.cloud import firestore
 
 from src.domain.ids import canonical_hash
@@ -735,10 +735,13 @@ class FirestoreRepository:
         )
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
-        self.client.collection("source_registry").document(source_name).set(
-            {"last_run": payload, "updated_at": datetime.now(UTC)},
-            merge=True,
-        )
+        document = self.client.collection("source_registry").document(source_name)
+        values = {"last_run": payload, "updated_at": datetime.now(UTC)}
+        try:
+            # update() заменяет top-level map last_run целиком.
+            document.update(values)
+        except NotFound:
+            document.set({"source_name": source_name, **values})
 
     def source_health(self) -> dict[str, dict[str, Any]]:
         results: dict[str, dict[str, Any]] = {}
