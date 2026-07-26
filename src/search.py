@@ -96,9 +96,26 @@ def parse_search(query: str, user_id: int, language_code: str = "en") -> ParsedS
         consumed.add("gcc")
 
     parameter_words = {
-        "budget", "max", "up", "to", "до", "бюджет", "aed", "дирхам",
-        "from", "от", "year", "год", "mileage", "пробег", "km", "км",
-        "profit", "прибыль", "roi", "рентабельность",
+        "budget",
+        "max",
+        "up",
+        "to",
+        "до",
+        "бюджет",
+        "aed",
+        "дирхам",
+        "from",
+        "от",
+        "year",
+        "год",
+        "mileage",
+        "пробег",
+        "km",
+        "км",
+        "profit",
+        "прибыль",
+        "roi",
+        "рентабельность",
     }
     unknown = [
         token

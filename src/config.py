@@ -57,6 +57,9 @@ class Settings:
     whatsapp_phone_number_id: str
     whatsapp_api_version: str
     tma_url: str
+    auto_news_rss_url: str
+    auto_news_max_age_days: int
+    auto_news_limit: int
     free_teaser_image_url: str
     schema_version: str
     migration_tool_version: str
@@ -126,6 +129,12 @@ class Settings:
             whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip(),
             whatsapp_api_version=os.getenv("WHATSAPP_API_VERSION", "v23.0").strip(),
             tma_url=os.getenv("TMA_URL", "").strip(),
+            auto_news_rss_url=os.getenv(
+                "AUTO_NEWS_RSS_URL",
+                "https://news.google.com/rss/search?q=%28Dubai%20OR%20UAE%29%20%28used%20cars%20OR%20automotive%20market%29&hl=en-AE&gl=AE&ceid=AE%3Aen",
+            ).strip(),
+            auto_news_max_age_days=max(1, int(os.getenv("AUTO_NEWS_MAX_AGE_DAYS", "45"))),
+            auto_news_limit=max(1, min(5, int(os.getenv("AUTO_NEWS_LIMIT", "3")))),
             free_teaser_image_url=os.getenv("FREE_TEASER_IMAGE_URL", "").strip(),
             schema_version=os.getenv("SCHEMA_VERSION", "2").strip(),
             migration_tool_version=os.getenv("MIGRATION_TOOL_VERSION", "1.1.0").strip(),

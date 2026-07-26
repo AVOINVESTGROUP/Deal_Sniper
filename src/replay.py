@@ -92,9 +92,7 @@ async def run_migration_replay_direct(
     )
     if retry_failed:
         documents.extend(
-            client.collection("migration_replay_requests")
-            .where("state", "==", "failed")
-            .stream()
+            client.collection("migration_replay_requests").where("state", "==", "failed").stream()
         )
     if recalculate_all:
         documents.extend(
@@ -141,9 +139,8 @@ async def run_migration_replay_direct(
                 listing_id = str(data["listing_id"])
                 content_hash = str(data["content_hash"])
                 snapshot = service.repository.get_snapshot(listing_id, content_hash)
-                if (
-                    snapshot is None
-                    or not service.repository.is_current_snapshot(listing_id, content_hash)
+                if snapshot is None or not service.repository.is_current_snapshot(
+                    listing_id, content_hash
                 ):
                     reference.set(
                         {

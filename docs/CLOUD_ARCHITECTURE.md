@@ -15,6 +15,7 @@ Cloud Scheduler -> Cloud Run collector Jobs -> Cloud Storage raw
                                                 -> Telegram / WhatsApp opt-in
 
 Telegram webhook -> API Gateway -> Cloud Run API -> Firestore
+                                      -> external automotive news RSS (read-only)
 Firebase Hosting TMA/Admin -> Firebase Auth -> Cloud Run API
 Secret Manager -> runtime service accounts
 Cloud Logging/Monitoring/Billing -> alerts and budget
@@ -27,6 +28,7 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 - migration Job: immutable schema migration с dry-run/apply и ledger.
 - replay Job: catch-up напрямую в maintenance-режиме либо через очередь.
 - content Job: weekly Market Pulse и PublicationEvent.
+- Telegram chat router: детерминированные intent/FAQ, персональный поиск и read-only news client.
 - `listing-processing`, `telegram-delivery`: rate-limited Cloud Tasks с OIDC.
 - Firestore: operational state, immutable evidence/decision/outbox history и current pointers.
 - Cloud Storage: raw snapshots, Firestore exports и hosting assets.
@@ -37,6 +39,8 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 Ключевые коллекции: `listings`, вложенные `snapshots`, `listing_current`, `verification_evidence`, `vehicle_identities`, `normalized_vehicles`, `decisions`, `current_decisions`, `delivery_outbox`, `telegram_updates`, `user_settings`, `saved_searches`, `user_actions`, `outcomes`, `publication_events`, `migration_ledger`, `migration_replay_requests`.
 
 Immutable сущности создаются по каноническому ID; operational freshness и leases обновляются отдельно. Старый current pointer не удаляет историю.
+
+Новостная лента не входит в verified market и не может изменять решение. Клиент принимает только HTTPS, ограничивает возраст и число материалов, удаляет дубли и возвращает пользователю provenance. Ошибка внешней ленты изолирована от collection/processing/delivery.
 
 ## Безопасный релиз
 

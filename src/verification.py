@@ -65,8 +65,7 @@ async def verify_listing_price(
         )
     headers = {
         "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/124 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
         )
     }
     started = datetime.now(UTC)
@@ -165,9 +164,7 @@ def build_evidence(
     else:
         created_at = checked_at
         attempts = 1
-    freshness = (
-        FreshnessStatus.ACTIVE if result.verified else FreshnessStatus.EXPIRED
-    )
+    freshness = FreshnessStatus.ACTIVE if result.verified else FreshnessStatus.EXPIRED
     return VerificationEvidence(
         verification_key=key,
         evidence_revision_id=revision,
@@ -237,9 +234,7 @@ def extract_detail_prices(html: str, listing: ListingSnapshot | None = None) -> 
     return sorted(prices)
 
 
-def _embedded_listing_prices(
-    soup: BeautifulSoup, listing: ListingSnapshot
-) -> set[Decimal]:
+def _embedded_listing_prices(soup: BeautifulSoup, listing: ListingSnapshot) -> set[Decimal]:
     """Извлекает цену из owner object server state, строго связанного с source listing ID."""
     results: set[Decimal] = set()
     for script in soup.find_all("script"):

@@ -160,9 +160,7 @@ def migration_id(source_schema: str, target_schema: str, export_watermark: datet
     )
 
 
-def publication_event_id(
-    *, decision_id_value: str, vehicle_id: str, event_type: str
-) -> str:
+def publication_event_id(*, decision_id_value: str, vehicle_id: str, event_type: str) -> str:
     return canonical_hash(
         "publication-event-id/v1",
         {

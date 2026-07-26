@@ -14,16 +14,12 @@ def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
     )
     session = AuthorizedSession(credentials)  # type: ignore[no-untyped-call]
     scheduler_url = (
-        f"https://cloudscheduler.googleapis.com/v1/projects/{project_id}/"
-        f"locations/{region}/jobs"
+        f"https://cloudscheduler.googleapis.com/v1/projects/{project_id}/locations/{region}/jobs"
     )
     queues_url = (
-        f"https://cloudtasks.googleapis.com/v2/projects/{project_id}/"
-        f"locations/{region}/queues"
+        f"https://cloudtasks.googleapis.com/v2/projects/{project_id}/locations/{region}/queues"
     )
-    run_url = (
-        f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/services"
-    )
+    run_url = f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/services"
     return {
         "scheduler": _get_items(session, scheduler_url, "jobs", ("name", "state", "schedule")),
         "queues": _get_items(session, queues_url, "queues", ("name", "state")),

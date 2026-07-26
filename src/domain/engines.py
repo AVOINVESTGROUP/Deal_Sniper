@@ -156,9 +156,7 @@ class CostEngine:
         repair_basis = policy.repair_high_aed
         holding = policy.holding_cost_per_day_aed * Decimal(policy.expected_hold_days)
         capital_rate = (
-            policy.annual_capital_rate
-            * Decimal(policy.expected_hold_days)
-            / Decimal("365")
+            policy.annual_capital_rate * Decimal(policy.expected_hold_days) / Decimal("365")
         )
         capital_basis = (
             asking_price_aed
@@ -289,9 +287,7 @@ class DecisionEngine:
 
         policy = self.policy
         cost_policy = self.cost_policy
-        resale = intermediate(
-            market.low_aed * (Decimal("1") - policy.liquidity_discount_rate)
-        )
+        resale = intermediate(market.low_aed * (Decimal("1") - policy.liquidity_discount_rate))
         profit = money(resale - asking_price_aed - costs.total_aed)
         invested = asking_price_aed + costs.total_aed
         roi = (
@@ -326,9 +322,9 @@ class DecisionEngine:
             )
             + cost_policy.risk_rate * repair_basis
         )
-        raw_max_purchase = (
-            resale - policy.target_profit_aed - constant
-        ) / (Decimal("1") + capital_rate + cost_policy.risk_rate)
+        raw_max_purchase = (resale - policy.target_profit_aed - constant) / (
+            Decimal("1") + capital_rate + cost_policy.risk_rate
+        )
         max_purchase = max(
             Decimal("0"),
             raw_max_purchase.quantize(Decimal("1"), rounding=ROUND_DOWN),

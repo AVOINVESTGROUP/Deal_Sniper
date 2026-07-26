@@ -61,19 +61,20 @@ class CloudTaskDispatcher:
 
         async def enqueue(item: tuple[str, str]) -> None:
             async with semaphore:
-                await self.enqueue_processing(
-                    item[0], item[1], engine_version, recalculation_epoch
-                )
+                await self.enqueue_processing(item[0], item[1], engine_version, recalculation_epoch)
 
         await asyncio.gather(*(enqueue(item) for item in pending))
 
     async def enqueue_delivery(self, payload: dict[str, Any]) -> None:
-        identity = str(payload.get("_task_identity") or delivery_id(
-            decision_id_value=str(payload.get("decision_id") or payload["listing_id"]),
-            recipient_id=str(payload["target_id"]),
-            template_version=str(payload.get("template_version", "pro/v1")),
-            format_name=str(payload.get("format", "telegram")),
-        ))
+        identity = str(
+            payload.get("_task_identity")
+            or delivery_id(
+                decision_id_value=str(payload.get("decision_id") or payload["listing_id"]),
+                recipient_id=str(payload["target_id"]),
+                template_version=str(payload.get("template_version", "pro/v1")),
+                format_name=str(payload.get("format", "telegram")),
+            )
+        )
         await self._enqueue(
             self.settings.telegram_delivery_queue,
             "/tasks/deliver-telegram",
@@ -82,12 +83,15 @@ class CloudTaskDispatcher:
         )
 
     async def enqueue_content_delivery(self, payload: dict[str, Any]) -> None:
-        identity = str(payload.get("_task_identity") or delivery_id(
-            decision_id_value=str(payload["publication_event_id"]),
-            recipient_id=str(payload["target_id"]),
-            template_version=str(payload.get("template_version", "content/v1")),
-            format_name="telegram-content",
-        ))
+        identity = str(
+            payload.get("_task_identity")
+            or delivery_id(
+                decision_id_value=str(payload["publication_event_id"]),
+                recipient_id=str(payload["target_id"]),
+                template_version=str(payload.get("template_version", "content/v1")),
+                format_name="telegram-content",
+            )
+        )
         await self._enqueue(
             self.settings.telegram_delivery_queue,
             "/tasks/deliver-content",

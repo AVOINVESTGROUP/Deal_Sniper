@@ -154,18 +154,14 @@ def test_warning_returns_inspect_only_for_profitable_listing() -> None:
 
 def test_canonical_cost_and_max_purchase_formula_fixture() -> None:
     cost_policy = CostPolicy()
-    costs = CostEngine(cost_policy).estimate(
-        Decimal("65000"), RiskAssessment(), Decimal("95000")
-    )
+    costs = CostEngine(cost_policy).estimate(Decimal("65000"), RiskAssessment(), Decimal("95000"))
     market = MarketEstimate(
         low_aed=Decimal("100000"),
         median_aed=Decimal("105000"),
         high_aed=Decimal("110000"),
         coverage_score=Decimal("1"),
     )
-    decision = DecisionEngine(DecisionPolicy(), cost_policy).decide(
-        Decimal("65000"), market, costs
-    )
+    decision = DecisionEngine(DecisionPolicy(), cost_policy).decide(Decimal("65000"), market, costs)
 
     assert costs.registration_aed == Decimal("800.00")
     assert costs.capital_aed == Decimal("718.03")
@@ -204,6 +200,8 @@ def test_telegram_card_uses_english_for_every_device_language() -> None:
 
     assert "Price:" in format_card(listing, decision, language="en")
     assert "Expected profit:" in format_card(listing, decision, language="en")
+    assert "Market fingerprint" not in format_card(listing, decision, language="en")
+    assert "/watch" not in format_card(listing, decision, language="en")
     assert "Price:" in format_card(listing, decision, language="ru")
     assert telegram_language("ru-RU") == "en"
     assert telegram_language("ar") == "en"

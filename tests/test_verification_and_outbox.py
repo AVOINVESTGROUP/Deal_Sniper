@@ -83,9 +83,7 @@ def test_outbox_sent_is_not_claimed_twice(tmp_path: Path) -> None:
     assert claimed is not None
     assert claimed.state is OutboxState.SENDING
 
-    repository.update_outbox(
-        "delivery-1", OutboxState.SENT, telegram_message_id="telegram-7"
-    )
+    repository.update_outbox("delivery-1", OutboxState.SENT, telegram_message_id="telegram-7")
     assert repository.claim_outbox("delivery-1", "worker-2") is None
 
 
@@ -103,9 +101,7 @@ def test_unknown_outbox_requires_explicit_single_reconciliation(tmp_path: Path) 
     )
     repository.update_outbox("delivery-unknown", OutboxState.UNKNOWN, error="timeout")
 
-    reconciled = repository.reconcile_outbox(
-        "delivery-unknown", "retry_once", "operation-1"
-    )
+    reconciled = repository.reconcile_outbox("delivery-unknown", "retry_once", "operation-1")
 
     assert reconciled is not None
     assert reconciled.state is OutboxState.PENDING

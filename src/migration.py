@@ -329,9 +329,7 @@ class FirestoreMigrator:
             batch.commit()
         report.updated_counts["listing_snapshots"] = updated
 
-    def _invalidate_derived_state(
-        self, report: MigrationReport, cutover_at: str
-    ) -> None:
+    def _invalidate_derived_state(self, report: MigrationReport, cutover_at: str) -> None:
         targets = {
             "decision_current": {"migration_invalidated": True, "active": False},
             "current_decisions": {"migration_invalidated": True, "active": False},
@@ -424,9 +422,7 @@ class FirestoreMigrator:
         if operations:
             batch.commit()
 
-    def _write_schema_ledger(
-        self, stable_id: str, cutover_at: str, export_watermark: str
-    ) -> None:
+    def _write_schema_ledger(self, stable_id: str, cutover_at: str, export_watermark: str) -> None:
         self.client.collection("schema_ledger").document("current").set(
             {
                 "schema_version": TARGET_SCHEMA_VERSION,
@@ -440,9 +436,7 @@ class FirestoreMigrator:
             }
         )
 
-    def _finish(
-        self, report: MigrationReport, ledger: firestore.DocumentReference
-    ) -> None:
+    def _finish(self, report: MigrationReport, ledger: firestore.DocumentReference) -> None:
         report.completed_at = datetime.now(UTC).isoformat()
         ledger.set(
             {

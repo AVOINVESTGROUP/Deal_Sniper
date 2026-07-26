@@ -115,8 +115,7 @@ async def test_market_change_recalculates_existing_vehicle(tmp_path: Path) -> No
         min_comparables_count=5,
     )
     source = FixtureSource(
-        [camry(0, 60_000)]
-        + [camry(index, 100_000 + index * 1_000) for index in range(1, 7)]
+        [camry(0, 60_000)] + [camry(index, 100_000 + index * 1_000) for index in range(1, 7)]
     )
     service = DealService(
         settings,
@@ -129,9 +128,7 @@ async def test_market_change_recalculates_existing_vehicle(tmp_path: Path) -> No
 
     source.listings[1] = camry(1, 130_000)
     second = await service.scan()
-    recalculated = next(
-        item for item in second.decisions if item.listing.source_listing_id == "0"
-    )
+    recalculated = next(item for item in second.decisions if item.listing.source_listing_id == "0")
 
     assert original.decision.market_fingerprint != recalculated.decision.market_fingerprint
     assert original.decision.decision_id != recalculated.decision.decision_id

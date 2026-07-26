@@ -293,17 +293,48 @@ def format_card(
         if market
         else localized(language, "недостаточно данных", "insufficient data")
     )
+
     def value(item: Decimal | None) -> str:
         return f"{item:,.0f} AED" if item is not None else "—"
+
     roi = f"{decision.roi_percent}%" if decision.roi_percent is not None else "—"
+    translations = {
+        "Не указана региональная спецификация": "Regional specification is not stated",
+        "Не указана комплектация": "Trim is not stated",
+        "Не указан пробег": "Mileage is not stated",
+        "Пробег выше 200 000 км": "Mileage is above 200,000 km",
+        "VIN не прошёл валидацию": "VIN failed validation",
+        "Максимальная цена покупки неположительна": "Maximum purchase price is not positive",
+        "Экономика проходит пороги, но требуется проверка рисков": (
+            "Financial thresholds pass, but the vehicle requires inspection"
+        ),
+        "Цена не выше максимальной цены покупки": "Price is within the maximum purchase price",
+        "Сделка положительная, но не выполнены целевые пороги": (
+            "Positive economics, but target thresholds are not met"
+        ),
+        "Цена не обеспечивает целевую прибыль и ROI": (
+            "Price does not meet the target profit and ROI"
+        ),
+        "غرق": "Possible flood history",
+        "غرقان": "Possible flood history",
+        "شاصي متضرر": "Possible chassis damage",
+        "حادث كبير": "Possible major accident",
+        "لا تعمل": "Vehicle may not be running",
+        "حادث": "Accident reference in listing",
+        "صبغ": "Repaint reference in listing",
+        "إصلاح": "Repair reference in listing",
+        "وارد": "Imported vehicle reference",
+    }
+
+    def translated(item: str) -> str:
+        if language == "en" and item.startswith("Полные непокупные расходы:"):
+            return item.replace("Полные непокупные расходы:", "Total non-purchase costs:", 1)
+        return translations.get(item, item) if language == "en" else item
+
     risk_flags = [*decision.risks.stop_flags, *decision.risks.warnings]
-    risks = ", ".join(html.escape(item) for item in risk_flags) or "none"
-    reasons = "; ".join(html.escape(item) for item in decision.reasons) or "—"
-    comparables = (
-        ", ".join(html.escape(item) for item in market.comparable_ids)
-        if market and market.comparable_ids
-        else "—"
-    )
+    risks = ", ".join(html.escape(translated(item)) for item in risk_flags) or "None stated"
+    reasons = "; ".join(html.escape(translated(item)) for item in decision.reasons) or "—"
+    comparable_count = len(market.comparable_ids) if market else 0
     listing_id = f"{listing.source}:{listing.source_listing_id}"
     return (
         f"<b>{html.escape(decision.action.value)}</b>\n"
@@ -320,14 +351,11 @@ def format_card(
         f"{localized(language, 'Уверенность', 'Confidence')}: {decision.confidence:.0%}\n"
         f"{localized(language, 'Риски', 'Risks')}: {risks}\n"
         f"{localized(language, 'Причины', 'Reasons')}: {reasons}\n"
-        f"{localized(language, 'Аналоги', 'Comparables')}: {comparables}\n"
-        f"Engine: <code>{html.escape(decision.engine_version)}</code> · "
-        f"Config: <code>{html.escape(decision.financial_config_version)}</code>\n"
-        f"Market fingerprint: <code>{html.escape(decision.market_fingerprint or '—')}</code>\n"
+        f"{localized(language, 'Проверенные аналоги', 'Verified comparables')}: "
+        f"{comparable_count}\n"
         f'<a href="{html.escape(str(listing.url), quote=True)}">'
         f"{localized(language, 'Открыть объявление', 'Open listing')}</a>\n"
-        f"ID: <code>{html.escape(listing_id)}</code>\n"
-        f"/watch {html.escape(listing_id)}"
+        f"ID: <code>{html.escape(listing_id)}</code>"
     )
 
 
@@ -342,8 +370,8 @@ def format_public_teaser(listing: ListingSnapshot, language: str = "en") -> str:
     )
     cta = localized(
         language,
-        "Получить полную оценку и ссылку: /find",
-        "Get the full analysis and listing: /find",
+        "Получить полную оценку и ссылку в личном боте.",
+        "Get the full analysis and listing in the personal bot.",
     )
     return f"<b>{html.escape(title)}</b>\n{signal}\n\n{cta}"
 

@@ -58,15 +58,11 @@ def test_golden_ids_are_stable() -> None:
         template_version="pro/v1",
         format_name="telegram-html",
     )
-    migration = migration_id(
-        "legacy/v1", "production/v2", datetime(2026, 7, 25, tzinfo=UTC)
-    )
+    migration = migration_id("legacy/v1", "production/v2", datetime(2026, 7, 25, tzinfo=UTC))
     task = cloud_task_name("process", {"decision_id": decision})
 
     assert verification == "647e331cac9673607d98c18bdeebd7959b046a4352761c8e06f53132b8845d23"
     assert decision == "f02508852b3a995e0814919f0ccc9f64cc1a58caa0bdf910bbf14a95c0c1046c"
     assert delivery == "b00c8153b8d704104f90eea37daceaa993bbc2bf794c8efd296494e4ae629d24"
     assert migration == "38a06c84261d8862afab1c39403479ddd301417d1ed6cb99f856c34d324cdaae"
-    assert task == (
-        "process-420bb98780069f4f54db7ab7424aed711c4c27b3c19b0656c92369116160c8b3"
-    )
+    assert task == ("process-420bb98780069f4f54db7ab7424aed711c4c27b3c19b0656c92369116160c8b3")

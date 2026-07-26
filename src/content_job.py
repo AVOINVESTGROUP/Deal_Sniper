@@ -25,9 +25,10 @@ def format_market_watch_card(listing: ListingSnapshot, decision: DealDecision) -
     """Формирует проверяемую карточку рынка без ложного инвестиционного сигнала."""
     if decision.market is None:
         raise ValueError("MARKET WATCH требует рыночную оценку")
-    vehicle = " ".join(
-        part for part in (listing.make, listing.model, str(listing.year or "")) if part
-    ) or listing.title
+    vehicle = (
+        " ".join(part for part in (listing.make, listing.model, str(listing.year or "")) if part)
+        or listing.title
+    )
     if decision.market.low_aed > 0 and listing.price_aed < decision.market.low_aed:
         difference = (decision.market.low_aed - listing.price_aed) / decision.market.low_aed * 100
         position = f"{difference:.1f}% below the verified market range"

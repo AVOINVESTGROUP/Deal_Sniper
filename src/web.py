@@ -13,7 +13,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import TimeoutException, TransportError
 from pydantic import BaseModel, Field
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram import (
+    Bot,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, TimedOut
 
@@ -27,6 +31,13 @@ from src.bot import (
     localized,
     select_publishable_decisions,
     telegram_language,
+)
+from src.chat import (
+    ChatIntent,
+    classify_chat_intent,
+    help_text,
+    search_prompt_text,
+    welcome_text,
 )
 from src.cloud_jobs import CloudJobLauncher
 from src.config import Settings
@@ -46,6 +57,7 @@ from src.domain.models import (
     UserAction,
     UserSettings,
 )
+from src.news import DubaiAutoNewsClient, format_news
 from src.search import build_saved_search, parse_search
 from src.service import DealService, EvaluatedListing
 from src.storage import snapshot_hash
@@ -59,6 +71,12 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
+news_client = DubaiAutoNewsClient(
+    settings.auto_news_rss_url,
+    settings.request_timeout_seconds,
+    settings.auto_news_max_age_days,
+    settings.auto_news_limit,
+)
 app = FastAPI(title="Dubai Deal Sniper", version="1.1.0")
 _market_cache: list[tuple[Any, Any]] = []
 _market_cache_at = 0.0
@@ -73,6 +91,15 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+def main_chat_keyboard() -> ReplyKeyboardMarkup:
+    """Показывает основные действия без знания технических команд."""
+    rows: list[list[KeyboardButton]] = [
+        [KeyboardButton("🚗 Find a car"), KeyboardButton("📰 Dubai auto news")],
+        [KeyboardButton("📊 Market overview"), KeyboardButton("ℹ️ How it works")],
+    ]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
 
 
 @app.middleware("http")
@@ -834,11 +861,7 @@ async def telegram_webhook(
                 ),
             )
             return {"ok": True}
-        if settings.telegram_allowed_user_ids and user_id not in settings.telegram_allowed_user_ids:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=tr("Доступ к боту не настроен.", "Bot access is not configured."),
-            )
+        if user_id is None:
             return {"ok": True}
         user_settings = await asyncio.to_thread(service.repository.get_user_settings, user_id)
         user_settings = user_settings or default_user_settings(user_id, language)
@@ -846,29 +869,10 @@ async def telegram_webhook(
             user_settings.language_code = language
         await asyncio.to_thread(service.repository.save_user_settings, user_settings)
         if text in {"/start", "/help"}:
-            keyboard = None
-            if settings.tma_url:
-                keyboard = InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                text=tr("Открыть приложение", "Open application"),
-                                web_app=WebAppInfo(url=settings.tma_url),
-                            )
-                        ]
-                    ]
-                )
             await bot.send_message(
                 chat_id=chat_id,
-                text=tr(
-                    "Dubai Deal Sniper готов к работе.\n\n"
-                    "Откройте приложение: там находятся сделки, подбор автомобиля, "
-                    "избранное, настройки и панель владельца.",
-                    "Dubai Deal Sniper is ready.\n\n"
-                    "Open the application to view deals, create car searches, manage "
-                    "favorites, settings and the owner dashboard.",
-                ),
-                reply_markup=keyboard,
+                text=welcome_text(),
+                reply_markup=main_chat_keyboard(),
             )
         elif text == "/status":
             count = await asyncio.to_thread(service.repository.count_snapshots)
@@ -1113,55 +1117,103 @@ async def telegram_webhook(
                 ),
             )
         else:
-            keyboard = None
-            if settings.tma_url:
-                keyboard = InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                text=tr("Открыть приложение", "Open application"),
-                                web_app=WebAppInfo(url=settings.tma_url),
-                            )
-                        ]
-                    ]
-                )
             if raw_text and not raw_text.startswith("/") and user_id is not None:
-                parsed = parse_search(raw_text, user_id, language)
-                if parsed.recognized:
-                    search = build_saved_search(raw_text, parsed).model_copy(
-                        update={"enabled": True}
-                    )
-                    await asyncio.to_thread(service.repository.save_search, search)
-                    recognized = "\n".join(f"• {item}" for item in parsed.recognized)
+                intent = classify_chat_intent(raw_text)
+                if intent is ChatIntent.GREETING:
                     await bot.send_message(
                         chat_id=chat_id,
-                        text=tr(
-                            f"Подбор создан и уже работает:\n{recognized}\n\n"
-                            "Я сообщу, когда появится подходящий проверенный автомобиль.",
-                            f"Your search is active:\n{recognized}\n\n"
-                            "I will notify you when a matching verified car appears.",
+                        text=welcome_text(),
+                        reply_markup=main_chat_keyboard(),
+                    )
+                elif intent is ChatIntent.HELP:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=help_text(),
+                        reply_markup=main_chat_keyboard(),
+                    )
+                elif intent is ChatIntent.FIND_CAR:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=search_prompt_text(),
+                        reply_markup=main_chat_keyboard(),
+                    )
+                elif intent is ChatIntent.NEWS:
+                    news = await news_client.latest()
+                    if news:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=format_news(news),
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True,
+                            reply_markup=main_chat_keyboard(),
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=(
+                                "The automotive news feed is temporarily unavailable. "
+                                "I will not invent a headline—please try again shortly."
+                            ),
+                            reply_markup=main_chat_keyboard(),
+                        )
+                elif intent is ChatIntent.MARKET:
+                    market_items = await current_market_snapshot()
+                    market_decisions = [decision for _, decision in market_items]
+                    with_market = sum(decision.market is not None for decision in market_decisions)
+                    opportunities = sum(
+                        decision.action.value in {"CONTACT", "INSPECT"}
+                        for decision in market_decisions
+                    )
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "<b>Dubai verified market overview</b>\n\n"
+                            f"Processed current listings: {len(market_decisions):,}\n"
+                            f"Listings with a comparable market: {with_market:,}\n"
+                            f"Current CONTACT/INSPECT opportunities: {opportunities:,}\n\n"
+                            "Open the application to explore verified market cards."
                         ),
-                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=main_chat_keyboard(),
+                    )
+                elif intent is ChatIntent.SOURCES:
+                    statuses = service.source_statuses()
+                    enabled_sources = [name for name, active in statuses.items() if active]
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            "Current listing sources: " + ", ".join(enabled_sources) + ".\n"
+                            "Every published price must pass detail-page verification."
+                        ),
+                        reply_markup=main_chat_keyboard(),
                     )
                 else:
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=tr(
-                            "Напишите, какой автомобиль нужен. Например: Toyota Land Cruiser, "
-                            "бюджет 180000 AED, 2020–2024, пробег до 80000 км, GCC.",
-                            "Describe the car you need. Example: Toyota Land Cruiser, budget "
-                            "180000 AED, 2020–2024, mileage up to 80000 km, GCC.",
-                        ),
-                        reply_markup=keyboard,
-                    )
+                    parsed = parse_search(raw_text, user_id, language)
+                    if parsed.recognized:
+                        search = build_saved_search(raw_text, parsed).model_copy(
+                            update={"enabled": True}
+                        )
+                        await asyncio.to_thread(service.repository.save_search, search)
+                        recognized = "\n".join(f"• {item}" for item in parsed.recognized)
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=(
+                                f"Your search is active:\n{recognized}\n\n"
+                                "I will notify you when a matching verified car appears."
+                            ),
+                            reply_markup=main_chat_keyboard(),
+                        )
+                    else:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=help_text(),
+                            reply_markup=main_chat_keyboard(),
+                        )
             else:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=tr(
-                        "Откройте приложение или напишите требования к автомобилю обычным текстом.",
-                        "Open the application or describe the car you need in plain text.",
-                    ),
-                    reply_markup=keyboard,
+                    text=help_text(),
+                    reply_markup=main_chat_keyboard(),
                 )
     return {"ok": True}
 
@@ -1252,6 +1304,8 @@ async def process_listing_task(
         }
         if template_version in {"free/v1", "personal-free/v1"}:
             delivery_payload["image_url"] = settings.free_teaser_image_url
+        elif evaluated.listing.image_urls:
+            delivery_payload["image_url"] = str(evaluated.listing.image_urls[0])
         await asyncio.to_thread(
             service.repository.put_outbox,
             OutboxRecord(
