@@ -47,6 +47,9 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
     assert "runtime.adminApiBase" in script
     assert 'api + "/tma/auth"' not in script
     assert "/admin/sources/${button.dataset.source}/run" in script
+    assert 'call("/admin/source-test"' in script
+    assert 'call("/admin/sources"' in script
+    assert "Add source" in page
     assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")
     runtime = json.loads((WEB / "runtime-config.json").read_text(encoding="utf-8"))
-    assert runtime["adminApiBase"] == ""
+    assert runtime["adminApiBase"] == runtime["apiBase"]

@@ -19,6 +19,7 @@ from src.domain.models import (
     PublicationEvent,
     RawSnapshotMetadata,
     SavedSearch,
+    SourceConfiguration,
     TelegramUpdateRecord,
     UserAction,
     UserSettings,
@@ -733,6 +734,35 @@ class FirestoreRepository:
             },
             merge=True,
         )
+
+    def list_source_configurations(self) -> list[SourceConfiguration]:
+        results: list[SourceConfiguration] = []
+        for document in self.client.collection("source_registry").stream():
+            data = document.to_dict() or {}
+            config = data.get("configuration")
+            if isinstance(config, dict):
+                results.append(SourceConfiguration.model_validate(config))
+        return sorted(results, key=lambda item: item.name)
+
+    def save_source_configuration(self, config: SourceConfiguration) -> None:
+        self.client.collection("source_registry").document(config.name).set(
+            {
+                "source_name": config.name,
+                "enabled": config.enabled,
+                "configuration": config.model_dump(mode="json"),
+                "updated_at": datetime.now(UTC),
+            },
+            merge=True,
+        )
+
+    def delete_source_configuration(self, source_name: str) -> bool:
+        reference = self.client.collection("source_registry").document(source_name)
+        snapshot = reference.get()
+        data = snapshot.to_dict() or {}
+        if not isinstance(data.get("configuration"), dict):
+            return False
+        reference.delete()
+        return True
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         document = self.client.collection("source_registry").document(source_name)

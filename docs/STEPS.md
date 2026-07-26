@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 26 июля 2026 — добавление источников из Admin Web
+
+- В Sources добавлен мастер `Test connection` → `Add source` для публичных HTTPS JSON feeds.
+- Backend не сохраняет источник до реальной загрузки и распознавания автомобиля со стабильным ID, URL, названием и фиксированной ценой не ниже 5 000 AED; `Price on request`, 99/999 AED, пустой JSON и private-network URL отклоняются.
+- Новый feed создаётся выключенным, затем отдельно включается администратором. Динамический feed можно удалить без удаления накопленной истории; предустановленные адаптеры удалить нельзя.
+- Конфигурация хранится в Firestore/SQLite и загружается каждым новым API/collector instance. Ручной запуск использует общий Cloud Run collector с source override.
+- Браузерный Admin API оставлен за API Gateway: попытка same-origin Hosting rewrite несовместима с организационным запретом публичного Cloud Run invoker.
+- Локальный gate успешен: Ruff, mypy и 66 pytest.
+
 ## 25 июля 2026 — полный production candidate
 
 - Production остановлен: schedules и Cloud Tasks paused, delivery/webhook выключены.

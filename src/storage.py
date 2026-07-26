@@ -21,6 +21,7 @@ from src.domain.models import (
     PublicationEvent,
     RawSnapshotMetadata,
     SavedSearch,
+    SourceConfiguration,
     TelegramUpdateRecord,
     UserAction,
     UserSettings,
@@ -84,6 +85,12 @@ class Repository(Protocol):
     def source_enabled(self, source_name: str, default: bool = True) -> bool: ...
 
     def set_source_enabled(self, source_name: str, enabled: bool) -> None: ...
+
+    def list_source_configurations(self) -> list[SourceConfiguration]: ...
+
+    def save_source_configuration(self, config: SourceConfiguration) -> None: ...
+
+    def delete_source_configuration(self, source_name: str) -> bool: ...
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None: ...
 
@@ -261,6 +268,11 @@ class LocalRepository:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE IF NOT EXISTS source_health (
+                    source_name TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS source_configurations (
                     source_name TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -1074,6 +1086,44 @@ class LocalRepository:
                 """,
                 (source_name, int(enabled)),
             )
+
+    def list_source_configurations(self) -> list[SourceConfiguration]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM source_configurations ORDER BY source_name"
+            ).fetchall()
+        return [SourceConfiguration.model_validate_json(row["payload_json"]) for row in rows]
+
+    def save_source_configuration(self, config: SourceConfiguration) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_configurations(source_name, payload_json, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(source_name) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (config.name, config.model_dump_json()),
+            )
+            connection.execute(
+                """
+                INSERT INTO source_registry(source_name, enabled, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(source_name) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (config.name, int(config.enabled)),
+            )
+
+    def delete_source_configuration(self, source_name: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM source_configurations WHERE source_name = ?", (source_name,)
+            )
+            connection.execute("DELETE FROM source_registry WHERE source_name = ?", (source_name,))
+        return cursor.rowcount > 0
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         with self._connect() as connection:

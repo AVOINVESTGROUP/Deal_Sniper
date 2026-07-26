@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import TimeoutException, TransportError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 from telegram import (
     Bot,
     InlineKeyboardButton,
@@ -60,12 +60,14 @@ from src.domain.models import (
     Outcome,
     ProcessingState,
     PublicationEvent,
+    SourceConfiguration,
     UserAction,
     UserSettings,
 )
 from src.news import DubaiAutoNewsClient, format_news
 from src.search import build_saved_search, parse_search
 from src.service import DealService, EvaluatedListing
+from src.sources.json_feed import JsonFeedSource
 from src.storage import snapshot_hash
 from src.tasks import CloudTaskDispatcher
 from src.verification import EXTRACTOR_VERSION, evidence_is_active
@@ -186,6 +188,12 @@ class DeliveryTask(BaseModel):
 
 class SourceAdminRequest(BaseModel):
     enabled: bool
+
+
+class SourceCreateRequest(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
+    url: HttpUrl
+    kind: str = Field(default="json_feed", pattern=r"^json_feed$")
 
 
 class OutboxReconciliationRequest(BaseModel):
@@ -338,7 +346,10 @@ async def launch_scan(source_name: str | None = None) -> list[str]:
     if not names:
         raise ValueError("Нет включённых источников")
     launcher = CloudJobLauncher(settings)
-    await launcher.run_collectors(names)
+    dynamic = service.dynamic_source_names()
+    await asyncio.gather(
+        *(launcher.run_collector(name, dynamic=name in dynamic) for name in names)
+    )
     return names
 
 
@@ -489,6 +500,7 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
         "snapshot_count": await asyncio.to_thread(service.repository.count_snapshots),
         "sources": normalized_health,
         "source_switches": service.source_statuses(),
+        "dynamic_sources": sorted(service.dynamic_source_names()),
         "delivery_enabled": settings.delivery_enabled,
         "whatsapp_status": "ready"
         if settings.whatsapp_enabled
@@ -539,6 +551,97 @@ async def admin_source(
         },
     )
     return {"ok": True, "operation_id": stable_operation_id}
+
+
+async def test_source_feed(request: SourceCreateRequest) -> list[Any]:
+    source = JsonFeedSource(
+        request.name,
+        str(request.url),
+        timeout_seconds=settings.request_timeout_seconds,
+    )
+    return await source.fetch()
+
+
+@app.post("/admin/source-test")
+async def admin_test_source(
+    request: SourceCreateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Проверяет feed без сохранения и без запуска production collector."""
+    firebase_principal(authorization, require_admin=True)
+    if request.name in service.source_statuses():
+        raise HTTPException(status_code=409, detail="Source name already exists")
+    try:
+        listings = await test_source_feed(request)
+    except Exception as error:
+        logger.warning("Проверка нового источника %s отклонена: %s", request.name, error)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    sample = listings[0]
+    return {
+        "ok": True,
+        "count": len(listings),
+        "sample": {
+            "title": sample.title,
+            "price_aed": str(sample.price_aed),
+            "url": str(sample.url),
+        },
+    }
+
+
+@app.post("/admin/sources")
+async def admin_add_source(
+    request: SourceCreateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Повторно проверяет и сохраняет новый feed выключенным."""
+    principal = firebase_principal(authorization, require_admin=True)
+    if request.name in service.source_statuses():
+        raise HTTPException(status_code=409, detail="Source name already exists")
+    try:
+        listings = await test_source_feed(request)
+        configuration = SourceConfiguration(
+            name=request.name,
+            kind=request.kind,
+            url=request.url,
+            enabled=False,
+            sample_count=len(listings),
+        )
+        await asyncio.to_thread(service.add_source_configuration, configuration)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        logger.warning("Добавление нового источника %s отклонено: %s", request.name, error)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_source_add",
+        {
+            "source": request.name,
+            "kind": request.kind,
+            "url": str(request.url),
+            "sample_count": len(listings),
+            "actor": principal.subject,
+        },
+    )
+    return {"ok": True, "name": request.name, "count": len(listings), "enabled": False}
+
+
+@app.post("/admin/sources/{source_name}/remove")
+async def admin_remove_source(
+    source_name: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Удаляет динамический feed; предустановленные адаптеры защищены."""
+    principal = firebase_principal(authorization, require_admin=True)
+    deleted = await asyncio.to_thread(service.delete_source_configuration, source_name)
+    if not deleted:
+        raise HTTPException(status_code=409, detail="Only a custom feed can be removed")
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_source_remove",
+        {"source": source_name, "actor": principal.subject},
+    )
+    return {"ok": True, "name": source_name}
 
 
 @app.post("/admin/sources/{source_name}/run")

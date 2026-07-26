@@ -55,6 +55,18 @@ class ListingLifecycle(StrEnum):
     QUARANTINED = "quarantined"
 
 
+class SourceConfiguration(BaseModel):
+    """Проверенная конфигурация динамического источника объявлений."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
+    kind: str = Field(default="json_feed", pattern=r"^json_feed$")
+    url: HttpUrl
+    enabled: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sample_count: int = Field(default=0, ge=0)
+
+
 class OutboxState(StrEnum):
     """Состояние внешней доставки без ложного exactly-once."""
 

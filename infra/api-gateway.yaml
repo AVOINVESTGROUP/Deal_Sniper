@@ -56,6 +56,12 @@ paths:
   /admin/overview:
     get: {operationId: adminOverview, responses: {"200": {description: Overview}}}
     options: {operationId: adminOverviewOptions, responses: {"200": {description: CORS}}}
+  /admin/sources:
+    post: {operationId: adminAddSource, responses: {"200": {description: Added}}}
+    options: {operationId: adminAddSourceOptions, responses: {"200": {description: CORS}}}
+  /admin/source-test:
+    post: {operationId: adminTestSource, responses: {"200": {description: Tested}}}
+    options: {operationId: adminTestSourceOptions, responses: {"200": {description: CORS}}}
   /admin/sources/{source_name}:
     parameters:
       - {name: source_name, in: path, required: true, type: string}
@@ -66,6 +72,11 @@ paths:
       - {name: source_name, in: path, required: true, type: string}
     post: {operationId: adminRunSource, responses: {"200": {description: Started}}}
     options: {operationId: adminRunSourceOptions, responses: {"200": {description: CORS}}}
+  /admin/sources/{source_name}/remove:
+    parameters:
+      - {name: source_name, in: path, required: true, type: string}
+    post: {operationId: adminRemoveSource, responses: {"200": {description: Removed}}}
+    options: {operationId: adminRemoveSourceOptions, responses: {"200": {description: CORS}}}
   /admin/outbox:
     get:
       operationId: adminOutbox

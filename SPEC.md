@@ -107,3 +107,7 @@ Admin Web является самостоятельным desktop-first прил
 ## 10. Критерий production-ready
 
 Production разрешено возобновить только когда один RC commit собран в immutable runtime/migration digests, тот же migration digest прошёл staging restore/rehearsal, production migration завершена с delivery disabled, `main` указывает на RC, runtime digest развёрнут и `/version` подтверждает commit/digest/schema. Resume выполняется collectors → processing → delivery; затем проходит пилот 100–300 объявлений без ложных цен, утечек Free и неконтролируемых дублей.
+
+## Динамические источники
+
+Администратор может подключать проверяемые HTTPS JSON feeds из отдельной Web Admin Panel. Сохранение разрешено только после серверного test fetch и успешного преобразования хотя бы одной записи в `ListingSnapshot` с фиксированной ценой в AED. Новый feed по умолчанию выключен. HTML marketplace без совместимого feed подключается только кодовым адаптером и до его развёртывания имеет статус `Adapter required`. Произвольный URL никогда не считается рабочим источником без успешной проверки данных.

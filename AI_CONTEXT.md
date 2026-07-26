@@ -1,5 +1,7 @@
 # AI Context: Dubai Deal Sniper
 
+26 июля 2026 добавлен отсутствовавший продуктовый контур управления источниками. Отдельная Admin Web Panel умеет протестировать и зарегистрировать публичный HTTPS JSON feed, показать число валидных автомобилей и sample, сохранить источник выключенным, включить/запустить и удалить только динамическую конфигурацию. Валидация fail-closed запрещает private-network fetch, не-JSON, пустой feed, `Price on request`, цену ниже 5 000 AED и записи без минимальных автомобильных полей. Конфигурации персистентны в Firestore/SQLite; штатные DubiCars/CarSwitch/Cars24/OpenSooq остаются кодовыми адаптерами. Gateway-контур сохранён, потому что org policy запрещает `allUsers` invoker для Cloud Run и тем самым блокирует Firebase Hosting rewrite. Gate: Ruff, mypy, 66 pytest.
+
 ## Цель
 
 Production-сервис быстрой монетизации сигналов по недооценённым автомобилям с фиксированной ценой в ОАЭ. Недвижимость и аукционы исключены. Основные каналы: персональный Telegram-бот, Free/Pro Telegram-каналы, TMA и Admin Web. WhatsApp — только официальный opt-in API.

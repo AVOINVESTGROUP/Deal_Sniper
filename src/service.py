@@ -21,6 +21,7 @@ from src.domain.models import (
     DealDecision,
     FreshnessStatus,
     ListingSnapshot,
+    SourceConfiguration,
     VerificationStatus,
 )
 from src.domain.normalization import normalize_listing, resolve_vehicle_identities
@@ -33,6 +34,7 @@ from src.sources.base import CompositeSource, SourceAdapter
 from src.sources.cars24 import Cars24Source
 from src.sources.carswitch import CarSwitchSource
 from src.sources.dubicars import DubiCarsSource
+from src.sources.json_feed import JsonFeedSource
 from src.sources.opensooq import OpenSooqSource
 from src.storage import LocalRepository, Repository, snapshot_hash
 from src.verification import (
@@ -81,11 +83,13 @@ class DealService:
         settings: Settings,
         repository: Repository,
         sources: dict[str, SourceAdapter],
+        archive: RawSnapshotArchive | None = None,
         verifier: PriceVerifier = verify_listing_price,
     ) -> None:
         self.settings = settings
         self.repository = repository
         self.sources = sources
+        self.archive = archive
         self.verifier = verifier
         self.market_engine = ComparablePriceEngine()
         self.risk_engine = RiskEngine()
@@ -159,11 +163,42 @@ class DealService:
                 archive=archive,
             ),
         }
-        return cls(settings=settings, repository=repository, sources=sources)
+        for config in repository.list_source_configurations():
+            if config.name not in sources and config.kind == "json_feed":
+                sources[config.name] = JsonFeedSource(
+                    config.name,
+                    str(config.url),
+                    timeout_seconds=settings.request_timeout_seconds,
+                    archive=archive,
+                )
+        return cls(settings=settings, repository=repository, sources=sources, archive=archive)
+
+    def add_source_configuration(self, config: SourceConfiguration) -> None:
+        """Регистрирует уже проверенный feed во всех последующих runtime instances."""
+        if config.name in {"dubicars", "carswitch", "cars24", "opensooq"}:
+            raise ValueError("Имя занято предустановленным адаптером")
+        self.repository.save_source_configuration(config)
+        self.sources[config.name] = JsonFeedSource(
+            config.name,
+            str(config.url),
+            timeout_seconds=self.settings.request_timeout_seconds,
+            archive=self.archive,
+        )
+
+    def delete_source_configuration(self, source_name: str) -> bool:
+        """Удаляет только динамическую конфигурацию, сохраняя собранную историю."""
+        normalized = source_name.strip().casefold()
+        deleted = self.repository.delete_source_configuration(normalized)
+        if deleted:
+            self.sources.pop(normalized, None)
+        return deleted
 
     def source_statuses(self) -> dict[str, bool]:
         """Возвращает доступные адаптеры и централизованные переключатели Firestore/SQLite."""
         return {name: self.repository.source_enabled(name, default=True) for name in self.sources}
+
+    def dynamic_source_names(self) -> set[str]:
+        return {config.name for config in self.repository.list_source_configurations()}
 
     def set_source_enabled(self, source_name: str, enabled: bool) -> None:
         """Меняет состояние зарегистрированного адаптера без удаления данных."""

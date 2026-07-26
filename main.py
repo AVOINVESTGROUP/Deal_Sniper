@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=("dubicars", "carswitch", "cars24", "opensooq"),
+        help="Имя предустановленного или динамического источника",
     )
     parser.add_argument(
         "--direct",

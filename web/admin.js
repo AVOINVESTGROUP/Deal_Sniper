@@ -6,6 +6,7 @@ const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"}))
 const auth = getAuth(initializeApp(config));
 const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ?? "";
 let token = "";
+let testedSourceKey = "";
 const byId = (id) => document.getElementById(id);
 const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
 const number = (value) => new Intl.NumberFormat("en-AE").format(Number(value || 0));
@@ -34,13 +35,15 @@ function keyValues(values) { return Object.entries(values || {}).map(([key, valu
 
 function renderSources(data) {
   const entries = Object.entries(data.source_switches || {});
+  const dynamicSources = new Set(data.dynamic_sources || []);
   let healthy = 0;
   byId("sources").innerHTML = entries.map(([name, enabled]) => {
     const run = data.sources?.[name] || {};
     const state = sourceState(run, enabled);
     if (state.good) healthy += 1;
     const stats = run.error ? `<span class="source-error" title="${safe(run.error)}">${safe(String(run.error).slice(0, 120))}</span>` : `<span>${number(run.fetched)} fetched</span><span>${number(run.new)} new</span><span>${number(run.changed)} changed</span><span>${safe(run.duration_seconds || "—")} sec</span>`;
-    return `<article class="data-row"><div class="data-primary"><div><strong>${safe(name)}</strong>${statusPill(state.label, state.good)}</div><div class="row-meta">${stats}</div></div><div class="row-actions"><button class="secondary run-source" data-source="${safe(name)}" ${enabled ? "" : "disabled"}>Run now</button><button class="toggle-source ${enabled ? "danger-button" : ""}" data-source="${safe(name)}" data-enabled="${enabled}">${enabled ? "Pause" : "Enable"}</button></div></article>`;
+    const remove = dynamicSources.has(name) ? `<button class="danger-button remove-source" data-source="${safe(name)}">Remove</button>` : "";
+    return `<article class="data-row"><div class="data-primary"><div><strong>${safe(name)}</strong>${dynamicSources.has(name) ? statusPill("Custom feed", true) : ""}${statusPill(state.label, state.good)}</div><div class="row-meta">${stats}</div></div><div class="row-actions"><button class="secondary run-source" data-source="${safe(name)}" ${enabled ? "" : "disabled"}>Run now</button><button class="toggle-source ${enabled ? "danger-button" : ""}" data-source="${safe(name)}" data-enabled="${enabled}">${enabled ? "Pause" : "Enable"}</button>${remove}</div></article>`;
   }).join("") || '<div class="empty-state">No source adapters installed.</div>';
   byId("source-brief").innerHTML = entries.map(([name, enabled]) => { const state = sourceState(data.sources?.[name], enabled); return `<div class="brief-row"><strong>${safe(name)}</strong>${statusPill(state.label, state.good)}</div>`; }).join("");
   byId("source-summary").className = `status-pill ${healthy === entries.length && entries.length ? "status-good" : "status-bad"}`;
@@ -55,6 +58,49 @@ function renderSources(data) {
     try { await call(`/admin/sources/${button.dataset.source}/run`, {method: "POST"}); button.textContent = "Started"; window.setTimeout(refresh, 5000); }
     catch (error) { showError(error); button.disabled = false; button.textContent = "Run now"; }
   }));
+  document.querySelectorAll(".remove-source").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.confirm(`Remove ${button.dataset.source}? Collected history will be kept.`)) return;
+    button.disabled = true;
+    try { await call(`/admin/sources/${button.dataset.source}/remove`, {method: "POST"}); await refresh(); }
+    catch (error) { showError(error); button.disabled = false; }
+  }));
+}
+
+function sourcePayload() {
+  const name = byId("source-name").value.trim().toLowerCase();
+  const url = byId("source-url").value.trim();
+  if (!/^[a-z][a-z0-9_-]{2,39}$/.test(name)) throw new Error("Use 3–40 lowercase letters, numbers, _ or - for the source name.");
+  if (!url.startsWith("https://")) throw new Error("Enter a public HTTPS JSON feed URL.");
+  return {name, url, kind: "json_feed"};
+}
+
+async function testNewSource() {
+  const result = byId("source-test-result");
+  byId("test-source").disabled = true; byId("add-source").disabled = true;
+  result.className = "muted"; result.textContent = "Testing the feed and fixed prices…";
+  try {
+    const payload = sourcePayload();
+    const response = await call("/admin/source-test", {method: "POST", body: JSON.stringify(payload)});
+    testedSourceKey = JSON.stringify(payload); byId("add-source").disabled = false;
+    result.className = "test-good";
+    result.textContent = `${number(response.count)} valid vehicles found. Sample: ${response.sample.title} — ${money(response.sample.price_aed)}.`;
+  } catch (error) {
+    testedSourceKey = ""; result.className = "test-bad";
+    result.textContent = error instanceof Error ? error.message : String(error);
+  } finally { byId("test-source").disabled = false; }
+}
+
+async function addNewSource() {
+  try {
+    const payload = sourcePayload();
+    if (JSON.stringify(payload) !== testedSourceKey) throw new Error("Test this exact name and URL first.");
+    byId("add-source").disabled = true;
+    await call("/admin/sources", {method: "POST", body: JSON.stringify(payload)});
+    byId("source-name").value = ""; byId("source-url").value = ""; testedSourceKey = "";
+    byId("source-test-result").className = "test-good";
+    byId("source-test-result").textContent = "Source added paused. Review it below, then click Enable.";
+    await refresh();
+  } catch (error) { byId("source-test-result").className = "test-bad"; byId("source-test-result").textContent = error instanceof Error ? error.message : String(error); }
 }
 
 function renderCloud(cloud = {}) {
@@ -112,6 +158,8 @@ byId("login").addEventListener("click", async () => {
   } catch (error) { showError(error); } finally { byId("login").disabled = false; }
 });
 byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
+byId("test-source").addEventListener("click", testNewSource); byId("add-source").addEventListener("click", addNewSource);
+[byId("source-name"), byId("source-url")].forEach((input) => input.addEventListener("input", () => { testedSourceKey = ""; byId("add-source").disabled = true; }));
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
     token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("login-email").hidden = false; byId("login-password").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;

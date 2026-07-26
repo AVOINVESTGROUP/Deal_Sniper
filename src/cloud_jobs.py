@@ -18,21 +18,32 @@ class CloudJobLauncher:
     async def run_collectors(self, source_names: list[str]) -> None:
         await asyncio.gather(*(self.run_collector(name) for name in source_names))
 
-    async def run_collector(self, source_name: str) -> None:
-        await asyncio.to_thread(self._run_collector_sync, source_name)
+    async def run_collector(self, source_name: str, dynamic: bool = False) -> None:
+        await asyncio.to_thread(self._run_collector_sync, source_name, dynamic)
 
-    def _run_collector_sync(self, source_name: str) -> None:
+    def _run_collector_sync(self, source_name: str, dynamic: bool = False) -> None:
         credentials, _ = google.auth.default(
             scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
         session = AuthorizedSession(credentials)  # type: ignore[no-untyped-call]
-        job_name = f"{self.settings.collector_job_prefix}-{source_name}"
+        job_name = (
+            self.settings.collector_job_prefix
+            if dynamic
+            else f"{self.settings.collector_job_prefix}-{source_name}"
+        )
         url = (
             "https://run.googleapis.com/v2/projects/"
             f"{self.settings.google_cloud_project}/locations/"
             f"{self.settings.google_cloud_region}/jobs/{job_name}:run"
         )
-        response = session.post(url, json={"validateOnly": False}, timeout=30)
+        payload: dict[str, Any] = {"validateOnly": False}
+        if dynamic:
+            payload["overrides"] = {
+                "containerOverrides": [
+                    {"args": ["main.py", "collect", "--source", source_name]}
+                ]
+            }
+        response = session.post(url, json=payload, timeout=30)
         response.raise_for_status()
         operation: dict[str, Any] = response.json()
         if not operation.get("name"):
