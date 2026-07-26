@@ -13,6 +13,9 @@ def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
         scopes=["https://www.googleapis.com/auth/cloud-platform.read-only"]
     )
     session = AuthorizedSession(credentials)  # type: ignore[no-untyped-call]
+    # REST discovery-вызовы не всегда получают quota project из metadata
+    # service account. Явный consumer исключает ложный 403 в Cloud Run.
+    session.headers["x-goog-user-project"] = project_id
     scheduler_url = (
         f"https://cloudscheduler.googleapis.com/v1/projects/{project_id}/locations/{region}/jobs"
     )
