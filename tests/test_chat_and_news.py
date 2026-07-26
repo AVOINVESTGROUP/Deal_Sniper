@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from src.chat import ChatIntent, classify_chat_intent, effective_chat_id
+from src.chat import ChatIntent, classify_chat_intent, effective_chat_id, incoming_text
 from src.news import format_news, parse_news_feed
 
 
@@ -17,6 +17,12 @@ def test_chat_intents_are_selected_before_car_search() -> None:
 def test_migrated_supergroup_id_takes_priority() -> None:
     message = {"chat": {"id": -123}, "migrate_to_chat_id": -1004451580668}
     assert effective_chat_id(message) == -1004451580668
+
+
+def test_service_message_is_not_treated_as_user_text() -> None:
+    message = {"supergroup_chat_created": True, "chat": {"id": -2074319276577}}
+    assert incoming_text(message) is None
+    assert incoming_text({"text": "  Find a Toyota  "}) == "Find a Toyota"
 
 
 def test_news_requires_provenance_and_freshness() -> None:

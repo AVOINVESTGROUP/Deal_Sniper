@@ -95,7 +95,8 @@
 - Следующий шаг: immutable build, API Gateway config, Firebase Hosting и production payment-link smoke.
 - Production-монетизация опубликована: API и 10 Jobs используют один immutable digest, API Gateway активен на конфигурации `deal-sniper-config-pro-c2b38b7`, а Firebase Hosting содержит Pro-карточку и endpoint `/tma/subscription`.
 - Проверка Telegram подтвердила entitlement владельца Pro-канала; неизвестный участник обрабатывается fail-closed. Ответ через direct messages канала передаёт обязательный `direct_messages_topic_id` из `direct_messages_topic.topic_id` или резервного `message_thread_id`.
-- Финальный локальный gate после исправления: Ruff, mypy и 60 тестов прошли.
+- Диагностика живого webhook показала служебный `supergroup_chat_created` без текста и topic ID; такие события теперь подтверждаются без попытки отправить ответ.
+- Финальный локальный gate после исправления: Ruff, mypy и 61 тест прошли.
 
 ## Ограничения
 

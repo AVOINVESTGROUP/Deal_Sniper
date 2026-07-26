@@ -31,6 +31,15 @@ def effective_chat_id(message: dict[str, Any]) -> int | str | None:
     return value if isinstance(value, (int, str)) else None
 
 
+def incoming_text(message: dict[str, Any]) -> str | None:
+    """Возвращает пользовательский текст и отбрасывает служебные Telegram-события."""
+    value = message.get("text")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def classify_chat_intent(text: str) -> ChatIntent:
     """Определяет намерение без LLM и без создания несуществующих фактов."""
     normalized = " ".join(text.casefold().strip().split())

@@ -40,6 +40,7 @@ from src.chat import (
     classify_chat_intent,
     effective_chat_id,
     help_text,
+    incoming_text,
     search_prompt_text,
     welcome_text,
 )
@@ -920,7 +921,9 @@ async def telegram_webhook(
     def tr(russian: str, english: str) -> str:
         return localized(language, russian, english)
 
-    raw_text = str(message.get("text", "")).strip()
+    raw_text = incoming_text(message)
+    if raw_text is None:
+        return {"ok": True}
     parts = raw_text.split()
     text = parts[0].split("@", maxsplit=1)[0].lower() if parts else ""
     arguments = parts[1:]
