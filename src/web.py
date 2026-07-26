@@ -35,6 +35,7 @@ from src.bot import (
 from src.chat import (
     ChatIntent,
     classify_chat_intent,
+    effective_chat_id,
     help_text,
     search_prompt_text,
     welcome_text,
@@ -820,9 +821,8 @@ async def telegram_webhook(
     message = update.get("message") or update.get("channel_post")
     if not isinstance(message, dict):
         return {"ok": True}
-    chat = message.get("chat", {})
     sender = message.get("from", {})
-    chat_id = chat.get("id")
+    chat_id = effective_chat_id(message)
     user_id = sender.get("id")
     language = telegram_language(str(sender.get("language_code", "en")))
 

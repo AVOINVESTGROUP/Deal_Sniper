@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 
 class ChatIntent(StrEnum):
@@ -15,6 +16,18 @@ class ChatIntent(StrEnum):
     SOURCES = "sources"
     HELP = "help"
     UNKNOWN = "unknown"
+
+
+def effective_chat_id(message: dict[str, Any]) -> int | str | None:
+    """Возвращает новый ID supergroup, если Telegram прислал событие миграции."""
+    migrated = message.get("migrate_to_chat_id")
+    if isinstance(migrated, int):
+        return migrated
+    chat = message.get("chat")
+    if not isinstance(chat, dict):
+        return None
+    value = chat.get("id")
+    return value if isinstance(value, (int, str)) else None
 
 
 def classify_chat_intent(text: str) -> ChatIntent:
