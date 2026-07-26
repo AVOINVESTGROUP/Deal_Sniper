@@ -3,7 +3,7 @@ import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebase
 
 const telegram = window.Telegram.WebApp;
 telegram.ready(); telegram.expand();
-const language = (telegram.initDataUnsafe?.user?.language_code || navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+const language = "en";
 const tr = (ru, en) => language === "ru" ? ru : en;
 const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const api = runtime.apiBase || "";

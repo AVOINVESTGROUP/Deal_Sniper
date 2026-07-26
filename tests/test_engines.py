@@ -188,7 +188,7 @@ def test_hard_stop_precedes_missing_market() -> None:
     assert decision.max_purchase_price_aed == Decimal("0")
 
 
-def test_telegram_card_uses_channel_english_and_device_russian() -> None:
+def test_telegram_card_uses_english_for_every_device_language() -> None:
     listing = ListingSnapshot(
         source="test",
         source_listing_id="localized-1",
@@ -204,6 +204,6 @@ def test_telegram_card_uses_channel_english_and_device_russian() -> None:
 
     assert "Price:" in format_card(listing, decision, language="en")
     assert "Expected profit:" in format_card(listing, decision, language="en")
-    assert "Цена:" in format_card(listing, decision, language="ru")
-    assert telegram_language("ru-RU") == "ru"
+    assert "Price:" in format_card(listing, decision, language="ru")
+    assert telegram_language("ru-RU") == "en"
     assert telegram_language("ar") == "en"

@@ -20,12 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 def telegram_language(language_code: str | None) -> str:
-    """Поддерживает русский интерфейс устройства, для остальных языков использует английский."""
-    return "ru" if (language_code or "").casefold().startswith("ru") else "en"
+    """Возвращает единый язык production-продукта для рынка ОАЭ."""
+    del language_code
+    return "en"
 
 
 def localized(language: str, russian: str, english: str) -> str:
-    """Возвращает строку на поддерживаемом языке Telegram-пользователя."""
+    """Возвращает английскую строку публичного production-интерфейса."""
     return russian if telegram_language(language) == "ru" else english
 
 
