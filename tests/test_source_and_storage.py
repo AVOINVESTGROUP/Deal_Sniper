@@ -12,12 +12,35 @@ from src.domain.models import (
     RiskAssessment,
 )
 from src.domain.normalization import normalize_listing, resolve_vehicle_identities
+from src.raw_storage import _upload_once
 from src.sources.cars24 import parse_cars24_page
 from src.sources.carswitch import parse_carswitch_page
 from src.sources.dubicars import parse_search_page
 from src.sources.opensooq import parse_opensooq_page
 from src.storage import LocalRepository
 from src.verification import extract_detail_prices
+
+
+class FakeGcsBlob:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def upload_from_string(self, payload: bytes, **kwargs: object) -> None:
+        self.calls.append({"payload": payload, **kwargs})
+
+
+def test_gcs_raw_upload_is_atomic_without_preliminary_read() -> None:
+    blob = FakeGcsBlob()
+
+    _upload_once(blob, b"raw", "text/html")
+
+    assert blob.calls == [
+        {
+            "payload": b"raw",
+            "content_type": "text/html",
+            "if_generation_match": 0,
+        }
+    ]
 
 SEARCH_HTML = """
 <html><head><script type="application/ld+json">

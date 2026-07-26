@@ -117,3 +117,5 @@ Production smoke административного пути завершён: �
 Read-only REST-запросы Admin Web к Scheduler, Tasks и Cloud Run передают явный quota project `avo-deal-sniper`; это отделяет фактический IAM-статус от ошибок отсутствующего billing/quota consumer в Application Default Credentials.
 
 API Gateway содержит отдельный защищённый маршрут `POST /admin/sources/{source_name}/run`; браузерная кнопка ручного запуска не обращается к Cloud Run напрямую.
+
+Production-диагностика service account показала `ACCESS_TOKEN_SCOPE_INSUFFICIENT` для Scheduler/Tasks/Run: Admin REST-клиент должен получать token с OAuth scope `cloud-platform`, тогда как полномочия остаются ограничены viewer IAM. Raw GCS archive создаёт объекты атомарным `if_generation_match=0` без предварительного `blob.exists()`; это соответствует роли Object Creator и устраняет ложный 403 на ещё не существующем checksum-объекте.

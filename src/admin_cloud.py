@@ -9,8 +9,10 @@ from google.auth.transport.requests import AuthorizedSession
 
 
 def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
+    # OAuth scope разрешает запросить API, а фактические полномочия всё равно
+    # ограничены viewer-ролями service account на уровне IAM.
     credentials, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform.read-only"]
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     session = AuthorizedSession(credentials)  # type: ignore[no-untyped-call]
     # REST discovery-вызовы не всегда получают quota project из metadata

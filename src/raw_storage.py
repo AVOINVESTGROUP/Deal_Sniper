@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from google.api_core.exceptions import PreconditionFailed
 from google.cloud.storage import Client  # type: ignore[import-untyped]
 from pydantic import HttpUrl
 
@@ -74,8 +75,7 @@ class GcsRawSnapshotArchive:
         suffix = _suffix(content_type)
         object_name = f"raw/{source}/{datetime.now(UTC).strftime('%Y/%m/%d')}/{checksum}{suffix}"
         blob = self.bucket.blob(object_name)
-        if not await asyncio.to_thread(blob.exists):
-            await asyncio.to_thread(blob.upload_from_string, payload, content_type=content_type)
+        await asyncio.to_thread(_upload_once, blob, payload, content_type)
         metadata = RawSnapshotMetadata(
             source=source,
             source_url=HttpUrl(source_url),
@@ -92,6 +92,19 @@ def _write_once(target: Path, payload: bytes) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     if not target.exists():
         target.write_bytes(payload)
+
+
+def _upload_once(blob: object, payload: bytes, content_type: str) -> None:
+    """Атомарно создаёт immutable GCS object без предварительного GET."""
+    try:
+        blob.upload_from_string(  # type: ignore[attr-defined]
+            payload,
+            content_type=content_type,
+            if_generation_match=0,
+        )
+    except PreconditionFailed:
+        # Такой checksum уже заархивирован; перезапись запрещена контрактом.
+        return
 
 
 def _suffix(content_type: str) -> str:
