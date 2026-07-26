@@ -25,6 +25,7 @@ def test_tma_settings_request_cannot_override_owner() -> None:
 def test_tma_contains_primary_navigation_without_slash_commands() -> None:
     root = Path(__file__).resolve().parents[1]
     script = (root / "web" / "tma.js").read_text(encoding="utf-8")
-    assert all(name in script for name in ("deals", "search", "saved", "settings", "admin"))
+    assert all(name in script for name in ("deals", "market", "search", "saved", "settings"))
+    assert '"admin"' not in script
     assert "/source_on" not in script
     assert "/set_budget" not in script

@@ -28,9 +28,10 @@ async function reconcile(deliveryId, action) {
 async function refresh() {
   error.textContent = "";
   try {
-    const [data, pulse, preview, unknown] = await Promise.all([
+    const [data, pulse, preview, unknown, failed] = await Promise.all([
       call("/admin/overview"), call("/content/market-pulse"),
       call("/admin/preview"), call("/admin/outbox?state=unknown"),
+      call("/admin/outbox?state=failed"),
     ]);
     document.querySelector("#overview").innerHTML =
       `<div class=card><b>Snapshots</b><p>${data.snapshot_count}</p></div>` +
@@ -52,7 +53,7 @@ async function refresh() {
     document.querySelector("#free").textContent = preview.free || "No current deal";
     document.querySelector("#pro").textContent = preview.pro || "No current deal";
     const unknownRoot = document.querySelector("#unknown"); unknownRoot.innerHTML = "";
-    for (const item of unknown.items) {
+    for (const item of [...unknown.items, ...failed.items]) {
       const row = document.createElement("p"); row.textContent = `${item.delivery_id} · ${item.last_error || "ambiguous result"} `;
       for (const action of ["mark_sent", "mark_failed", "retry_once"]) {
         const button = document.createElement("button"); button.textContent = action;

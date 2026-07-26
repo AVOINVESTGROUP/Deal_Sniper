@@ -165,6 +165,7 @@ class ContentDeliveryTask(BaseModel):
     target_id: str
     text: str
     template_version: str = "content/v1"
+    image_url: str | None = None
 
 
 class WhatsAppDeliveryTask(BaseModel):
@@ -1354,11 +1355,19 @@ async def deliver_content_task(
         return {"ok": True}
     try:
         async with Bot(settings.require_bot_token()) as bot:
-            sent = await bot.send_message(
-                chat_id=task.target_id,
-                text=task.text,
-                parse_mode=ParseMode.HTML,
-            )
+            if task.image_url:
+                sent = await bot.send_photo(
+                    chat_id=task.target_id,
+                    photo=task.image_url,
+                    caption=task.text,
+                    parse_mode=ParseMode.HTML,
+                )
+            else:
+                sent = await bot.send_message(
+                    chat_id=task.target_id,
+                    text=task.text,
+                    parse_mode=ParseMode.HTML,
+                )
     except (TimedOut, NetworkError) as error:
         await asyncio.to_thread(
             service.repository.update_outbox,
