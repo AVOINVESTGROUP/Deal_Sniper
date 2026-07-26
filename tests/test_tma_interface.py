@@ -49,3 +49,17 @@ async def test_channel_direct_message_reply_keeps_topic() -> None:
         text="Hello",
         direct_messages_topic_id=417,
     )
+
+
+@pytest.mark.asyncio
+async def test_channel_direct_message_reply_uses_thread_fallback() -> None:
+    bot = AsyncMock()
+    client = TelegramReplyClient(bot, {"message_thread_id": 418})
+
+    await client.send_message(chat_id=-1001, text="Hello")
+
+    bot.send_message.assert_awaited_once_with(
+        chat_id=-1001,
+        text="Hello",
+        direct_messages_topic_id=418,
+    )

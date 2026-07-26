@@ -91,6 +91,8 @@ class TelegramReplyClient:
         self._bot = bot
         topic = message.get("direct_messages_topic")
         topic_id = topic.get("topic_id") if isinstance(topic, dict) else None
+        if not isinstance(topic_id, int):
+            topic_id = message.get("message_thread_id")
         self._topic_id = topic_id if isinstance(topic_id, int) else None
 
     async def send_message(self, **kwargs: Any) -> Any:
