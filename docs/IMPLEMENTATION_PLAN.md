@@ -38,6 +38,8 @@
 | 20 | Immutable RC build и manifest | готово к выполнению | ожидает digest |
 | 21 | Staging restore/migration/full rehearsal | готово к выполнению | ожидает execution |
 | 22 | Production migration, merge, cutover и pilot | запрещено до 21 | ожидает execution |
+| 23 | Чужие Telegram sources: MTProto registry, analyzer и evidence tier | только документация | ожидает утверждения плана |
+| 24 | Telegram discovery и controlled scaling до 50–200 sources | только документация | после успешного Telegram pilot |
 
 ## Порядок оставшегося execution
 
@@ -108,3 +110,32 @@
 5. Обычный marketplace HTML, антибот-защита или нестабильная закрытая схема требуют отдельного протестированного адаптера. Панель регистрирует такой источник как `Adapter required`, но не выдаёт его за работающий collector.
 6. Конфигурация динамического feed хранится в Firestore/SQLite, доступна всем экземплярам API и collector, не содержит ключей или токенов и удаляется без удаления уже собранной истории.
 7. Ручной `Run now` для динамического feed запускает общий Cloud Run collector с override имени источника; предустановленные источники продолжают использовать отдельные jobs.
+
+### Telegram Sources — чужие публичные каналы и группы
+
+Этот контур не является функцией пользовательского Telegram-бота. Он реализуется отдельным MTProto collector от имени выделенного технического аккаунта и до утверждения данного плана не развёртывается.
+
+1. Admin Web принимает публичный `@username` или `t.me` URL, разрешает стабильный peer ID и запускает ограниченный анализ истории.
+2. Для каждого источника сохраняются type, peer identity, access state, status, quality report, cursor, lease и provenance обнаружения. Credentials и session находятся только в Secret Manager.
+3. Source Discovery создаёт кандидатов по EN/AR/RU search, forward origin, ссылкам/упоминаниям и cross-post graph. Кандидат не становится включённым источником автоматически.
+4. Анализатор группирует media albums, учитывает edits/deletes, классифицирует sale/wanted/rent/parts/auction/discussion/spam и извлекает только присутствующие поля.
+5. Gemini разрешён только как fallback для нового неоднозначного content hash. Детерминированный парсер остаётся источником цены, AED, года, пробега, телефона и URL; финансовые решения Gemini запрещены.
+6. Quality Gate требует достаточную выборку, минимум 20 продаж, classification precision не ниже 90%, fixed-price coverage не ниже 70%, make/model/year completeness не ниже 80% и price anomaly rate не выше 1%. Иначе источник остаётся `needs_review` или `rejected`.
+7. Telegram-only evidence маркируется `seller_stated`, исключается из verified comparable market и не может самостоятельно создать `CONTACT`.
+8. Инкрементальный collector работает конечными batch, хранит message cursor и single active lease, уважает FloodWait и не создаёт бесконечный цикл в Cloud Run.
+9. Пилот начинается с 10–20 источников на 7 дней и ручной проверки минимум 200 извлечений. Масштабирование до 50–200 включённых источников разрешается только отдельным отчётом.
+10. Полный контракт, схема Admin, данные и порядок TG0–TG6 находятся в `docs/TELEGRAM_SOURCES_PLAN.md`.
+
+### Порядок релизов Telegram Sources
+
+```text
+TG0  golden dataset и контракты
+TG1  MTProto bootstrap/session/connectivity
+TG2  Admin registry, backfill и quality report
+TG3  extraction, Gemini fallback и evidence tiers
+TG4  incremental collector, cursors, edits/deletes и metrics
+TG5  multilingual discovery и candidate queue
+TG6  staging, 7-day production pilot и решение о масштабировании
+```
+
+Каждый этап заканчивается unit/integration/contract tests и обновлением документации. Production delivery не принимает Telegram-derived `CONTACT` до отдельного доказательства отсутствия Telegram-only verified decisions.

@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 26 июля 2026 — план массовых Telegram Sources
+
+- Уточнено требование: нужны чужие публичные Telegram-каналы и группы, а не чаты, в которые добавлен продуктовый бот.
+- Подготовлен `docs/TELEGRAM_SOURCES_PLAN.md`: отдельный MTProto technical account, source registry, ограниченный history backfill, quality analyzer, incremental cursors, edits/deletes/media albums и multilingual Discovery.
+- Цель пилота: 200+ candidates, 50 analyzed, 10–20 enabled на 7 дней; масштабирование до 50–200 только после quality report.
+- Telegram-only цена получает tier `seller_stated`, исключается из verified comparable market и не может самостоятельно сформировать `CONTACT`.
+- Определены этапы TG0–TG6, quality thresholds и новые Google Cloud компоненты.
+- Это документальный этап. Код, credentials, session, Cloud Jobs и production не изменялись; реализация запрещена до утверждения плана владельцем.
+
 ## 26 июля 2026 — добавление источников из Admin Web
 
 - В Sources добавлен мастер `Test connection` → `Add source` для публичных HTTPS JSON feeds.

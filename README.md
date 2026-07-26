@@ -17,6 +17,8 @@ Production-сервис поиска недооценённых автомоби
 
 Активные адаптеры: DubiCars, CarSwitch, Cars24 UAE и OpenSooq UAE. Источник можно включить или выключить без удаления истории. В Admin Web можно добавить HTTPS JSON feed после обязательного test fetch; обычный новый marketplace требует отдельного адаптера. Ошибка источника не заменяется mock-данными.
 
+Следующее утверждаемое расширение — массовый сбор из чужих публичных Telegram-каналов и групп через отдельный MTProto Source Collector. Он включает автоматический Discovery, backfill sample, quality report и ручное включение источника. Это пока документация, а не заявленная работающая production-функция; подробности находятся в `docs/TELEGRAM_SOURCES_PLAN.md`. Telegram-цена считается `seller_stated` и не подменяет verified marketplace evidence.
+
 ## Как принимается решение
 
 1. Коллектор сохраняет raw snapshot до разбора.
