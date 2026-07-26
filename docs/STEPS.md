@@ -76,7 +76,11 @@
 - Живая RSS-проверка вернула релевантные материалы с издателем, датой и ссылкой; нерелевантные, старые, неполные и HTTP-записи отбрасываются.
 - Ruff, mypy и 56 тестов прошли; покрытие 52,6%.
 - Production smoke выявил Telegram `ChatMigrated`: группа `Avto_invest` стала supergroup с новым ID. Webhook теперь отвечает в `migrate_to_chat_id`, не возвращает 500 и не создаёт цикл повторов старого update.
-- Следующий шаг: immutable build, exact-digest deploy и Telegram production smoke.
+- Production smoke успешен: личный webhook ответил на приветствие и запрос новостей, migrated supergroup получила ответ по новому ID, Pro-канал принял контрольную публикацию с message ID 22.
+- Telegram webhook queue равна нулю; после исправления `ChatMigrated` у финальной ревизии новых ERROR нет.
+- Production API и десять Cloud Run Jobs выровнены по одному immutable digest; `/version` подтверждает commit, digest, schema и engine.
+- Для чтения произвольных сообщений в группе `Avto_invest` бот всё ещё должен быть назначен администратором группы либо Privacy Mode должен быть отключён владельцем через BotFather. Личный чат работает без этого действия.
+- Следующий шаг: наблюдать pilot и качество внешней новостной ленты; новые источники новостей подключать только с обязательными publisher/date/HTTPS provenance.
 
 ## Ограничения
 
