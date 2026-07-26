@@ -11,7 +11,7 @@
     ],
     "headers": [
       {
-        "source": "/{app.html,tma.js,styles.css,runtime-config.json}",
+        "source": "/{app.html,tma.js,admin.html,admin.js,styles.css,runtime-config.json}",
         "headers": [{"key": "Cache-Control", "value": "no-store, max-age=0"}]
       },
       {

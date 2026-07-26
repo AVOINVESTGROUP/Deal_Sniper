@@ -80,7 +80,7 @@ Telegram-бот и TMA используют один Application API. Подде
 
 Pro раскрывает фотографию, ссылку, verified market, максимальную цену покупки, расходы, прибыль, ROI и риски. Free не раскрывает полный финансовый audit trail. Реферальный параметр сохраняется только как атрибуция входа и не меняет цену или права доступа.
 
-Admin Web использует Firebase Authentication и admin claim/allowlist. Панель показывает состояние источников/pipeline, previews, контент и outbox reconciliation, но никогда не показывает секреты.
+Admin Web открывается как отдельная Telegram Web App из личного чата бота. Backend проверяет подписанный Telegram `initData`, выдаёт Firebase custom token с `admin=true` только ID из `TELEGRAM_ADMIN_USER_IDS` и затем разрешает административные API. Прямая вкладка браузера без Telegram-контекста предлагает открыть панель через бота. Google Sign-In не является способом административного входа. Панель показывает состояние источников/pipeline, previews, контент и outbox reconciliation, но никогда не показывает секреты.
 
 ## 8. Контент
 

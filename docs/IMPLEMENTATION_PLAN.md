@@ -86,3 +86,11 @@
 - outbox/provider IDs и source health доступны администратору.
 
 После пилота формируется `docs/RELEASE_EVIDENCE.md` с commit, digests, cloud revisions, migration IDs, counts, checksums, smoke/pilot результатами и оставшимся внешним blocker WhatsApp, если он существует.
+
+## Рабочий административный вход
+
+1. Владелец открывает личный чат бота и запускает `/start`.
+2. Для ID из `TELEGRAM_ADMIN_USER_IDS` бот показывает отдельную Web App кнопку **Open admin panel**.
+3. Панель передаёт Telegram `initData` в `/tma/auth` и получает Firebase custom token с claim `admin=true`.
+4. Только после успешного обмена загружаются `/admin/*` endpoints.
+5. Прямое открытие страницы без Telegram-контекста не использует Google Sign-In и показывает переход в бот.

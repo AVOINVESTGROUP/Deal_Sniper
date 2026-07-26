@@ -19,6 +19,7 @@ from telegram import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, TimedOut
@@ -124,6 +125,26 @@ def main_chat_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton("⭐ Upgrade to Pro")],
     ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
+
+
+def admin_tma_url() -> str:
+    """Строит отдельный URL панели оператора из публичного URL Mini App."""
+    base = settings.tma_url.split("?", maxsplit=1)[0]
+    if not base:
+        return ""
+    if base.endswith("/app.html"):
+        return f"{base.removesuffix('/app.html')}/admin.html"
+    return f"{base.rstrip('/')}/admin.html"
+
+
+def admin_chat_keyboard() -> InlineKeyboardMarkup | None:
+    """Возвращает защищённую Web App кнопку панели оператора."""
+    url = admin_tma_url()
+    if not url:
+        return None
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("Open admin panel", web_app=WebAppInfo(url=url))]]
+    )
 
 
 @app.middleware("http")
@@ -982,6 +1003,12 @@ async def telegram_webhook(
                 text=welcome_text(),
                 reply_markup=main_chat_keyboard(),
             )
+            if user_id in settings.telegram_admin_user_ids:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text="Administrator access",
+                    reply_markup=admin_chat_keyboard(),
+                )
         elif text == "/status":
             count = await asyncio.to_thread(service.repository.count_snapshots)
             health = await asyncio.to_thread(service.repository.source_health)

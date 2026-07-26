@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const config = await (await fetch("/__/firebase/init.json")).json();
 const auth = getAuth(initializeApp(config));
@@ -7,6 +7,10 @@ const runtime = await (await fetch("/runtime-config.json")).json();
 const api = window.DEAL_SNIPER_API || runtime.apiBase || "";
 let token = "";
 const error = document.querySelector("#error");
+const identity = document.querySelector("#identity");
+const login = document.querySelector("#login");
+const refreshButton = document.querySelector("#refresh");
+const telegram = window.Telegram?.WebApp;
 
 async function call(path, options = {}) {
   const response = await fetch(api + path, {
@@ -64,11 +68,35 @@ async function refresh() {
   } catch (caught) { error.textContent = caught.message; }
 }
 
-document.querySelector("#login").onclick = async () => {
-  const result = await signInWithPopup(auth, new GoogleAuthProvider());
-  token = await result.user.getIdToken();
-  document.querySelector("#identity").textContent = result.user.email;
-  document.querySelector("#refresh").disabled = false;
-  await refresh();
-};
-document.querySelector("#refresh").onclick = refresh;
+async function authenticateFromTelegram() {
+  telegram?.ready();
+  telegram?.expand();
+  if (!telegram?.initData) {
+    identity.textContent = "Open this panel from the administrator button in @DubaiDealSniper111_bot.";
+    login.hidden = false;
+    return;
+  }
+  login.hidden = true;
+  identity.textContent = "Verifying Telegram administrator…";
+  try {
+    const exchange = await fetch(api + "/tma/auth", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({init_data: telegram.initData}),
+    });
+    if (!exchange.ok) throw new Error(`${exchange.status}: ${await exchange.text()}`);
+    const custom = await exchange.json();
+    const credential = await signInWithCustomToken(auth, custom.firebase_custom_token);
+    token = await credential.user.getIdToken();
+    identity.textContent = `Administrator ${telegram.initDataUnsafe?.user?.first_name || "verified"}`;
+    refreshButton.disabled = false;
+    await refresh();
+  } catch (caught) {
+    identity.textContent = "Administrator access failed.";
+    error.textContent = caught.message;
+  }
+}
+
+login.onclick = () => { window.location.href = "https://t.me/DubaiDealSniper111_bot?start=admin"; };
+refreshButton.onclick = refresh;
+await authenticateFromTelegram();

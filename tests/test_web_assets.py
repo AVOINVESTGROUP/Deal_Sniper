@@ -32,3 +32,15 @@ def test_user_app_contains_pro_subscription_offer() -> None:
     assert "/tma/subscription" in script
     assert "Subscribe to Pro" in script
     assert "price_aed" in script
+
+
+def test_admin_uses_telegram_auth_instead_of_disabled_google_provider() -> None:
+    page = (WEB / "admin.html").read_text(encoding="utf-8")
+    script = (WEB / "admin.js").read_text(encoding="utf-8")
+
+    assert "telegram-web-app.js" in page
+    assert "Open admin panel in Telegram" in page
+    assert "signInWithCustomToken" in script
+    assert 'api + "/tma/auth"' in script
+    assert "signInWithPopup" not in script
+    assert "GoogleAuthProvider" not in script
