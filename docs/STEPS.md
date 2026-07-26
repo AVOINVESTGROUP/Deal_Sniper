@@ -93,6 +93,9 @@
 - Бот показывает постоянную кнопку `Upgrade to Pro`; успешным entitlement считается только фактический статус member/administrator/owner/restricted в Pro-канале.
 - Ruff, mypy и 58 тестов прошли; покрытие 52,1%.
 - Следующий шаг: immutable build, API Gateway config, Firebase Hosting и production payment-link smoke.
+- Production-монетизация опубликована: API и 10 Jobs используют один immutable digest, API Gateway активен на конфигурации `deal-sniper-config-pro-c2b38b7`, а Firebase Hosting содержит Pro-карточку и endpoint `/tma/subscription`.
+- Проверка Telegram подтвердила entitlement владельца Pro-канала; неизвестный участник обрабатывается fail-closed. Найден и исправлен ответ через direct messages канала с обязательным `direct_messages_topic_id`.
+- Финальный локальный gate после исправления: Ruff, mypy и 59 тестов прошли.
 
 ## Ограничения
 

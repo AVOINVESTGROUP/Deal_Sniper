@@ -82,6 +82,22 @@ news_client = DubaiAutoNewsClient(
     settings.auto_news_limit,
 )
 app = FastAPI(title="Dubai Deal Sniper", version="1.1.0")
+
+
+class TelegramReplyClient:
+    """Отправляет ответ в ту же тему личных сообщений канала, если она задана."""
+
+    def __init__(self, bot: Bot, message: dict[str, Any]) -> None:
+        self._bot = bot
+        topic = message.get("direct_messages_topic")
+        topic_id = topic.get("topic_id") if isinstance(topic, dict) else None
+        self._topic_id = topic_id if isinstance(topic_id, int) else None
+
+    async def send_message(self, **kwargs: Any) -> Any:
+        """Дополняет sendMessage идентификатором direct-messages topic."""
+        if self._topic_id is not None:
+            kwargs["direct_messages_topic_id"] = self._topic_id
+        return await self._bot.send_message(**kwargs)
 _market_cache: list[tuple[Any, Any]] = []
 _market_cache_at = 0.0
 _market_cache_lock = asyncio.Lock()
@@ -920,11 +936,13 @@ async def telegram_webhook(
         "/status",
     }
     if text in admin_commands and user_id not in settings.telegram_admin_user_ids:
-        async with Bot(settings.require_bot_token()) as bot:
+        async with Bot(settings.require_bot_token()) as telegram_bot:
+            bot = TelegramReplyClient(telegram_bot, message)
             await bot.send_message(chat_id=chat_id, text=tr("Недостаточно прав.", "Forbidden."))
         return {"ok": True}
 
-    async with Bot(settings.require_bot_token()) as bot:
+    async with Bot(settings.require_bot_token()) as telegram_bot:
+        bot = TelegramReplyClient(telegram_bot, message)
         if text == "/id":
             await bot.send_message(
                 chat_id=chat_id,

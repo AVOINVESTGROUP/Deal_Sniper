@@ -1,6 +1,9 @@
 from pathlib import Path
+from unittest.mock import AsyncMock
 
-from src.web import TmaSettingsRequest, app
+import pytest
+
+from src.web import TelegramReplyClient, TmaSettingsRequest, app
 
 
 def test_tma_exposes_button_driven_user_routes() -> None:
@@ -29,3 +32,20 @@ def test_tma_contains_primary_navigation_without_slash_commands() -> None:
     assert '"admin"' not in script
     assert "/source_on" not in script
     assert "/set_budget" not in script
+
+
+@pytest.mark.asyncio
+async def test_channel_direct_message_reply_keeps_topic() -> None:
+    bot = AsyncMock()
+    client = TelegramReplyClient(
+        bot,
+        {"direct_messages_topic": {"topic_id": 417}},
+    )
+
+    await client.send_message(chat_id=-1001, text="Hello")
+
+    bot.send_message.assert_awaited_once_with(
+        chat_id=-1001,
+        text="Hello",
+        direct_messages_topic_id=417,
+    )
