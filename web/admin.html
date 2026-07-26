@@ -3,21 +3,60 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Deal Sniper Admin</title>
+  <title>Deal Sniper Control Center</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
-<body><main>
-  <h1>Deal Sniper Administration</h1>
-  <div class="toolbar"><button id="login">Open admin panel in Telegram</button><button id="refresh" disabled>Refresh</button></div>
-  <p id="identity" class="muted">Checking administrator access…</p>
-  <section id="overview" class="grid"></section>
-  <section class="card"><h2>Sources and health</h2><div id="sources"></div></section>
-  <section class="card"><h2>Cloud runtime</h2><pre id="cloud">—</pre></section>
-  <section class="card"><h2>Operations</h2><pre id="operations">—</pre></section>
-  <section class="card"><h2>Free / Pro preview</h2><h3>Free</h3><pre id="free">—</pre><h3>Pro</h3><pre id="pro">—</pre></section>
-  <section class="card"><h2>Failed or unknown delivery reconciliation</h2><div id="unknown"></div></section>
-  <section class="card"><h2>Market Pulse</h2><pre id="pulse">—</pre></section>
-  <section class="card"><h2>Security</h2><p>Secret values are never displayed or changed here. Every mutation is authenticated and audited.</p></section>
-  <p id="error" class="danger"></p>
-</main><script src="https://telegram.org/js/telegram-web-app.js"></script><script type="module" src="/admin.js?v=telegram-admin-1"></script></body>
+<body class="admin-body">
+  <div class="admin-shell">
+    <aside class="admin-sidebar">
+      <a class="admin-brand" href="/admin.html"><span>DS</span><strong>Deal Sniper</strong></a>
+      <nav class="admin-nav" aria-label="Administration">
+        <button class="active" data-view="dashboard">Dashboard</button>
+        <button data-view="sources">Sources</button>
+        <button data-view="runtime">Cloud runtime</button>
+        <button data-view="delivery">Publications</button>
+        <button data-view="business">Subscriptions</button>
+      </nav>
+      <div class="admin-account">
+        <span id="identity">Not signed in</span>
+        <button id="logout" class="text-button" hidden>Sign out</button>
+      </div>
+    </aside>
+    <main class="admin-main">
+      <header class="admin-header">
+        <div><p class="eyebrow">OPERATIONS</p><h1 id="page-title">Dashboard</h1></div>
+        <div class="toolbar"><span id="updated" class="muted"></span><button id="refresh" class="secondary" disabled>Refresh</button><button id="login">Sign in with Google</button></div>
+      </header>
+      <div id="auth-notice" class="notice"><strong>Administrator access required</strong><span>Use the Google account included in the administrator allowlist.</span></div>
+      <p id="error" class="notice notice-error" hidden></p>
+      <section class="admin-view active" data-panel="dashboard">
+        <div id="overview" class="metric-grid"></div>
+        <div class="admin-grid admin-grid-wide">
+          <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">DATA PIPELINE</p><h2>Source health</h2></div><span id="source-summary" class="status-pill">—</span></div><div id="source-brief"></div></section>
+          <section class="admin-card"><p class="eyebrow">CONTENT</p><h2>Market pulse</h2><div id="pulse" class="content-preview">No update loaded.</div></section>
+        </div>
+        <div class="admin-grid">
+          <section class="admin-card"><p class="eyebrow">DELIVERY</p><h2>Queue status</h2><div id="queue-brief"></div></section>
+          <section class="admin-card"><p class="eyebrow">BUSINESS</p><h2>Pro subscription</h2><div id="subscription-brief"></div></section>
+        </div>
+      </section>
+      <section class="admin-view" data-panel="sources">
+        <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">COLLECTORS</p><h2>Marketplace sources</h2><p class="muted">Enable, pause or run an installed source. Adding a new marketplace requires a tested adapter deployment.</p></div></div><div id="sources" class="data-list"></div></section>
+      </section>
+      <section class="admin-view" data-panel="runtime">
+        <div id="cloud" class="admin-grid"></div>
+        <section class="admin-card"><p class="eyebrow">PROCESSING</p><h2>Database operations</h2><div id="operations" class="key-value-grid"></div></section>
+      </section>
+      <section class="admin-view" data-panel="delivery">
+        <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">RECONCILIATION</p><h2>Delivery exceptions</h2><p class="muted">Only failed or ambiguous messages require action.</p></div></div><div id="unknown" class="data-list"></div></section>
+        <div class="admin-grid"><section class="admin-card"><p class="eyebrow">FREE CHANNEL</p><h2>Latest preview</h2><div id="free" class="content-preview">No current deal.</div></section><section class="admin-card"><p class="eyebrow">PRO CHANNEL</p><h2>Latest preview</h2><div id="pro" class="content-preview">No current deal.</div></section></div>
+      </section>
+      <section class="admin-view" data-panel="business">
+        <div id="business-metrics" class="metric-grid"></div>
+        <section class="admin-card"><p class="eyebrow">PRICING</p><h2>Current commercial settings</h2><div id="financial" class="key-value-grid"></div></section>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="/admin.js?v=browser-admin-2"></script>
+</body>
 </html>

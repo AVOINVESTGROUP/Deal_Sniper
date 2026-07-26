@@ -113,3 +113,11 @@
 - Terraform apply до import существующих ресурсов запрещён.
 - WhatsApp включать только после внешних Meta credentials/template approval/opt-in.
 - Любое изменение build context после staging rehearsal требует нового RC и повторного rehearsal.
+## 26 июля 2026 — отдельная браузерная админ-панель
+
+- Документация утверждает отдельный desktop-first Admin Web; Telegram больше не является оболочкой административного интерфейса.
+- В Firebase Authentication включён Google provider, доступ backend ограничивается серверным `ADMIN_EMAILS`.
+- Реализованы разделы Dashboard, Sources, Cloud runtime, Publications и Subscriptions без вывода внутренних JSON-дампов и секретов.
+- Для установленных источников доступны понятные состояния, включение/пауза и аудитируемый ручной запуск Cloud Run Job.
+- Ошибка источника имеет приоритет над историческим `success=true`: в панели такой запуск всегда обозначается как требующий внимания.
+- Локальный gate: Ruff и 62 теста прошли; JavaScript-модуль прошёл синтаксическую проверку Node.js.

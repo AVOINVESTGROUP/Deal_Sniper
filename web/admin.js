@@ -1,102 +1,109 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import {initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+import {getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const config = await (await fetch("/__/firebase/init.json")).json();
+const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const auth = getAuth(initializeApp(config));
-const runtime = await (await fetch("/runtime-config.json")).json();
 const api = window.DEAL_SNIPER_API || runtime.apiBase || "";
+const provider = new GoogleAuthProvider();
+provider.setCustomParameters({prompt: "select_account"});
 let token = "";
-const error = document.querySelector("#error");
-const identity = document.querySelector("#identity");
-const login = document.querySelector("#login");
-const refreshButton = document.querySelector("#refresh");
-const telegram = window.Telegram?.WebApp;
+const byId = (id) => document.getElementById(id);
+const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
+const number = (value) => new Intl.NumberFormat("en-AE").format(Number(value || 0));
+const money = (value) => `${number(value)} AED`;
 
 async function call(path, options = {}) {
-  const response = await fetch(api + path, {
-    ...options,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers },
-  });
-  if (!response.ok) throw new Error(`${response.status}: ${await response.text()}`);
+  const response = await fetch(api + path, {...options, headers: {"Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers}});
+  if (!response.ok) {
+    let message = `Request failed (${response.status})`;
+    try { message = (await response.json()).detail || message; } catch { /* response was not JSON */ }
+    throw new Error(message);
+  }
   return response.json();
 }
 
-async function reconcile(deliveryId, action) {
-  await call(`/admin/outbox/${deliveryId}/reconcile`, {
-    method: "POST",
-    body: JSON.stringify({ action }),
-  });
-  await refresh();
+function statusPill(label, good = true) { return `<span class="status-pill ${good ? "status-good" : "status-bad"}">${safe(label)}</span>`; }
+function metric(label, value, hint = "") { return `<article class="metric-card"><span>${safe(label)}</span><strong>${safe(value)}</strong><small>${safe(hint)}</small></article>`; }
+function sourceState(run, enabled) {
+  if (!enabled) return {label: "Paused", good: false};
+  if (!run || Object.keys(run).length === 0) return {label: "Not run", good: false};
+  if (run.success === true && !run.error) return {label: "Healthy", good: true};
+  return {label: "Attention", good: false};
+}
+function shortName(value) { const text = String(value || ""); return text.split("/").pop() || text || "Unknown"; }
+function keyValues(values) { return Object.entries(values || {}).map(([key, value]) => `<div><span>${safe(key.replaceAll("_", " "))}</span><strong>${safe(typeof value === "object" ? JSON.stringify(value) : value)}</strong></div>`).join(""); }
+
+function renderSources(data) {
+  const entries = Object.entries(data.source_switches || {});
+  let healthy = 0;
+  byId("sources").innerHTML = entries.map(([name, enabled]) => {
+    const run = data.sources?.[name] || {};
+    const state = sourceState(run, enabled);
+    if (state.good) healthy += 1;
+    const stats = run.error ? `<span class="source-error" title="${safe(run.error)}">${safe(String(run.error).slice(0, 120))}</span>` : `<span>${number(run.fetched)} fetched</span><span>${number(run.new)} new</span><span>${number(run.changed)} changed</span><span>${safe(run.duration_seconds || "—")} sec</span>`;
+    return `<article class="data-row"><div class="data-primary"><div><strong>${safe(name)}</strong>${statusPill(state.label, state.good)}</div><div class="row-meta">${stats}</div></div><div class="row-actions"><button class="secondary run-source" data-source="${safe(name)}" ${enabled ? "" : "disabled"}>Run now</button><button class="toggle-source ${enabled ? "danger-button" : ""}" data-source="${safe(name)}" data-enabled="${enabled}">${enabled ? "Pause" : "Enable"}</button></div></article>`;
+  }).join("") || '<div class="empty-state">No source adapters installed.</div>';
+  byId("source-brief").innerHTML = entries.map(([name, enabled]) => { const state = sourceState(data.sources?.[name], enabled); return `<div class="brief-row"><strong>${safe(name)}</strong>${statusPill(state.label, state.good)}</div>`; }).join("");
+  byId("source-summary").className = `status-pill ${healthy === entries.length && entries.length ? "status-good" : "status-bad"}`;
+  byId("source-summary").textContent = `${healthy}/${entries.length} healthy`;
+  document.querySelectorAll(".toggle-source").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try { await call(`/admin/sources/${button.dataset.source}`, {method: "POST", body: JSON.stringify({enabled: button.dataset.enabled !== "true"})}); await refresh(); }
+    catch (error) { showError(error); button.disabled = false; }
+  }));
+  document.querySelectorAll(".run-source").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true; button.textContent = "Starting…";
+    try { await call(`/admin/sources/${button.dataset.source}/run`, {method: "POST"}); button.textContent = "Started"; window.setTimeout(refresh, 5000); }
+    catch (error) { showError(error); button.disabled = false; button.textContent = "Run now"; }
+  }));
 }
 
+function renderCloud(cloud = {}) {
+  const groups = [["Scheduler", cloud.scheduler], ["Task queues", cloud.queues], ["Cloud Run", cloud.services]];
+  byId("cloud").innerHTML = groups.map(([label, items]) => {
+    const values = Array.isArray(items) ? items : [];
+    const unavailable = values.some((item) => item.state === "UNAVAILABLE");
+    const body = unavailable ? '<div class="empty-state error-state">Status unavailable. Check runtime viewer permissions.</div>' : values.map((item) => `<div class="brief-row"><strong>${safe(shortName(item.name))}</strong>${statusPill(item.state || (item.latestReadyRevision ? "Ready" : "Active"), true)}</div>`).join("") || '<div class="empty-state">No resources found.</div>';
+    return `<section class="admin-card"><div class="card-heading"><div><p class="eyebrow">GOOGLE CLOUD</p><h2>${safe(label)}</h2></div>${statusPill(unavailable ? "Unavailable" : "Connected", !unavailable)}</div>${body}</section>`;
+  }).join("");
+}
+
+function render(data, pulse, preview, exceptions) {
+  const sourceEntries = Object.entries(data.source_switches || {});
+  const sourceHealthy = sourceEntries.filter(([name, enabled]) => sourceState(data.sources?.[name], enabled).good).length;
+  byId("overview").innerHTML = metric("Listings stored", number(data.snapshot_count), "immutable snapshots") + metric("Sources healthy", `${sourceHealthy}/${sourceEntries.length}`, "installed adapters") + metric("Delivery", data.delivery_enabled ? "Running" : "Paused", "Telegram publishing") + metric("Schema", `v${data.schema_version}`, "production data");
+  renderSources(data); renderCloud(data.cloud);
+  byId("operations").innerHTML = keyValues(data.operations);
+  byId("pulse").textContent = pulse.text || pulse.summary || "No market update is currently available.";
+  byId("free").textContent = preview.free || "No current deal."; byId("pro").textContent = preview.pro || "No current deal.";
+  byId("queue-brief").innerHTML = keyValues({delivery: data.delivery_enabled ? "running" : "paused", exceptions: exceptions.length, whatsapp: data.whatsapp_status});
+  byId("subscription-brief").innerHTML = keyValues({price: money(data.subscription?.price_aed), active: data.subscription?.active || 0, total: data.subscription?.total || 0});
+  byId("business-metrics").innerHTML = metric("Monthly price", money(data.subscription?.price_aed), "per Pro subscriber") + metric("Active Pro", number(data.subscription?.active), "Telegram subscriptions") + metric("Referrals", number(data.referrals?.total), "recorded invitations") + metric("WhatsApp", data.whatsapp_status, "channel relay");
+  byId("financial").innerHTML = keyValues({...data.financial_config, pro_price_aed: data.subscription?.price_aed});
+  byId("unknown").innerHTML = exceptions.map((item) => `<article class="data-row"><div class="data-primary"><strong>${safe(item.delivery_id)}</strong><span class="source-error">${safe(item.last_error || "Ambiguous delivery result")}</span></div><div class="row-actions">${["mark_sent", "mark_failed", "retry_once"].map((action) => `<button class="secondary reconcile" data-id="${safe(item.delivery_id)}" data-action="${action}">${safe(action.replaceAll("_", " "))}</button>`).join("")}</div></article>`).join("") || '<div class="empty-state">No delivery exceptions. Everything is reconciled.</div>';
+  document.querySelectorAll(".reconcile").forEach((button) => button.addEventListener("click", () => reconcile(button.dataset.id, button.dataset.action)));
+}
+
+function showError(caught) { byId("error").hidden = false; byId("error").textContent = caught instanceof Error ? caught.message : String(caught); }
+async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/${encodeURIComponent(deliveryId)}/reconcile`, {method: "POST", body: JSON.stringify({action})}); await refresh(); } catch (error) { showError(error); } }
 async function refresh() {
-  error.textContent = "";
+  byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const [data, pulse, preview, unknown, failed] = await Promise.all([
-      call("/admin/overview"), call("/content/market-pulse"),
-      call("/admin/preview"), call("/admin/outbox?state=unknown"),
-      call("/admin/outbox?state=failed"),
-    ]);
-    document.querySelector("#overview").innerHTML =
-      `<div class=card><b>Snapshots</b><p>${data.snapshot_count}</p></div>` +
-      `<div class=card><b>Delivery</b><p>${data.delivery_enabled}</p></div>` +
-      `<div class=card><b>WhatsApp</b><p>${data.whatsapp_status}</p></div>` +
-      `<div class=card><b>Schema</b><p>${data.schema_version}</p></div>`;
-    const root = document.querySelector("#sources"); root.innerHTML = "";
-    for (const [name, enabled] of Object.entries(data.source_switches)) {
-      const row = document.createElement("p");
-      const health = data.sources[name] || {};
-      row.textContent = `${name}: ${enabled ? "enabled" : "disabled"}; ${JSON.stringify(health)} `;
-      const button = document.createElement("button"); button.textContent = enabled ? "Disable" : "Enable";
-      button.onclick = async () => { await call(`/admin/sources/${name}`, { method: "POST", body: JSON.stringify({ enabled: !enabled }) }); await refresh(); };
-      row.append(button); root.append(row);
-    }
-    document.querySelector("#cloud").textContent = JSON.stringify(data.cloud, null, 2);
-    document.querySelector("#operations").textContent = JSON.stringify({ operations: data.operations, financial_config: data.financial_config, subscription: data.subscription, referrals: data.referrals }, null, 2);
-    document.querySelector("#pulse").textContent = JSON.stringify(pulse, null, 2);
-    document.querySelector("#free").textContent = preview.free || "No current deal";
-    document.querySelector("#pro").textContent = preview.pro || "No current deal";
-    const unknownRoot = document.querySelector("#unknown"); unknownRoot.innerHTML = "";
-    for (const item of [...unknown.items, ...failed.items]) {
-      const row = document.createElement("p"); row.textContent = `${item.delivery_id} · ${item.last_error || "ambiguous result"} `;
-      for (const action of ["mark_sent", "mark_failed", "retry_once"]) {
-        const button = document.createElement("button"); button.textContent = action;
-        button.onclick = () => reconcile(item.delivery_id, action); row.append(button);
-      }
-      unknownRoot.append(row);
-    }
-  } catch (caught) { error.textContent = caught.message; }
+    const [data, pulse, preview, unknown, failed] = await Promise.all([call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed")]);
+    render(data, pulse, preview, [...(unknown.items || []), ...(failed.items || [])]);
+    byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
+  } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }
 }
 
-async function authenticateFromTelegram() {
-  telegram?.ready();
-  telegram?.expand();
-  if (!telegram?.initData) {
-    identity.textContent = "Open this panel from the administrator button in @DubaiDealSniper111_bot.";
-    login.hidden = false;
-    return;
-  }
-  login.hidden = true;
-  identity.textContent = "Verifying Telegram administrator…";
-  try {
-    const exchange = await fetch(api + "/tma/auth", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({init_data: telegram.initData}),
-    });
-    if (!exchange.ok) throw new Error(`${exchange.status}: ${await exchange.text()}`);
-    const custom = await exchange.json();
-    const credential = await signInWithCustomToken(auth, custom.firebase_custom_token);
-    token = await credential.user.getIdToken();
-    identity.textContent = `Administrator ${telegram.initDataUnsafe?.user?.first_name || "verified"}`;
-    refreshButton.disabled = false;
-    await refresh();
-  } catch (caught) {
-    identity.textContent = "Administrator access failed.";
-    error.textContent = caught.message;
-  }
-}
-
-login.onclick = () => { window.location.href = "https://t.me/DubaiDealSniper111_bot?start=admin"; };
-refreshButton.onclick = refresh;
-await authenticateFromTelegram();
+document.querySelectorAll(".admin-nav button").forEach((button) => button.addEventListener("click", () => {
+  document.querySelectorAll(".admin-nav button").forEach((item) => item.classList.toggle("active", item === button));
+  document.querySelectorAll(".admin-view").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === button.dataset.view));
+  byId("page-title").textContent = button.textContent;
+}));
+byId("login").addEventListener("click", async () => { byId("error").hidden = true; try { await signInWithPopup(auth, provider); } catch (error) { showError(error); } });
+byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
+onAuthStateChanged(auth, async (user) => {
+  if (!user) { token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false; return; }
+  token = await user.getIdToken(); byId("identity").textContent = user.email || user.displayName || "Administrator"; byId("login").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
+});

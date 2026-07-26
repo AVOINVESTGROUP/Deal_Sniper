@@ -87,10 +87,13 @@
 
 После пилота формируется `docs/RELEASE_EVIDENCE.md` с commit, digests, cloud revisions, migration IDs, counts, checksums, smoke/pilot результатами и оставшимся внешним blocker WhatsApp, если он существует.
 
-## Рабочий административный вход
+## Рабочая браузерная Admin Panel
 
-1. Владелец открывает личный чат бота и запускает `/start`.
-2. Для ID из `TELEGRAM_ADMIN_USER_IDS` бот показывает отдельную Web App кнопку **Open admin panel**.
-3. Панель передаёт Telegram `initData` в `/tma/auth` и получает Firebase custom token с claim `admin=true`.
-4. Только после успешного обмена загружаются `/admin/*` endpoints.
-5. Прямое открытие страницы без Telegram-контекста не использует Google Sign-In и показывает переход в бот.
+1. `/admin.html` открывается в обычном desktop-браузере без Telegram-контекста.
+2. Firebase Google Sign-In включён; backend принимает только подтверждённый Firebase ID token.
+3. Административная роль определяется allowlist `ADMIN_EMAILS`, а не Telegram ID.
+4. Интерфейс содержит разделы Dashboard, Sources, Runs, Listings, Decisions, Publications, Users & subscriptions, Revenue & referrals, Errors и Settings.
+5. Технические JSON/provenance/stack traces скрыты за подробностями; основной экран показывает человекочитаемые статусы и действия.
+6. Collector получает минимальный доступ чтения/записи raw bucket; API получает read-only роли для Scheduler, Tasks и Run.
+7. Ошибка обязательного этапа делает source run неуспешным; противоречие `success=true` вместе с `error` запрещено тестом.
+8. Telegram используется для клиентского продукта и кратких owner alerts, но не как обязательная оболочка панели.

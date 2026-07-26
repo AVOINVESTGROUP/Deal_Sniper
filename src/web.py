@@ -472,9 +472,19 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
         cloud_runtime_status, settings.google_cloud_project, settings.google_cloud_region
     )
     subscription_metrics = await telegram_subscription_metrics(settings)
+    source_health = await asyncio.to_thread(service.repository.source_health)
+    normalized_health: dict[str, dict[str, Any]] = {}
+    for source_name, payload in source_health.items():
+        run = dict(payload)
+        if run.get("error"):
+            # Старые записи могли содержать success=true вместе с ошибкой GCS.
+            # Для оператора ошибка всегда имеет приоритет над optimistic-флагом.
+            run["success"] = False
+        run["status"] = "healthy" if run.get("success") is True else "attention"
+        normalized_health[source_name] = run
     return {
         "snapshot_count": await asyncio.to_thread(service.repository.count_snapshots),
-        "sources": await asyncio.to_thread(service.repository.source_health),
+        "sources": normalized_health,
         "source_switches": service.source_statuses(),
         "delivery_enabled": settings.delivery_enabled,
         "whatsapp_status": "ready"
@@ -522,6 +532,41 @@ async def admin_source(
             "operation_id": stable_operation_id,
             "source": source_name,
             "enabled": request.enabled,
+            "actor": principal.subject,
+        },
+    )
+    return {"ok": True, "operation_id": stable_operation_id}
+
+
+@app.post("/admin/sources/{source_name}/run")
+async def admin_run_source(
+    source_name: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str | bool]:
+    """Запускает один установленный и включённый collector из браузерной админки."""
+    principal = firebase_principal(authorization, require_admin=True)
+    statuses = service.source_statuses()
+    if source_name not in statuses:
+        raise HTTPException(status_code=404, detail=f"Unknown source: {source_name}")
+    if not statuses[source_name]:
+        raise HTTPException(status_code=409, detail=f"Source is paused: {source_name}")
+    stable_operation_id = operation_id(
+        "source-run",
+        {"source": source_name, "actor": principal.subject},
+    )
+    try:
+        await launch_scan(source_name)
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Не удалось запустить collector %s", source_name)
+        raise HTTPException(status_code=502, detail="Collector launch failed") from error
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_source_run",
+        {
+            "operation_id": stable_operation_id,
+            "source": source_name,
             "actor": principal.subject,
         },
     )
