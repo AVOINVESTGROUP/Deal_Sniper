@@ -22,3 +22,13 @@ def test_user_cards_render_listing_photos() -> None:
     assert 'document.createElement("img")' in script
     assert "listing.image_urls?.[0]" in script
     assert ".deal-image" in styles
+
+
+def test_user_app_contains_pro_subscription_offer() -> None:
+    app = (WEB / "app.html").read_text(encoding="utf-8")
+    script = (WEB / "tma.js").read_text(encoding="utf-8")
+
+    assert "subscription-card" in app
+    assert "/tma/subscription" in script
+    assert "Subscribe to Pro" in script
+    assert "price_aed" in script

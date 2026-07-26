@@ -82,6 +82,18 @@
 - Для чтения произвольных сообщений в группе `Avto_invest` бот всё ещё должен быть назначен администратором группы либо Privacy Mode должен быть отключён владельцем через BotFather. Личный чат работает без этого действия.
 - Следующий шаг: наблюдать pilot и качество внешней новостной ленты; новые источники новостей подключать только с обязательными publisher/date/HTTPS provenance.
 
+## Монетизация Pro 100 AED
+
+- Зафиксирован один тариф: Pro — 100 AED за 30 дней; Free остаётся бесплатным.
+- Для цифрового доступа внутри Telegram выбран нативный recurring-механизм Telegram Stars и приватная платная ссылка Pro-канала.
+- Telegram является источником истины по членству, продлению и окончанию доступа; backend не имитирует успешную оплату.
+- Требуется реализовать: конфигурацию цены/ссылки, Upgrade CTA в боте и TMA, endpoint статуса членства, ограничение полного feed для Free, реферальную атрибуцию и production smoke.
+- Создана нативная Telegram Stars recurring-ссылка Pro-канала: 1500 Stars каждые 30 дней; коммерческая цена интерфейса — 100 AED.
+- Реализованы `/tma/subscription`, membership entitlement, закрытие полного deal feed для Free, Upgrade CTA, referral link/атрибуция и агрегаты subscription/referrals в Admin.
+- Бот показывает постоянную кнопку `Upgrade to Pro`; успешным entitlement считается только фактический статус member/administrator/owner/restricted в Pro-канале.
+- Ruff, mypy и 58 тестов прошли; покрытие 52,1%.
+- Следующий шаг: immutable build, API Gateway config, Firebase Hosting и production payment-link smoke.
+
 ## Ограничения
 
 - Существующий draft PR #1 не сливать и не использовать как production baseline.

@@ -832,6 +832,17 @@ class FirestoreRepository:
             settings.model_dump(mode="json")
         )
 
+    def referral_summary(self) -> dict[str, int]:
+        """Считает атрибуцию referral без раскрытия профилей пользователей."""
+        summary: dict[str, int] = {}
+        for document in self.client.collection("user_settings").stream():
+            data = document.to_dict() or {}
+            referrer = data.get("referred_by_user_id")
+            if isinstance(referrer, int):
+                key = str(referrer)
+                summary[key] = summary.get(key, 0) + 1
+        return summary
+
     def save_user_action(self, action: UserAction) -> None:
         document_id = _stable_id(str(action.user_id), action.listing_id)
         self.client.collection("user_actions").document(document_id).set(

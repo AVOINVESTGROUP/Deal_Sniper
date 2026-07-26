@@ -101,6 +101,8 @@ class Repository(Protocol):
 
     def save_user_settings(self, settings: UserSettings) -> None: ...
 
+    def referral_summary(self) -> dict[str, int]: ...
+
     def save_user_action(self, action: UserAction) -> None: ...
 
     def user_watchlist(self, user_id: int) -> list[str]: ...
@@ -1184,6 +1186,18 @@ class LocalRepository:
                 """,
                 (settings.user_id, settings.model_dump_json()),
             )
+
+    def referral_summary(self) -> dict[str, int]:
+        """Считает атрибутированных пользователей по referrer ID."""
+        with self._connect() as connection:
+            rows = connection.execute("SELECT payload_json FROM user_settings").fetchall()
+        summary: dict[str, int] = {}
+        for row in rows:
+            settings = UserSettings.model_validate_json(row["payload_json"])
+            if settings.referred_by_user_id is not None:
+                key = str(settings.referred_by_user_id)
+                summary[key] = summary.get(key, 0) + 1
+        return summary
 
     def save_user_action(self, action: UserAction) -> None:
         with self._connect() as connection:

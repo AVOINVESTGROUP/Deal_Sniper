@@ -16,6 +16,7 @@ Cloud Scheduler -> Cloud Run collector Jobs -> Cloud Storage raw
 
 Telegram webhook -> API Gateway -> Cloud Run API -> Firestore
                                       -> external automotive news RSS (read-only)
+                                      -> Telegram Stars subscription / Pro channel membership
 Firebase Hosting TMA/Admin -> Firebase Auth -> Cloud Run API
 Secret Manager -> runtime service accounts
 Cloud Logging/Monitoring/Billing -> alerts and budget
@@ -41,6 +42,8 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 Immutable сущности создаются по каноническому ID; operational freshness и leases обновляются отдельно. Старый current pointer не удаляет историю.
 
 Новостная лента не входит в verified market и не может изменять решение. Клиент принимает только HTTPS, ограничивает возраст и число материалов, удаляет дубли и возвращает пользователю provenance. Ошибка внешней ленты изолирована от collection/processing/delivery.
+
+Pro entitlement определяется нативным членством пользователя в приватном платном Telegram-канале. Цена продукта хранится как `100 AED/30 дней`, платёжная цена — отдельным целым числом Stars. Приложение не хранит банковские данные и не создаёт собственный успешный платёж: Telegram является источником истины по подписке и членству.
 
 ## Безопасный релиз
 

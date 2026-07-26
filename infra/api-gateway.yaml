@@ -23,6 +23,9 @@ paths:
   /tma/feed:
     get: {operationId: tmaFeed, responses: {"200": {description: Feed}}}
     options: {operationId: tmaFeedOptions, responses: {"200": {description: CORS}}}
+  /tma/subscription:
+    get: {operationId: tmaSubscription, responses: {"200": {description: Subscription}}}
+    options: {operationId: tmaSubscriptionOptions, responses: {"200": {description: CORS}}}
   /tma/outcomes:
     get: {operationId: tmaOutcomes, responses: {"200": {description: Outcomes}}}
     post: {operationId: tmaSaveOutcome, responses: {"200": {description: Saved}}}

@@ -48,7 +48,7 @@ async function refresh() {
       row.append(button); root.append(row);
     }
     document.querySelector("#cloud").textContent = JSON.stringify(data.cloud, null, 2);
-    document.querySelector("#operations").textContent = JSON.stringify({ operations: data.operations, financial_config: data.financial_config }, null, 2);
+    document.querySelector("#operations").textContent = JSON.stringify({ operations: data.operations, financial_config: data.financial_config, subscription: data.subscription, referrals: data.referrals }, null, 2);
     document.querySelector("#pulse").textContent = JSON.stringify(pulse, null, 2);
     document.querySelector("#free").textContent = preview.free || "No current deal";
     document.querySelector("#pro").textContent = preview.pro || "No current deal";

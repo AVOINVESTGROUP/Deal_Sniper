@@ -28,6 +28,7 @@
 | 12 | Admin Web и Firebase Auth | реализовано, тесты | ожидает Hosting/Auth |
 | 13 | TMA feed, filters, favorites, outcomes | реализовано | ожидает Hosting/BotFather |
 | 14 | Естественный Telegram-диалог и новости авторынка Дубая | production, 57 тестов | наблюдение pilot |
+| 15 | Pro 100 AED: Telegram Stars, платная ссылка, entitlement и CTA | реализовано, 58 тестов | production smoke |
 | 14 | Market Pulse и engagement content | реализовано, тесты | включается после pilot |
 | 15 | WhatsApp official opt-in adapter | реализовано fail-closed | ожидает внешние credentials |
 | 16 | Schema migration tool/ledger/checkpoints/checksums | реализовано | ожидает staging rehearsal |

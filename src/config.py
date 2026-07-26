@@ -39,6 +39,7 @@ class Settings:
     telegram_admin_user_ids: frozenset[int]
     telegram_channel_id: str | None
     telegram_pro_channel_id: str | None
+    telegram_pro_subscription_url: str
     telegram_webhook_secret: str
     google_cloud_project: str
     google_cloud_region: str
@@ -57,6 +58,8 @@ class Settings:
     whatsapp_phone_number_id: str
     whatsapp_api_version: str
     tma_url: str
+    pro_price_aed: int
+    pro_price_stars: int
     auto_news_rss_url: str
     auto_news_max_age_days: int
     auto_news_limit: int
@@ -107,6 +110,7 @@ class Settings:
             telegram_admin_user_ids=_integer_set(os.getenv("TELEGRAM_ADMIN_USER_IDS", "")),
             telegram_channel_id=os.getenv("TELEGRAM_CHANNEL_ID") or None,
             telegram_pro_channel_id=os.getenv("TELEGRAM_PRO_CHANNEL_ID") or None,
+            telegram_pro_subscription_url=os.getenv("TELEGRAM_PRO_SUBSCRIPTION_URL", "").strip(),
             telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip(),
             google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
             google_cloud_region=os.getenv("GOOGLE_CLOUD_REGION", "me-central1").strip(),
@@ -129,6 +133,8 @@ class Settings:
             whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip(),
             whatsapp_api_version=os.getenv("WHATSAPP_API_VERSION", "v23.0").strip(),
             tma_url=os.getenv("TMA_URL", "").strip(),
+            pro_price_aed=max(1, int(os.getenv("PRO_PRICE_AED", "100"))),
+            pro_price_stars=max(1, int(os.getenv("PRO_PRICE_STARS", "1500"))),
             auto_news_rss_url=os.getenv(
                 "AUTO_NEWS_RSS_URL",
                 "https://news.google.com/rss/search?q=%28Dubai%20OR%20UAE%29%20%28used%20cars%20OR%20automotive%20market%29&hl=en-AE&gl=AE&ceid=AE%3Aen",

@@ -306,6 +306,7 @@ class UserSettings(BaseModel):
     specifications: list[str] = Field(default_factory=list)
     body_types: list[str] = Field(default_factory=list)
     tariff: str = "free"
+    referred_by_user_id: int | None = None
 
 
 class UserAction(BaseModel):

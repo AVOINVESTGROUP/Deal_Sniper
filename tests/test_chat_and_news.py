@@ -11,6 +11,7 @@ def test_chat_intents_are_selected_before_car_search() -> None:
     assert classify_chat_intent("Latest Dubai auto news") is ChatIntent.NEWS
     assert classify_chat_intent("Show market overview") is ChatIntent.MARKET
     assert classify_chat_intent("Find a car") is ChatIntent.FIND_CAR
+    assert classify_chat_intent("Upgrade to Pro") is ChatIntent.UPGRADE
 
 
 def test_migrated_supergroup_id_takes_priority() -> None:

@@ -15,6 +15,8 @@ from httpx import TimeoutException, TransportError
 from pydantic import BaseModel, Field
 from telegram import (
     Bot,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
 )
@@ -23,6 +25,7 @@ from telegram.error import NetworkError, TimedOut
 
 from src.admin_cloud import cloud_runtime_status
 from src.auth import Principal, verify_firebase_bearer, verify_telegram_init_data
+from src.billing import telegram_subscription_metrics, telegram_subscription_status
 from src.bot import (
     format_card,
     format_public_teaser,
@@ -99,6 +102,7 @@ def main_chat_keyboard() -> ReplyKeyboardMarkup:
     rows: list[list[KeyboardButton]] = [
         [KeyboardButton("🚗 Find a car"), KeyboardButton("📰 Dubai auto news")],
         [KeyboardButton("📊 Market overview"), KeyboardButton("ℹ️ How it works")],
+        [KeyboardButton("⭐ Upgrade to Pro")],
     ]
     return ReplyKeyboardMarkup(rows, resize_keyboard=True, is_persistent=True)
 
@@ -304,6 +308,34 @@ def default_user_settings(user_id: int, language_code: str = "en") -> UserSettin
     )
 
 
+def pro_subscription_text(active: bool) -> str:
+    """Формирует прозрачное предложение единственного платного тарифа."""
+    status = "Your Pro access is active." if active else "Your current plan is Free."
+    return (
+        f"<b>Dubai Deal Sniper Pro — {settings.pro_price_aed} AED / 30 days</b>\n\n"
+        f"{status}\n\n"
+        "Pro includes full verified deal cards: listing photo and link, market range, "
+        "maximum purchase price, costs, expected profit, ROI and risks.\n\n"
+        f"Telegram payment: {settings.pro_price_stars:,} Stars every 30 days."
+    )
+
+
+def pro_subscription_keyboard() -> InlineKeyboardMarkup | None:
+    """Возвращает нативную Telegram Stars ссылку без раскрытия в исходном коде."""
+    if not settings.telegram_pro_subscription_url:
+        return None
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Subscribe to Pro",
+                    url=settings.telegram_pro_subscription_url,
+                )
+            ]
+        ]
+    )
+
+
 def format_user_settings(value: UserSettings, language: str | None = None) -> str:
     language = telegram_language(language or value.language_code)
     budget = (
@@ -399,6 +431,7 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
     cloud = await asyncio.to_thread(
         cloud_runtime_status, settings.google_cloud_project, settings.google_cloud_region
     )
+    subscription_metrics = await telegram_subscription_metrics(settings)
     return {
         "snapshot_count": await asyncio.to_thread(service.repository.count_snapshots),
         "sources": await asyncio.to_thread(service.repository.source_health),
@@ -418,6 +451,12 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
             "min_roi_percent": str(settings.min_roi_percent),
             "min_comparables": settings.min_comparables_count,
         },
+        "subscription": {
+            "price_aed": settings.pro_price_aed,
+            "price_stars": settings.pro_price_stars,
+            **subscription_metrics,
+        },
+        "referrals": await asyncio.to_thread(service.repository.referral_summary),
     }
 
 
@@ -611,6 +650,14 @@ async def tma_feed(authorization: str | None = Header(default=None)) -> dict[str
     principal = firebase_principal(authorization, require_admin=False)
     if principal.telegram_user_id is None:
         raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    subscription = await telegram_subscription_status(settings, principal.telegram_user_id)
+    if not subscription.active:
+        return {
+            "owner": principal.telegram_user_id,
+            "items": [],
+            "is_admin": principal.admin,
+            "is_pro": False,
+        }
     user_settings = await asyncio.to_thread(
         service.repository.get_user_settings, principal.telegram_user_id
     )
@@ -630,7 +677,33 @@ async def tma_feed(authorization: str | None = Header(default=None)) -> dict[str
                 "decision": decision.model_dump(mode="json"),
             }
         )
-    return {"owner": principal.telegram_user_id, "items": feed, "is_admin": principal.admin}
+    return {
+        "owner": principal.telegram_user_id,
+        "items": feed,
+        "is_admin": principal.admin,
+        "is_pro": True,
+    }
+
+
+@app.get("/tma/subscription")
+async def tma_subscription(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Возвращает цену, membership entitlement и персональную referral-ссылку."""
+    principal = firebase_principal(authorization, require_admin=False)
+    if principal.telegram_user_id is None:
+        raise HTTPException(status_code=403, detail="Owner scope отсутствует")
+    subscription = await telegram_subscription_status(settings, principal.telegram_user_id)
+    return {
+        "plan": "pro" if subscription.active else "free",
+        "active": subscription.active,
+        "member_status": subscription.member_status,
+        "price_aed": settings.pro_price_aed,
+        "price_stars": settings.pro_price_stars,
+        "period_days": 30,
+        "subscription_url": settings.telegram_pro_subscription_url,
+        "referral_url": (
+            f"https://t.me/DubaiDealSniper111_bot?start=ref_{principal.telegram_user_id}"
+        ),
+    }
 
 
 @app.get("/tma/outcomes")
@@ -865,6 +938,18 @@ async def telegram_webhook(
             return {"ok": True}
         user_settings = await asyncio.to_thread(service.repository.get_user_settings, user_id)
         user_settings = user_settings or default_user_settings(user_id, language)
+        if (
+            text == "/start"
+            and arguments
+            and arguments[0].startswith("ref_")
+            and user_settings.referred_by_user_id is None
+        ):
+            try:
+                referrer_id = int(arguments[0].removeprefix("ref_"))
+            except ValueError:
+                referrer_id = user_id
+            if referrer_id != user_id and referrer_id > 0:
+                user_settings.referred_by_user_id = referrer_id
         if user_settings.language_code != language:
             user_settings.language_code = language
         await asyncio.to_thread(service.repository.save_user_settings, user_settings)
@@ -1156,6 +1241,14 @@ async def telegram_webhook(
                             ),
                             reply_markup=main_chat_keyboard(),
                         )
+                elif intent is ChatIntent.UPGRADE:
+                    subscription = await telegram_subscription_status(settings, user_id)
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=pro_subscription_text(subscription.active),
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=pro_subscription_keyboard(),
+                    )
                 elif intent is ChatIntent.MARKET:
                     market_items = await current_market_snapshot()
                     market_decisions = [decision for _, decision in market_items]

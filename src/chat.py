@@ -15,6 +15,7 @@ class ChatIntent(StrEnum):
     MARKET = "market"
     SOURCES = "sources"
     HELP = "help"
+    UPGRADE = "upgrade"
     UNKNOWN = "unknown"
 
 
@@ -50,6 +51,11 @@ def classify_chat_intent(text: str) -> ChatIntent:
         return ChatIntent.GREETING
     if any(token in normalized for token in ("news", "headline", "latest update", "новост")):
         return ChatIntent.NEWS
+    if any(
+        token in normalized
+        for token in ("upgrade", "subscribe", "subscription", "pro access", "buy pro")
+    ):
+        return ChatIntent.UPGRADE
     if any(
         token in normalized
         for token in ("market overview", "market status", "market pulse", "обзор рынка")
