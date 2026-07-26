@@ -5,7 +5,7 @@
 ## Правила выполнения
 
 1. Только автомобили с фиксированной ценой в ОАЭ.
-2. Сначала проверяемый код и тесты, затем документация, затем cloud execution.
+2. Сначала обновляется документация и утверждается план, затем создаются проверяемый код и тесты, и только после этого выполняется cloud execution.
 3. Ни один этап не разрешает delivery до финального cutover.
 4. Любое изменение после фиксации RC digest аннулирует rehearsal.
 5. WhatsApp не блокирует основной релиз, если единственная причина — отсутствующие внешние Meta credentials.
@@ -40,6 +40,7 @@
 | 22 | Production migration, merge, cutover и pilot | запрещено до 21 | ожидает execution |
 | 23 | Чужие Telegram sources: MTProto registry, analyzer и evidence tier | только документация | ожидает утверждения плана |
 | 24 | Telegram discovery и controlled scaling до 50–200 sources | только документация | после успешного Telegram pilot |
+| 25 | Уникальный CTA и кнопка Pro под каждым Free-объявлением | только документация | ожидает утверждения плана |
 
 ## Порядок оставшегося execution
 
@@ -88,6 +89,16 @@
 - outbox/provider IDs и source health доступны администратору.
 
 После пилота формируется `docs/RELEASE_EVIDENCE.md` с commit, digests, cloud revisions, migration IDs, counts, checksums, smoke/pilot результатами и оставшимся внешним blocker WhatsApp, если он существует.
+
+### Free → Pro CTA под каждым объявлением
+
+1. Каждый автомобильный пост Free получает англоязычный CTA и inline-кнопку подписки Pro; публикация без корректной `TELEGRAM_PRO_SUBSCRIPTION_URL` запрещена.
+2. CTA создаётся один раз на новый `publication_id`: Gemini получает только уже подтверждённые поля карточки и не создаёт финансовые значения. Fallback — утверждённая библиотека минимум из 30 вариантов.
+3. Проверка допускает только короткий английский текст, разрешённые факты и один из продуктовых акцентов: verified market, maximum purchase, costs, expected profit, ROI или risks.
+4. `cta_fingerprint` не повторяется до исчерпания пула; соседние публикации всегда имеют разные CTA и button labels. Выбор детерминирован для `publication_id`.
+5. `cta_variant_id`, текст, label, target и template/model version сохраняются в `PublicationEvent` и outbox. Retry повторяет исходный вариант без нового вызова Gemini.
+6. Тесты проверяют наличие кнопки у 100% Free vehicle posts, отсутствие Pro-данных в teaser, корректность ссылки, разнообразие, fallback, идемпотентность и отсутствие выдуманных чисел.
+7. Pilot проверяет не менее 30 последовательных постов, ноль соседних повторов, ноль постов без кнопки и доступную конверсию в членство Pro.
 
 ## Рабочая браузерная Admin Panel
 
