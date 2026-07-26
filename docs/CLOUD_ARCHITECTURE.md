@@ -19,6 +19,7 @@ Telegram webhook -> API Gateway -> Cloud Run API -> Firestore
                                       -> Telegram Stars subscription / Pro channel membership
 Firebase Hosting TMA -> Telegram initData -> Firebase custom token -> Cloud Run API
 Firebase Hosting Admin -> Firebase email/password -> Firebase ID token + ADMIN_EMAILS -> Cloud Run API
+Firebase Hosting /admin/** rewrite -> public Cloud Run ingress -> application-level Firebase authorization
 Secret Manager -> runtime service accounts
 Cloud Logging/Monitoring/Billing -> alerts and budget
 ```

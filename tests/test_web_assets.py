@@ -1,5 +1,6 @@
 """Контракт пользовательского и административного Web-интерфейсов."""
 
+import json
 from pathlib import Path
 
 WEB = Path(__file__).parents[1] / "web"
@@ -43,6 +44,9 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
     assert "Cloud runtime" in page
     assert "Subscriptions" in page
     assert "signInWithEmailAndPassword" in script
+    assert "runtime.adminApiBase" in script
     assert 'api + "/tma/auth"' not in script
     assert "/admin/sources/${button.dataset.source}/run" in script
     assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")
+    runtime = json.loads((WEB / "runtime-config.json").read_text(encoding="utf-8"))
+    assert runtime["adminApiBase"] == ""

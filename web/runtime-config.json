@@ -1,3 +1,4 @@
 {
-  "apiBase": "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev"
+  "apiBase": "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev",
+  "adminApiBase": ""
 }

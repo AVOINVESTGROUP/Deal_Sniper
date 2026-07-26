@@ -4,7 +4,7 @@ import {getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut} from "
 const config = await (await fetch("/__/firebase/init.json")).json();
 const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const auth = getAuth(initializeApp(config));
-const api = window.DEAL_SNIPER_API || runtime.apiBase || "";
+const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ?? "";
 let token = "";
 const byId = (id) => document.getElementById(id);
 const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));

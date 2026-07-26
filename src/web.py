@@ -151,13 +151,16 @@ def admin_chat_keyboard() -> InlineKeyboardMarkup | None:
 async def restore_gateway_authorization(request: Any, call_next: Any) -> Any:
     """Восстанавливает Firebase bearer, сохранённый API Gateway при backend OIDC."""
     forwarded = request.headers.get("x-forwarded-authorization")
+    if not forwarded:
+        # Прямой bearer от Firebase Hosting rewrite уже является
+        # пользовательским токеном и должен быть сохранён.
+        return await call_next(request)
     headers = [
         (name, value)
         for name, value in request.scope.get("headers", [])
         if name.lower() != b"authorization"
     ]
-    if forwarded:
-        headers.append((b"authorization", forwarded.encode("latin-1")))
+    headers.append((b"authorization", forwarded.encode("latin-1")))
     request.scope["headers"] = headers
     return await call_next(request)
 
