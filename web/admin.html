@@ -25,9 +25,9 @@
     <main class="admin-main">
       <header class="admin-header">
         <div><p class="eyebrow">OPERATIONS</p><h1 id="page-title">Dashboard</h1></div>
-        <div class="toolbar"><span id="updated" class="muted"></span><button id="refresh" class="secondary" disabled>Refresh</button><input id="login-email" type="email" autocomplete="email" placeholder="Administrator email" aria-label="Administrator email"><button id="login">Email me a sign-in link</button></div>
+        <div class="toolbar"><span id="updated" class="muted"></span><button id="refresh" class="secondary" disabled>Refresh</button><input id="login-email" type="email" autocomplete="username" placeholder="Administrator email" aria-label="Administrator email"><input id="login-password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Administrator password"><button id="login">Sign in</button></div>
       </header>
-      <div id="auth-notice" class="notice"><strong>Administrator access required</strong><span>Enter an allowed email address. We will send a one-time sign-in link; no password is required.</span></div>
+      <div id="auth-notice" class="notice"><strong>Administrator access required</strong><span>Enter the allowed email address and the password delivered privately by the bot.</span></div>
       <p id="error" class="notice notice-error" hidden></p>
       <section class="admin-view active" data-panel="dashboard">
         <div id="overview" class="metric-grid"></div>
@@ -57,6 +57,6 @@
       </section>
     </main>
   </div>
-  <script type="module" src="/admin.js?v=browser-admin-3"></script>
+  <script type="module" src="/admin.js?v=browser-admin-4"></script>
 </body>
 </html>

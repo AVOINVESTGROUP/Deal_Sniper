@@ -118,6 +118,10 @@ Production-релиз passwordless Admin Authentication завершён: Fireba
 
 Пользовательский screenshot выявил только визуальный stale error: CSS-класс `.notice` перекрывал стандартное поведение атрибута `hidden`. Исправление — глобальное `[hidden]{display:none!important}`; состояние отправки email было успешным и backend/auth flow ошибки не возвращали. Hosting version `1e168b3b11990c1a` опубликована, live CSS вернул HTTP 200, нужное правило и `Cache-Control: no-store`.
 
+Письмо email-link фактически не пришло владельцу, несмотря на успешный ответ Identity Toolkit; последующая точная проверка показала, что account record при этом не была создана. Для устранения зависимости от внешней почтовой доставки контракт заменён на Firebase email/password. Случайный пароль устанавливается административно в Firebase, не хранится в репозитории или Cloud Run env и однократно передаётся владельцу в личный Telegram-чат; доступ backend всё равно ограничен `ADMIN_EMAILS`.
+
+Production smoke email/password завершён: Hosting version `5abe3c43043b3e9c` содержит password field и `signInWithEmailAndPassword`, email-link код удалён. Подтверждённая Firebase account создана для административного email; реальный password sign-in, Firebase ID token и `/admin/overview` прошли успешно. Первоначальный случайный пароль передан владельцу Telegram-сообщением `93` и не записан в код, Git, `.env`, Secret Manager или документацию.
+
 Read-only REST-запросы Admin Web к Scheduler, Tasks и Cloud Run передают явный quota project `avo-deal-sniper`; это отделяет фактический IAM-статус от ошибок отсутствующего billing/quota consumer в Application Default Credentials.
 
 API Gateway содержит отдельный защищённый маршрут `POST /admin/sources/{source_name}/run`; браузерная кнопка ручного запуска не обращается к Cloud Run напрямую.

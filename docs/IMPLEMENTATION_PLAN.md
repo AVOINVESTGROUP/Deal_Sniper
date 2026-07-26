@@ -90,7 +90,7 @@
 ## Рабочая браузерная Admin Panel
 
 1. `/admin.html` открывается в обычном desktop-браузере без Telegram-контекста.
-2. Firebase passwordless email-link sign-in включён; запрос ссылки ограничен `ADMIN_EMAILS`, а backend принимает только подтверждённый Firebase ID token.
+2. Firebase email/password sign-in включён; пароль хранится только в Firebase Authentication, а backend принимает Firebase ID token только для email из `ADMIN_EMAILS`.
 3. Административная роль определяется allowlist `ADMIN_EMAILS`, а не Telegram ID.
 4. Интерфейс содержит разделы Dashboard, Sources, Runs, Listings, Decisions, Publications, Users & subscriptions, Revenue & referrals, Errors и Settings.
 5. Технические JSON/provenance/stack traces скрыты за подробностями; основной экран показывает человекочитаемые статусы и действия.

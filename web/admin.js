@@ -1,12 +1,10 @@
 import {initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import {getAuth, isSignInWithEmailLink, onAuthStateChanged, sendSignInLinkToEmail, signInWithEmailLink, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import {getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const config = await (await fetch("/__/firebase/init.json")).json();
 const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const auth = getAuth(initializeApp(config));
 const api = window.DEAL_SNIPER_API || runtime.apiBase || "";
-const emailStorageKey = "deal-sniper-admin-email";
-const actionCodeSettings = {url: `${window.location.origin}/admin.html`, handleCodeInApp: true};
 let token = "";
 const byId = (id) => document.getElementById(id);
 const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
@@ -101,43 +99,23 @@ document.querySelectorAll(".admin-nav button").forEach((button) => button.addEve
   document.querySelectorAll(".admin-view").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === button.dataset.view));
   byId("page-title").textContent = button.textContent;
 }));
-async function completeEmailLink(email) {
-  await signInWithEmailLink(auth, email, window.location.href);
-  window.localStorage.removeItem(emailStorageKey);
-  window.history.replaceState({}, document.title, "/admin.html");
-}
-
 byId("login").addEventListener("click", async () => {
   byId("error").hidden = true;
   const email = byId("login-email").value.trim();
+  const password = byId("login-password").value;
   if (!email) { showError(new Error("Enter the administrator email address.")); return; }
+  if (!password) { showError(new Error("Enter the administrator password.")); return; }
   byId("login").disabled = true;
   try {
-    if (isSignInWithEmailLink(auth, window.location.href)) {
-      await completeEmailLink(email);
-      return;
-    }
-    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-    window.localStorage.setItem(emailStorageKey, email);
-    byId("auth-notice").hidden = false;
-    byId("auth-notice").innerHTML = "<strong>Check your email</strong><span>Open the one-time link on this device. No password is required.</span>";
+    await signInWithEmailAndPassword(auth, email, password);
+    byId("login-password").value = "";
   } catch (error) { showError(error); } finally { byId("login").disabled = false; }
 });
 byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("login-email").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
-    if (isSignInWithEmailLink(auth, window.location.href)) {
-      byId("login").textContent = "Complete sign in";
-      const storedEmail = window.localStorage.getItem(emailStorageKey);
-      if (storedEmail) {
-        byId("login-email").value = storedEmail;
-        try { await completeEmailLink(storedEmail); } catch (error) { showError(error); }
-      } else {
-        byId("auth-notice").innerHTML = "<strong>Confirm your email</strong><span>Enter the address that received this one-time link.</span>";
-      }
-    }
+    token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("login-email").hidden = false; byId("login-password").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
     return;
   }
-  token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-email").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
+  token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-email").hidden = true; byId("login-password").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
 });
