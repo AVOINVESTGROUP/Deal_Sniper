@@ -194,3 +194,14 @@ delivery и content не возобновлялись. Диагностика д
 deadline. Исправление ограничено этим слоем: Cloud status и агрегаты выполняются
 параллельно, dashboard counts используют Firestore aggregation. Изменение требует нового
 commit/digest и полного повторения R6.5–R6.6 перед продолжением разрешённого R6.7.
+## 7. Итог выполнения R6.6–R6.7
+
+R6 завершён после отдельного разрешения владельца на production deploy.
+
+- Финальный RC: `851ddaf26852aaaa0547df1b60e222d7f74b5d9a`.
+- Immutable image: `sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112`.
+- Повторный staging gate: Firestore integration и authenticated real-Chrome Admin smoke успешны.
+- Production API и все Jobs используют один digest; `/health`, `/ready` и authenticated Admin browser path успешны.
+- Staged resume выполнен в порядке collectors → processing → delivery → content.
+- Pilot Free CTA: 30 публикаций, 30 уникальных fingerprints, 0 соседних повторов, 0 пропущенных кнопок, 0 pending/unknown.
+- Подробные доказательства находятся в `docs/RELEASE_EVIDENCE_2026-07-27-R6.md`.

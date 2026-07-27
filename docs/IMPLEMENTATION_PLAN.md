@@ -168,3 +168,6 @@ TG6  staging, 7-day production pilot и решение о масштабиров
 ```
 
 Каждый этап заканчивается unit/integration/contract tests и обновлением документации. Production delivery не принимает Telegram-derived `CONTACT` до отдельного доказательства отсутствия Telegram-only verified decisions.
+# Статус R6
+
+R6 утверждён владельцем и полностью развёрнут в production 27 июля 2026 года. Финальный baseline и результаты pilot зафиксированы в `docs/RELEASE_EVIDENCE_2026-07-27-R6.md`. Следующий этап не изменяет этот baseline: эксплуатационное наблюдение, измерение конверсии Free → Pro и подключение новых источников отдельными проверяемыми адаптерами.

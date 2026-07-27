@@ -212,3 +212,17 @@
 - Диагностика service-account runtime установила точную причину read-only `403`: access token запрашивался с недостаточным OAuth scope. Клиент использует полный `cloud-platform`, а фактический доступ по-прежнему ограничен viewer IAM.
 - GCS raw archive больше не делает предварительный `GET`: immutable-объект создаётся атомарно с `if_generation_match=0`, а существующий объект определяется по precondition. Collector сохраняет write-once модель и не требует чтения отсутствующего объекта.
 - Firestore source health заменяет карту `last_run` целиком. Поле `error` предыдущего запуска не сохраняется после следующего успешного запуска из-за рекурсивного `merge=True`.
+## 27 июля 2026 — R6 полностью развёрнут в production
+
+- Владелец явно разрешил production deploy после утверждения плана R6.
+- Перед переключением создан защищённый Firestore export: `gs://avo-deal-sniper-firestore-exports/r6-production-20260727-193058`, 69 251 документ, операция завершена успешно.
+- Первый production smoke обнаружил тайм-аут только у `/admin/overview`; доставка оставалась выключенной. Причина устранена без расширения объёма R6: Cloud API читаются параллельно, счётчики Firestore используют aggregation queries.
+- Финальный RC commit: `851ddaf26852aaaa0547df1b60e222d7f74b5d9a`; immutable digest: `sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112`.
+- GitHub Actions run `30282317974` успешен: quality, container/Trivy и Terraform прошли.
+- Тот же digest прошёл повторный staging Firestore integration и authenticated Chrome smoke для пяти Admin endpoints, затем развёрнут в production API revision `deal-sniper-api-00060-kkc` и во все 10 Cloud Run Jobs.
+- Firebase Hosting version `c110b289b2855e7f` остаётся активной; Admin доступен по `https://avo-deal-sniper.web.app/admin.html`.
+- Поэтапно возобновлены четыре collector scheduler, `listing-processing`, delivery и content scheduler. Legacy aggregate scheduler `deal-sniper-collector-every-10m` намеренно оставлен остановленным, чтобы не создавать двойной сбор.
+- Контрольный сбор четырёх источников завершился успешно. Очередь обработки приняла 563 задания и была сведена к нулю; временные `ReadTimeout` detail pages обрабатывались retry/fail-closed и не создавали ложные решения.
+- Telegram webhook подтверждён: pending updates 0, последняя ошибка отсутствует. Обе Cloud Tasks queues работают.
+- Production pilot отправил ровно 30 новых Free-карточек с CTA: 30 уникальных fingerprints, 0 соседних повторов, 0 карточек без CTA или кнопки, очередь доставки 0.
+- После пилота: 6 819 snapshots, 1 489 current decisions, outbox 94 (`sent=92`, `pending=0`, `sending=0`, `unknown=0`, две исторические `failed` относятся к delivery-disabled cutover). Все четыре marketplace sources имеют статус `healthy`.
