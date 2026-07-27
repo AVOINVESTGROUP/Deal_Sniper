@@ -40,7 +40,7 @@
 | 22 | Production migration, merge, cutover и pilot | запрещено до 21 | ожидает execution |
 | 23 | Чужие Telegram sources: MTProto registry, analyzer и evidence tier | только документация | ожидает утверждения плана |
 | 24 | Telegram discovery и controlled scaling до 50–200 sources | только документация | после успешного Telegram pilot |
-| 25 | Уникальный CTA и кнопка Pro под каждым Free-объявлением | реализовано локально, 71 тест | immutable deploy и production smoke |
+| 25 | Уникальный CTA и кнопка Pro под каждым Free-объявлением | кандидат `1ce36ff` отклонён аудитом | исправленный план R6 и повторная реализация после утверждения |
 
 ## Порядок оставшегося execution
 
@@ -99,6 +99,24 @@
 5. `cta_variant_id`, текст, label, target и template/model version сохраняются в `PublicationEvent` и outbox. Retry повторяет исходный вариант без нового вызова Gemini.
 6. Тесты проверяют наличие кнопки у 100% Free vehicle posts, отсутствие Pro-данных в teaser, корректность ссылки, разнообразие, fallback, идемпотентность и отсутствие выдуманных чисел.
 7. Pilot проверяет не менее 30 последовательных постов, ноль соседних повторов, ноль постов без кнопки и доступную конверсию в членство Pro.
+
+### Корректирующий релиз R6: Admin Web и Free → Pro
+
+Кандидат `1ce36ff` не развёртывается. Его локальные тесты не доказывают соответствие сквозным контрактам. Полный аудит и критерии повторной реализации зафиксированы в `docs/PLAN_REVIEW_2026-07-27-R6.md`.
+
+Порядок релиза после отдельного утверждения владельцем:
+
+```text
+R6.1  контракт publication identity и совместимость старых событий/outbox
+R6.2  единый Free renderer без цены, рынка, ссылки, ID, прибыли и ROI
+R6.3  сохранение CTA + кнопки в одном атомарном publication/outbox контуре
+R6.4  диагностика Admin browser path и устранение подтверждённой причины
+R6.5  integration/browser tests, CORS/CSP/auth failure matrix
+R6.6  immutable image, staging rehearsal и release evidence
+R6.7  deploy exact digest, Hosting release и live smoke
+```
+
+До завершения R6.1–R6.5 запрещены Cloud Run, Jobs, API Gateway и Firebase Hosting deploy. До R6.6 запрещено включать новые Free-публикации шаблонов v2.
 
 ## Рабочая браузерная Admin Panel
 
