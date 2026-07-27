@@ -9,7 +9,8 @@
 - Market Watch Free переведён на безопасный teaser; legacy publisher теперь fail-closed без отдельного `TELEGRAM_PRO_CHANNEL_ID` и не отправляет полную карточку в Free.
 - Firebase Hosting очищен от конфликтующих Cloud Run rewrites; Admin сохраняет Gateway-only transport, CSP для Firebase runtime и понятную ошибку истёкшей сессии.
 - Локальный gate: Ruff — green; mypy — green; 80 pytest — green; coverage 56%; pip-audit — без известных уязвимостей; Terraform fmt/validate — green.
-- R6.5 не завершён: Python 3.11/container/Trivy должен подтвердить CI, затем нужны Firestore/browser integration и staging rehearsal. Production не изменён.
+- GitHub Actions кандидата `f1bd8fd` подтвердил Python 3.11, quality, Docker build, Trivy и Terraform; все три jobs завершились успешно.
+- R6.5 не завершён: нужны Firestore/browser integration и staging rehearsal. Production не изменён.
 
 ## 27 июля 2026 — остановка кандидата и обязательный сквозной аудит
 

@@ -160,6 +160,7 @@ R6.1–R6.4:
 - Admin Web отдельно сообщает об истёкшей Firebase-сессии и сохраняет частичный рендер.
 
 Локальный gate: Ruff, mypy, 80 pytest, coverage 56%, pip-audit без известных
-уязвимостей, Terraform fmt/validate успешно. Локальный интерпретатор — Python 3.13;
-обязательный Python 3.11, container/Trivy, Firestore integration, browser smoke и staging
-rehearsal относятся к незавершённым R6.5–R6.6. Production остаётся на прежнем digest.
+уязвимостей, Terraform fmt/validate успешно. GitHub Actions для кандидата `f1bd8fd`
+подтвердил Python 3.11, повторный quality gate, Docker build и Trivy без блокирующих
+HIGH/CRITICAL. Firestore integration, browser smoke и staging rehearsal относятся к
+незавершённым R6.5–R6.6. Production остаётся на прежнем digest.
