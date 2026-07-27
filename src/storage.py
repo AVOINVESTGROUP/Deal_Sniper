@@ -162,6 +162,10 @@ class Repository(Protocol):
 
     def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int: ...
 
+    def commit_publication_with_outbox(
+        self, event: PublicationEvent, record: OutboxRecord
+    ) -> OutboxRecord: ...
+
     def admin_summary(self) -> dict[str, Any]: ...
 
     def schema_version(self) -> str: ...
@@ -837,6 +841,56 @@ class LocalRepository:
                 """,
                 (event.publication_event_id, event.model_dump_json()),
             )
+
+    def commit_publication_with_outbox(
+        self, event: PublicationEvent, record: OutboxRecord
+    ) -> OutboxRecord:
+        """Атомарно фиксирует immutable publication revision и её outbox."""
+        if record.payload.get("publication_event_id") != event.publication_event_id:
+            raise ValueError("Outbox ссылается на другую publication revision")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            event_row = connection.execute(
+                "SELECT payload_json FROM publication_events WHERE publication_event_id = ?",
+                (event.publication_event_id,),
+            ).fetchone()
+            outbox_row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (record.delivery_id,),
+            ).fetchone()
+            if (event_row is None) != (outbox_row is None):
+                raise RuntimeError("Нарушена атомарность publication revision и outbox")
+            if event_row is not None and outbox_row is not None:
+                stored_event = PublicationEvent.model_validate_json(event_row["payload_json"])
+                stored_record = OutboxRecord.model_validate_json(outbox_row["payload_json"])
+                if (
+                    stored_event.model_dump(exclude={"created_at"})
+                    != event.model_dump(exclude={"created_at"})
+                    or stored_record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    != record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    or stored_record.payload != record.payload
+                ):
+                    raise RuntimeError("Retry изменил immutable publication payload")
+                return stored_record
+            connection.execute(
+                """
+                INSERT INTO publication_events(publication_event_id, payload_json)
+                VALUES (?, ?)
+                """,
+                (event.publication_event_id, event.model_dump_json()),
+            )
+            connection.execute(
+                """
+                INSERT INTO delivery_outbox(delivery_id, state, payload_json)
+                VALUES (?, ?, ?)
+                """,
+                (record.delivery_id, record.state.value, record.model_dump_json()),
+            )
+            return record
 
     def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int:
         """Атомарно назначает следующий CTA, сохраняя выбор для повторной задачи."""

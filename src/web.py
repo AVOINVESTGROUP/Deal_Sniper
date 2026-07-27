@@ -35,6 +35,7 @@ from src.bot import (
     localized,
     select_publishable_decisions,
     telegram_language,
+    validate_free_publication,
 )
 from src.chat import (
     ChatIntent,
@@ -52,6 +53,7 @@ from src.domain.ids import (
     delivery_id,
     operation_id,
     publication_event_id,
+    publication_revision_id,
     verification_key,
 )
 from src.domain.models import (
@@ -66,7 +68,6 @@ from src.domain.models import (
 )
 from src.news import DubaiAutoNewsClient, format_news
 from src.pro_cta import (
-    ProCta,
     append_pro_cta,
     pro_cta_count,
     pro_cta_for_index,
@@ -1554,15 +1555,7 @@ async def process_listing_task(
         event_type="deal-candidate",
     )
     subscription_url = validated_subscription_url(settings.telegram_pro_subscription_url)
-    pro_cta: ProCta | None = None
-    if settings.telegram_channel_id and subscription_url:
-        cta_index = await asyncio.to_thread(
-            service.repository.reserve_pro_cta_variant,
-            event_id,
-            pro_cta_count(),
-        )
-        pro_cta = pro_cta_for_index(cta_index)
-    elif settings.telegram_channel_id:
+    if settings.telegram_channel_id and not subscription_url:
         logger.error("Free-публикация заблокирована: ссылка подписки Pro отсутствует или невалидна")
     await asyncio.to_thread(
         service.repository.save_publication_event,
@@ -1571,13 +1564,7 @@ async def process_listing_task(
             decision_id=current_decision_id,
             vehicle_id=vehicle_id,
             event_type="deal-candidate",
-            template_version="deal/v2",
-            pro_cta_variant_id=pro_cta.variant_id if pro_cta else None,
-            pro_cta_text=pro_cta.text if pro_cta else None,
-            pro_cta_button_label=pro_cta.button_label if pro_cta else None,
-            pro_cta_target=subscription_url if pro_cta else None,
-            pro_cta_fingerprint=pro_cta.fingerprint if pro_cta else None,
-            pro_cta_template_version=pro_cta.template_version if pro_cta else None,
+            template_version="deal/v1",
         ),
     )
     targets: dict[str, tuple[str, str]] = {}
@@ -1608,20 +1595,29 @@ async def process_listing_task(
             )
     if settings.telegram_pro_channel_id:
         targets[settings.telegram_pro_channel_id] = ("en", "pro/v1")
-    if settings.telegram_channel_id and pro_cta and subscription_url:
+    if settings.telegram_channel_id and subscription_url:
         targets[settings.telegram_channel_id] = ("en", "free/v2")
     dispatcher = CloudTaskDispatcher(settings)
     for target_id, (target_language, template_version) in targets.items():
         is_free_channel = template_version == "free/v2"
+        free_event_id = (
+            publication_revision_id(
+                decision_id_value=current_decision_id,
+                vehicle_id=vehicle_id,
+                event_type="deal-candidate-free",
+                recipient_id=target_id,
+                template_version=template_version,
+            )
+            if is_free_channel
+            else None
+        )
         card = (
             format_public_teaser(evaluated.listing, target_language)
             if template_version in {"free/v2", "personal-free/v1"}
             else format_card(evaluated.listing, evaluated.decision, target_language)
         )
-        if is_free_channel and pro_cta:
-            card = append_pro_cta(card, pro_cta)
         stable_delivery_id = delivery_id(
-            decision_id_value=current_decision_id,
+            decision_id_value=free_event_id or current_decision_id,
             recipient_id=target_id,
             template_version=template_version,
             format_name="telegram",
@@ -1641,23 +1637,55 @@ async def process_listing_task(
             delivery_payload["image_url"] = settings.free_teaser_image_url
         elif evaluated.listing.image_urls:
             delivery_payload["image_url"] = str(evaluated.listing.image_urls[0])
-        if is_free_channel and pro_cta and subscription_url:
+        publication_event: PublicationEvent | None = None
+        if is_free_channel and subscription_url:
+            assert free_event_id is not None
+            cta_index = await asyncio.to_thread(
+                service.repository.reserve_pro_cta_variant,
+                free_event_id,
+                pro_cta_count(),
+            )
+            pro_cta = pro_cta_for_index(cta_index)
+            card = append_pro_cta(card, pro_cta)
+            validate_free_publication(card)
+            delivery_payload["publication_event_id"] = free_event_id
+            delivery_payload["text"] = card
             delivery_payload["pro_cta_button_label"] = pro_cta.button_label
             delivery_payload["pro_cta_button_url"] = subscription_url
             delivery_payload["pro_cta_variant_id"] = pro_cta.variant_id
             delivery_payload["pro_cta_fingerprint"] = pro_cta.fingerprint
-        await asyncio.to_thread(
-            service.repository.put_outbox,
-            OutboxRecord(
-                delivery_id=stable_delivery_id,
+            publication_event = PublicationEvent(
+                publication_event_id=free_event_id,
+                parent_publication_event_id=event_id,
                 decision_id=current_decision_id,
+                vehicle_id=vehicle_id,
                 recipient=target_id,
+                event_type="deal-candidate-free",
                 template_version=template_version,
-                format="telegram",
-                payload=delivery_payload,
-            ),
+                pro_cta_variant_id=pro_cta.variant_id,
+                pro_cta_text=pro_cta.text,
+                pro_cta_button_label=pro_cta.button_label,
+                pro_cta_target=subscription_url,
+                pro_cta_fingerprint=pro_cta.fingerprint,
+                pro_cta_template_version=pro_cta.template_version,
+            )
+        outbox = OutboxRecord(
+            delivery_id=stable_delivery_id,
+            decision_id=current_decision_id,
+            recipient=target_id,
+            template_version=template_version,
+            format="telegram",
+            payload=delivery_payload,
         )
-        await dispatcher.enqueue_delivery(delivery_payload)
+        if publication_event is not None:
+            stored_outbox = await asyncio.to_thread(
+                service.repository.commit_publication_with_outbox,
+                publication_event,
+                outbox,
+            )
+        else:
+            stored_outbox = await asyncio.to_thread(service.repository.put_outbox, outbox)
+        await dispatcher.enqueue_delivery(dict(stored_outbox.payload))
     return {"ok": True}
 
 

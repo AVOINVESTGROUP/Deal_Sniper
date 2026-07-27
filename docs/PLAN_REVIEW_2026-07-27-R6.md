@@ -1,6 +1,7 @@
 # Проверка кандидата `1ce36ff` и корректирующий план R6
 
-Статус: **план ожидает утверждения владельцем; код и deploy запрещены**.
+Статус: **утверждён владельцем 27 июля 2026; R6.1–R6.5 выполняются,
+staging и production deploy ещё не разрешены**.
 
 ## 1. Проверенный контур
 
@@ -142,3 +143,23 @@ Firebase sign-in
 ## 5. Критерий утверждения плана
 
 Владелец явно подтверждает этот документ. Только после этого разрешён R6.1. Любое изменение контракта identity, Free/Pro данных, Admin transport или release sequence возвращает работу на стадию документации и повторного утверждения.
+
+## 6. Текущее выполнение
+
+После явного сообщения владельца «План R6 утверждаю» реализован локальный кандидат
+R6.1–R6.4:
+
+- новая immutable publication revision включает subject, recipient, event type и template;
+- старые subject events сохраняются как parent и не переписываются;
+- PublicationEvent и outbox фиксируются одной транзакцией в SQLite и Firestore;
+- повторная обработка возвращает тот же payload и тот же CTA, а противоречивое частичное
+  состояние блокируется;
+- все автомобильные Free-пути используют общий teaser и leakage validator;
+- legacy publisher больше не подменяет отсутствующий Pro-канал бесплатным каналом;
+- Firebase Hosting использует только Gateway browser path без конфликтующих rewrites;
+- Admin Web отдельно сообщает об истёкшей Firebase-сессии и сохраняет частичный рендер.
+
+Локальный gate: Ruff, mypy, 80 pytest, coverage 56%, pip-audit без известных
+уязвимостей, Terraform fmt/validate успешно. Локальный интерпретатор — Python 3.13;
+обязательный Python 3.11, container/Trivy, Firestore integration, browser smoke и staging
+rehearsal относятся к незавершённым R6.5–R6.6. Production остаётся на прежнем digest.

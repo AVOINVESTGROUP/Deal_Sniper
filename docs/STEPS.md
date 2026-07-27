@@ -1,5 +1,16 @@
 # Журнал реализации
 
+## 27 июля 2026 — утверждение R6 и локальный кандидат R6.1–R6.4
+
+- Владелец явно утвердил `docs/PLAN_REVIEW_2026-07-27-R6.md`; только после этого начаты изменения кода.
+- Введена recipient/template-scoped immutable publication revision с parent-связью на прежний subject event; существующие immutable события не изменяются.
+- PublicationEvent и delivery outbox сохраняются атомарно в SQLite и Firestore; retry возвращает исходный payload и CTA, orphan/changed-payload состояние блокируется.
+- Free renderer и leakage validator запрещают цену, рынок, ссылку, ID, прибыль и ROI во всех автомобильных Free-публикациях.
+- Market Watch Free переведён на безопасный teaser; legacy publisher теперь fail-closed без отдельного `TELEGRAM_PRO_CHANNEL_ID` и не отправляет полную карточку в Free.
+- Firebase Hosting очищен от конфликтующих Cloud Run rewrites; Admin сохраняет Gateway-only transport, CSP для Firebase runtime и понятную ошибку истёкшей сессии.
+- Локальный gate: Ruff — green; mypy — green; 80 pytest — green; coverage 56%; pip-audit — без известных уязвимостей; Terraform fmt/validate — green.
+- R6.5 не завершён: Python 3.11/container/Trivy должен подтвердить CI, затем нужны Firestore/browser integration и staging rehearsal. Production не изменён.
+
 ## 27 июля 2026 — остановка кандидата и обязательный сквозной аудит
 
 - Владелец повторно зафиксировал порядок: перед каждым исправлением требуется изучить проект; сначала документы и утверждённый план, затем код.

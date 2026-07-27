@@ -2,6 +2,7 @@
 
 import html
 import logging
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -154,9 +155,10 @@ class DealBot:
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=False,
             )
-        delivery_channel_id = (
-            self.settings.telegram_pro_channel_id or self.settings.telegram_channel_id
-        )
+        # Полная карточка содержит финансовые поля и разрешена только в Pro-контуре.
+        # Free-канал обслуживается исключительно web/content pipeline с общим
+        # format_public_teaser + validate_free_publication.
+        delivery_channel_id = self.settings.telegram_pro_channel_id
         if delivery_channel_id:
             await publish_candidates(
                 update.get_bot(),
@@ -373,7 +375,27 @@ def format_public_teaser(listing: ListingSnapshot, language: str = "en") -> str:
         "Получить полную оценку и ссылку в личном боте.",
         "Get the full analysis and listing in the personal bot.",
     )
-    return f"<b>{html.escape(title)}</b>\n{signal}\n\n{cta}"
+    teaser = f"<b>{html.escape(title)}</b>\n{signal}\n\n{cta}"
+    validate_free_publication(teaser)
+    return teaser
+
+
+_FREE_DISCLOSURE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"https?://", re.IGNORECASE),
+    re.compile(r"<a\s", re.IGNORECASE),
+    re.compile(r"\b\d[\d,.\s]*\s*AED\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:price|market|max(?:imum)? purchase|costs?|expected profit|profit|roi|id)\s*:",
+        re.IGNORECASE,
+    ),
+    re.compile(r"<code>.*?</code>", re.IGNORECASE | re.DOTALL),
+)
+
+
+def validate_free_publication(message: str) -> None:
+    """Запрещает раскрытие финансовых значений, ID и ссылок в Free-карточке."""
+    if any(pattern.search(message) for pattern in _FREE_DISCLOSURE_PATTERNS):
+        raise ValueError("Free-публикация содержит запрещённые Pro-данные")
 
 
 def format_sources(service: DealService, language: str = "ru") -> str:
@@ -457,9 +479,12 @@ def run_bot(settings: Settings) -> None:
 
 async def scan_and_publish(settings: Settings) -> int:
     """Однократно сканирует источник и публикует новые кандидаты в канал."""
-    channel_id = settings.telegram_pro_channel_id or settings.telegram_channel_id
+    channel_id = settings.telegram_pro_channel_id
     if not channel_id:
-        raise RuntimeError("TELEGRAM_PRO_CHANNEL_ID или TELEGRAM_CHANNEL_ID не задан в .env")
+        raise RuntimeError(
+            "TELEGRAM_PRO_CHANNEL_ID не задан: полные карточки нельзя публиковать "
+            "в бесплатный канал"
+        )
     service = DealService.from_settings(settings)
     await service.scan()
     current = service.repository.latest_decisions(limit=500)

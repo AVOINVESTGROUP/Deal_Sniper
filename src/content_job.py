@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import asyncio
-import html
 from decimal import Decimal
 
+from src.bot import format_public_teaser, validate_free_publication
 from src.config import Settings
 from src.content import market_pulse
-from src.domain.ids import canonical_hash, delivery_id, publication_event_id
-from src.domain.models import DealDecision, ListingSnapshot, OutboxRecord, PublicationEvent
+from src.domain.ids import (
+    canonical_hash,
+    delivery_id,
+    publication_event_id,
+    publication_revision_id,
+)
+from src.domain.models import (
+    DealDecision,
+    ListingSnapshot,
+    OutboxRecord,
+    OutboxState,
+    PublicationEvent,
+)
 from src.pro_cta import (
     append_pro_cta,
     pro_cta_count,
@@ -28,29 +39,12 @@ def _money(value: Decimal) -> str:
 
 
 def format_market_watch_card(listing: ListingSnapshot, decision: DealDecision) -> str:
-    """Формирует проверяемую карточку рынка без ложного инвестиционного сигнала."""
+    """Формирует Free teaser без финансовых значений и прямой ссылки."""
     if decision.market is None:
         raise ValueError("MARKET WATCH требует рыночную оценку")
-    vehicle = (
-        " ".join(part for part in (listing.make, listing.model, str(listing.year or "")) if part)
-        or listing.title
-    )
-    if decision.market.low_aed > 0 and listing.price_aed < decision.market.low_aed:
-        difference = (decision.market.low_aed - listing.price_aed) / decision.market.low_aed * 100
-        position = f"{difference:.1f}% below the verified market range"
-    else:
-        position = "within or above the verified market range"
-    return (
-        "<b>MARKET WATCH</b>\n"
-        f"<b>{html.escape(vehicle)}</b>\n"
-        f"Price: {_money(listing.price_aed)} AED\n"
-        f"Verified market: {_money(decision.market.low_aed)}–"
-        f"{_money(decision.market.high_aed)} AED\n"
-        f"Position: {position}\n"
-        f"Source: {html.escape(listing.source)}\n\n"
-        f'<a href="{html.escape(str(listing.url), quote=True)}">Open listing</a>\n'
-        "Market reference — not an investment recommendation."
-    )
+    card = f"<b>MARKET WATCH</b>\n{format_public_teaser(listing, 'en')}"
+    validate_free_publication(card)
+    return card
 
 
 async def enqueue_market_pulse(settings: Settings) -> str | None:
@@ -155,10 +149,17 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
             },
         )
         listing_id = f"{listing.source}:{listing.source_listing_id}"
-        card_event_id = publication_event_id(
+        subject_event_id = publication_event_id(
             decision_id_value=decision_identity,
             vehicle_id=decision.vehicle_id or listing_id,
             event_type="market-watch",
+        )
+        card_event_id = publication_revision_id(
+            decision_id_value=decision_identity,
+            vehicle_id=decision.vehicle_id or listing_id,
+            event_type="market-watch-free",
+            recipient_id=target,
+            template_version=MARKET_WATCH_TEMPLATE_VERSION,
         )
         card_delivery_id = delivery_id(
             decision_id_value=card_event_id,
@@ -168,6 +169,9 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         )
         existing = await asyncio.to_thread(service.repository.get_outbox, card_delivery_id)
         if existing is not None:
+            if existing.state is OutboxState.PENDING:
+                await dispatcher.enqueue_content_delivery(dict(existing.payload))
+                published += 1
             continue
         if subscription_url is None:
             continue
@@ -179,9 +183,11 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         pro_cta = pro_cta_for_index(cta_index)
         card_event = PublicationEvent(
             publication_event_id=card_event_id,
+            parent_publication_event_id=subject_event_id,
             decision_id=decision_identity,
             vehicle_id=decision.vehicle_id or listing_id,
-            event_type="market-watch",
+            recipient=target,
+            event_type="market-watch-free",
             template_version=MARKET_WATCH_TEMPLATE_VERSION,
             pro_cta_variant_id=pro_cta.variant_id,
             pro_cta_text=pro_cta.text,
@@ -190,12 +196,13 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
             pro_cta_fingerprint=pro_cta.fingerprint,
             pro_cta_template_version=pro_cta.template_version,
         )
-        await asyncio.to_thread(service.repository.save_publication_event, card_event)
+        card_text = append_pro_cta(format_market_watch_card(listing, decision), pro_cta)
+        validate_free_publication(card_text)
         card_payload: dict[str, object] = {
             "delivery_id": card_delivery_id,
             "publication_event_id": card_event_id,
             "target_id": target,
-            "text": append_pro_cta(format_market_watch_card(listing, decision), pro_cta),
+            "text": card_text,
             "template_version": MARKET_WATCH_TEMPLATE_VERSION,
             "image_url": str(listing.image_urls[0]),
             "pro_cta_button_label": pro_cta.button_label,
@@ -203,17 +210,19 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
             "pro_cta_variant_id": pro_cta.variant_id,
             "pro_cta_fingerprint": pro_cta.fingerprint,
         }
-        await asyncio.to_thread(
-            service.repository.put_outbox,
-            OutboxRecord(
-                delivery_id=card_delivery_id,
-                decision_id=decision_identity,
-                recipient=target,
-                template_version=MARKET_WATCH_TEMPLATE_VERSION,
-                format="telegram-content",
-                payload=card_payload,
-            ),
+        outbox = OutboxRecord(
+            delivery_id=card_delivery_id,
+            decision_id=decision_identity,
+            recipient=target,
+            template_version=MARKET_WATCH_TEMPLATE_VERSION,
+            format="telegram-content",
+            payload=card_payload,
         )
-        await dispatcher.enqueue_content_delivery(card_payload)
+        stored = await asyncio.to_thread(
+            service.repository.commit_publication_with_outbox,
+            card_event,
+            outbox,
+        )
+        await dispatcher.enqueue_content_delivery(dict(stored.payload))
         published += 1
     return event_id

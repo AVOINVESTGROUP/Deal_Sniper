@@ -434,11 +434,73 @@ class FirestoreRepository:
                     "event_type": event.event_type,
                     "payload": event.model_dump(mode="json"),
                     "created_at": event.created_at,
-                    "schema_version": "publication-event/v2",
+                    "schema_version": "publication-event/v3",
                 }
             )
         except AlreadyExists:
             return
+
+    def commit_publication_with_outbox(
+        self, event: PublicationEvent, record: OutboxRecord
+    ) -> OutboxRecord:
+        """Атомарно фиксирует immutable publication revision и её outbox."""
+        if record.payload.get("publication_event_id") != event.publication_event_id:
+            raise ValueError("Outbox ссылается на другую publication revision")
+        event_ref = self.client.collection("publication_events").document(
+            event.publication_event_id
+        )
+        outbox_ref = self.client.collection("delivery_outbox").document(record.delivery_id)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def commit(transaction: firestore.Transaction) -> OutboxRecord:
+            event_snapshot = event_ref.get(transaction=transaction)
+            outbox_snapshot = outbox_ref.get(transaction=transaction)
+            if event_snapshot.exists != outbox_snapshot.exists:
+                raise RuntimeError("Нарушена атомарность publication revision и outbox")
+            if event_snapshot.exists and outbox_snapshot.exists:
+                event_data = event_snapshot.to_dict() or {}
+                outbox_data = outbox_snapshot.to_dict() or {}
+                stored_event = PublicationEvent.model_validate(event_data["payload"])
+                stored_record = OutboxRecord.model_validate(outbox_data["payload"])
+                if (
+                    stored_event.model_dump(exclude={"created_at"})
+                    != event.model_dump(exclude={"created_at"})
+                    or stored_record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    != record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    or stored_record.payload != record.payload
+                ):
+                    raise RuntimeError("Retry изменил immutable publication payload")
+                return stored_record
+            transaction.set(
+                event_ref,
+                {
+                    "publication_event_id": event.publication_event_id,
+                    "decision_id": event.decision_id,
+                    "vehicle_id": event.vehicle_id,
+                    "event_type": event.event_type,
+                    "payload": event.model_dump(mode="json"),
+                    "created_at": event.created_at,
+                    "schema_version": "publication-event/v3",
+                },
+            )
+            transaction.set(
+                outbox_ref,
+                {
+                    "delivery_id": record.delivery_id,
+                    "state": record.state.value,
+                    "payload": record.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "schema_version": "outbox/v2",
+                },
+            )
+            return record
+
+        return cast(OutboxRecord, commit(transaction))
 
     def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int:
         """Атомарно вращает CTA и возвращает прежний выбор при retry."""

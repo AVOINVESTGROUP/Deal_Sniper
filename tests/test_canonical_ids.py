@@ -13,6 +13,7 @@ from src.domain.ids import (
     delivery_id,
     migration_id,
     money_value,
+    publication_revision_id,
     rate_value,
     verification_key,
 )
@@ -66,3 +67,29 @@ def test_golden_ids_are_stable() -> None:
     assert delivery == "b00c8153b8d704104f90eea37daceaa993bbc2bf794c8efd296494e4ae629d24"
     assert migration == "38a06c84261d8862afab1c39403479ddd301417d1ed6cb99f856c34d324cdaae"
     assert task == ("process-420bb98780069f4f54db7ab7424aed711c4c27b3c19b0656c92369116160c8b3")
+
+
+def test_publication_revision_identity_includes_recipient_and_template() -> None:
+    revision = publication_revision_id(
+        decision_id_value="decision-1",
+        vehicle_id="vehicle-1",
+        event_type="deal-candidate-free",
+        recipient_id="-1001",
+        template_version="free/v2",
+    )
+
+    assert revision == "e29880ac3261f091f7e5a09cd09fd9a5e6544cc870c055db2344b14dced2259f"
+    assert revision != publication_revision_id(
+        decision_id_value="decision-1",
+        vehicle_id="vehicle-1",
+        event_type="deal-candidate-free",
+        recipient_id="-1002",
+        template_version="free/v2",
+    )
+    assert revision != publication_revision_id(
+        decision_id_value="decision-1",
+        vehicle_id="vehicle-1",
+        event_type="deal-candidate-free",
+        recipient_id="-1001",
+        template_version="free/v3",
+    )

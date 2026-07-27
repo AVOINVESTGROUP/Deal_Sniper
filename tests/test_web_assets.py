@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
+import httpx
+import pytest
+
+from src.web import app
+
 WEB = Path(__file__).parents[1] / "web"
+ROOT = WEB.parent
 
 
 def test_user_app_contains_no_admin_interface() -> None:
@@ -70,3 +76,61 @@ def test_hosting_csp_allows_required_firebase_and_gateway_connections() -> None:
 
     assert "https://www.gstatic.com" in csp
     assert "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev" in csp
+    assert config["hosting"]["rewrites"] == []
+
+
+def test_gateway_declares_preflight_for_every_admin_browser_route() -> None:
+    gateway = (ROOT / "infra" / "api-gateway.yaml").read_text(encoding="utf-8")
+    paths = (
+        "/admin/overview",
+        "/admin/sources",
+        "/admin/source-test",
+        "/admin/sources/{source_name}",
+        "/admin/sources/{source_name}/run",
+        "/admin/sources/{source_name}/remove",
+        "/admin/outbox",
+        "/admin/outbox/{delivery_id}/reconcile",
+        "/admin/preview",
+        "/content/market-pulse",
+    )
+
+    for path in paths:
+        marker = f"  {path}:"
+        assert marker in gateway
+        block = gateway.split(marker, maxsplit=1)[1].split("\n  /", maxsplit=1)[0]
+        assert "options:" in block, path
+
+
+@pytest.mark.asyncio
+async def test_admin_cors_preflight_and_error_response_keep_allowed_origin() -> None:
+    origin = "https://avo-deal-sniper.web.app"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        preflight = await client.options(
+            "/admin/overview",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+        unauthorized = await client.get("/admin/overview", headers={"Origin": origin})
+
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == origin
+    assert "Authorization" in preflight.headers["access-control-allow-headers"]
+    assert unauthorized.status_code == 401
+    assert unauthorized.headers["access-control-allow-origin"] == origin
+
+    disallowed = "https://attacker.example"
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        rejected_origin = await client.options(
+            "/admin/overview",
+            headers={
+                "Origin": disallowed,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+    assert rejected_origin.status_code == 400
+    assert "access-control-allow-origin" not in rejected_origin.headers

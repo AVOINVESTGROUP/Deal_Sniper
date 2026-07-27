@@ -190,5 +190,10 @@ onAuthStateChanged(auth, async (user) => {
     token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("login-email").hidden = false; byId("login-password").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
     return;
   }
-  token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-email").hidden = true; byId("login-password").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
+  try {
+    token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-email").hidden = true; byId("login-password").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
+  } catch (error) {
+    token = ""; byId("refresh").disabled = true;
+    showError(new Error("Firebase session could not be established. Reload the page and sign in again."));
+  }
 });
