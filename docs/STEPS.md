@@ -184,6 +184,15 @@
 - Настоящий headless Chrome прошёл защищённый путь Hosting origin → отдельный staging API Gateway → приватный Cloud Run. `/admin/overview`, `/content/market-pulse`, `/admin/preview` и оба состояния `/admin/outbox` вернули HTTP 200 с browser-enforced CORS.
 - Telegram payload проверялся только как preview; фактическая доставка в Telegram и WhatsApp не выполнялась.
 - Production остаётся на commit `12bdee56c6b299132f55d1afedc0d25e4918ac82` и digest `sha256:561814a852339e454dca7a362d41bc68e27ffe3359fc02e5eedbe6a31597aa3e` до отдельного разрешения владельца на R6.7.
+
+## 27 июля 2026 — R6.7 production smoke и новый RC
+
+- После отдельного разрешения владельца выполнен STOP: delivery выключена, Scheduler и обе Cloud Tasks queue приостановлены; защищённый export `r6-production-20260727-193058` успешно сохранил 69 251 документ.
+- RC `2a42735` и Hosting version `c110b289b2855e7f` были развёрнуты с delivery off. Четыре collector smoke получили 502 объявления, все источники вернули `success=true`; processing queue из 57 уникальных задач полностью обработана без ERROR.
+- Настоящий production Chrome smoke остановил cutover: четыре Admin endpoint вернули 200, а `/admin/overview` получил Gateway 504 без CORS и проявился как `Failed to fetch`. Telegram delivery и content scheduler не включались.
+- Подтверждённая причина: overview последовательно ждал три Cloud API запроса до 20 секунд и потоково считывал десятки тысяч Firestore документов для счётчиков.
+- Исправление не меняет продуктовый контракт: Cloud API запрашиваются параллельно отдельными сессиями с ограниченным timeout; независимые части overview выполняются через `asyncio.gather`; Firestore dashboard counts используют aggregation queries вместо полного stream.
+- Gate нового кандидата: Ruff, strict mypy, 81 pytest, coverage 55,65%, dependency audit и Terraform успешно. До повторного staging rehearsal production остаётся в maintenance-состоянии с delivery off, всеми расписаниями и очередями paused.
 ## 26 июля 2026 — отдельная браузерная админ-панель
 
 - Документация утверждает отдельный desktop-first Admin Web; Telegram больше не является оболочкой административного интерфейса.

@@ -504,11 +504,25 @@ async def version() -> dict[str, str]:
 async def admin_overview(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Безопасный агрегат панели без секретных значений."""
     firebase_principal(authorization, require_admin=True)
-    cloud = await asyncio.to_thread(
-        cloud_runtime_status, settings.google_cloud_project, settings.google_cloud_region
+    (
+        cloud,
+        subscription_metrics,
+        source_health,
+        snapshot_count,
+        operations,
+        referrals,
+    ) = await asyncio.gather(
+        asyncio.to_thread(
+            cloud_runtime_status,
+            settings.google_cloud_project,
+            settings.google_cloud_region,
+        ),
+        telegram_subscription_metrics(settings),
+        asyncio.to_thread(service.repository.source_health),
+        asyncio.to_thread(service.repository.count_snapshots),
+        asyncio.to_thread(service.repository.admin_summary),
+        asyncio.to_thread(service.repository.referral_summary),
     )
-    subscription_metrics = await telegram_subscription_metrics(settings)
-    source_health = await asyncio.to_thread(service.repository.source_health)
     normalized_health: dict[str, dict[str, Any]] = {}
     for source_name, payload in source_health.items():
         run = dict(payload)
@@ -519,7 +533,7 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
         run["status"] = "healthy" if run.get("success") is True else "attention"
         normalized_health[source_name] = run
     return {
-        "snapshot_count": await asyncio.to_thread(service.repository.count_snapshots),
+        "snapshot_count": snapshot_count,
         "sources": normalized_health,
         "source_switches": service.source_statuses(),
         "dynamic_sources": sorted(service.dynamic_source_names()),
@@ -530,7 +544,7 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
         and settings.whatsapp_phone_number_id
         else "disabled",
         "schema_version": settings.schema_version,
-        "operations": await asyncio.to_thread(service.repository.admin_summary),
+        "operations": operations,
         "cloud": cloud,
         "financial_config": {
             "version": settings.financial_config_version,
@@ -543,7 +557,7 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
             "price_stars": settings.pro_price_stars,
             **subscription_metrics,
         },
-        "referrals": await asyncio.to_thread(service.repository.referral_summary),
+        "referrals": referrals,
     }
 
 

@@ -1,7 +1,7 @@
 # Проверка кандидата `1ce36ff` и корректирующий план R6
 
-Статус: **утверждён владельцем 27 июля 2026; R6.1–R6.6 завершены,
-production deploy R6.7 ещё не разрешён**.
+Статус: **утверждён владельцем 27 июля 2026; R6.7 разрешён, но production cutover
+остановлен на обязательном Chrome gate; готовится новый RC**.
 
 ## 1. Проверенный контур
 
@@ -185,3 +185,12 @@ commit-labelled image имеет digest
 `/version` успешны. Повторный реальный Firestore integration и authenticated browser smoke
 прошли. Telegram payload проверен через Admin preview без фактической доставки. Production
 остаётся на прежнем commit/digest до отдельного разрешения владельца на R6.7.
+
+После отдельного разрешения R6.7 был выполнен STOP и защищённый Firestore export. RC
+`2a42735` развёрнут с delivery off, Hosting опубликован, collector и processing smoke
+успешны. Production Chrome gate обнаружил `504` только у `/admin/overview`, поэтому
+delivery и content не возобновлялись. Диагностика доказала production-only bottleneck:
+последовательные Cloud API waits и потоковое чтение Firestore counts превышали Gateway
+deadline. Исправление ограничено этим слоем: Cloud status и агрегаты выполняются
+параллельно, dashboard counts используют Firestore aggregation. Изменение требует нового
+commit/digest и полного повторения R6.5–R6.6 перед продолжением разрешённого R6.7.

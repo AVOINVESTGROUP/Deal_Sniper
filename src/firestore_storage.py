@@ -31,6 +31,14 @@ from src.storage import snapshot_hash
 PUBLICATION_TRANSACTION_MAX_ATTEMPTS = 20
 
 
+def _aggregation_count(query: Any) -> int:
+    """Возвращает Firestore COUNT без потокового чтения всех документов."""
+    results = query.count(alias="total").get()
+    if not results or not results[0]:
+        return 0
+    return int(results[0][0].value)
+
+
 class FirestoreRepository:
     """Firestore-реализация контракта Repository."""
 
@@ -558,13 +566,14 @@ class FirestoreRepository:
             "outcomes": "outcomes",
         }
         counts = {
-            name: sum(1 for _document in self.client.collection(collection).stream())
+            name: _aggregation_count(self.client.collection(collection))
             for name, collection in collections.items()
         }
-        outbox_states: dict[str, int] = {}
-        for document in self.client.collection("delivery_outbox").stream():
-            state = str((document.to_dict() or {}).get("state", "unknown"))
-            outbox_states[state] = outbox_states.get(state, 0) + 1
+        outbox = self.client.collection("delivery_outbox")
+        outbox_states = {
+            state.value: _aggregation_count(outbox.where("state", "==", state.value))
+            for state in OutboxState
+        }
         return {"counts": counts, "outbox_states": outbox_states}
 
     def schema_version(self) -> str:
@@ -802,7 +811,7 @@ class FirestoreRepository:
         ]
 
     def count_snapshots(self) -> int:
-        return sum(1 for _document in self.client.collection_group("snapshots").stream())
+        return _aggregation_count(self.client.collection_group("snapshots"))
 
     def notification_sent(self, target_id: str, listing_id: str, content_hash: str) -> bool:
         return (
