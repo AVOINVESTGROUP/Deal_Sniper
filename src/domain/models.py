@@ -396,8 +396,14 @@ class PublicationEvent(BaseModel):
     decision_id: str
     vehicle_id: str
     event_type: str
+    pro_cta_variant_id: str | None = None
+    pro_cta_text: str | None = None
+    pro_cta_button_label: str | None = None
+    pro_cta_target: str | None = None
+    pro_cta_fingerprint: str | None = None
+    pro_cta_template_version: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    template_version: str = "publication/v1"
+    template_version: str = "publication/v2"
 
 
 class TelegramUpdateRecord(BaseModel):

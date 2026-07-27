@@ -10,10 +10,16 @@ from src.config import Settings
 from src.content import market_pulse
 from src.domain.ids import canonical_hash, delivery_id, publication_event_id
 from src.domain.models import DealDecision, ListingSnapshot, OutboxRecord, PublicationEvent
+from src.pro_cta import (
+    append_pro_cta,
+    pro_cta_count,
+    pro_cta_for_index,
+    validated_subscription_url,
+)
 from src.service import DealService
 from src.tasks import CloudTaskDispatcher
 
-MARKET_WATCH_TEMPLATE_VERSION = "market-watch/v1"
+MARKET_WATCH_TEMPLATE_VERSION = "market-watch/v2"
 MARKET_WATCH_BATCH_SIZE = 5
 
 
@@ -133,6 +139,7 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
     await dispatcher.enqueue_content_delivery(delivery_payload)
 
     published = 0
+    subscription_url = validated_subscription_url(settings.telegram_pro_subscription_url)
     for listing, decision in watch:
         if published >= MARKET_WATCH_BATCH_SIZE:
             break
@@ -162,21 +169,39 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         existing = await asyncio.to_thread(service.repository.get_outbox, card_delivery_id)
         if existing is not None:
             continue
+        if subscription_url is None:
+            continue
+        cta_index = await asyncio.to_thread(
+            service.repository.reserve_pro_cta_variant,
+            card_event_id,
+            pro_cta_count(),
+        )
+        pro_cta = pro_cta_for_index(cta_index)
         card_event = PublicationEvent(
             publication_event_id=card_event_id,
             decision_id=decision_identity,
             vehicle_id=decision.vehicle_id or listing_id,
             event_type="market-watch",
             template_version=MARKET_WATCH_TEMPLATE_VERSION,
+            pro_cta_variant_id=pro_cta.variant_id,
+            pro_cta_text=pro_cta.text,
+            pro_cta_button_label=pro_cta.button_label,
+            pro_cta_target=subscription_url,
+            pro_cta_fingerprint=pro_cta.fingerprint,
+            pro_cta_template_version=pro_cta.template_version,
         )
         await asyncio.to_thread(service.repository.save_publication_event, card_event)
         card_payload: dict[str, object] = {
             "delivery_id": card_delivery_id,
             "publication_event_id": card_event_id,
             "target_id": target,
-            "text": format_market_watch_card(listing, decision),
+            "text": append_pro_cta(format_market_watch_card(listing, decision), pro_cta),
             "template_version": MARKET_WATCH_TEMPLATE_VERSION,
             "image_url": str(listing.image_urls[0]),
+            "pro_cta_button_label": pro_cta.button_label,
+            "pro_cta_button_url": subscription_url,
+            "pro_cta_variant_id": pro_cta.variant_id,
+            "pro_cta_fingerprint": pro_cta.fingerprint,
         }
         await asyncio.to_thread(
             service.repository.put_outbox,

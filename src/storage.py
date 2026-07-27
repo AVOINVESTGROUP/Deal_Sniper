@@ -160,6 +160,8 @@ class Repository(Protocol):
 
     def save_publication_event(self, event: PublicationEvent) -> None: ...
 
+    def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int: ...
+
     def admin_summary(self) -> dict[str, Any]: ...
 
     def schema_version(self) -> str: ...
@@ -360,6 +362,12 @@ class LocalRepository:
                 CREATE TABLE IF NOT EXISTS publication_events (
                     publication_event_id TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS pro_cta_assignments (
+                    assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    publication_event_id TEXT NOT NULL UNIQUE,
+                    variant_index INTEGER NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 """
@@ -829,6 +837,31 @@ class LocalRepository:
                 """,
                 (event.publication_event_id, event.model_dump_json()),
             )
+
+    def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int:
+        """Атомарно назначает следующий CTA, сохраняя выбор для повторной задачи."""
+        if variant_count < 1:
+            raise ValueError("Пул CTA не может быть пустым")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT variant_index FROM pro_cta_assignments WHERE publication_event_id = ?",
+                (publication_event_id,),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["variant_index"])
+            latest = connection.execute(
+                "SELECT variant_index FROM pro_cta_assignments ORDER BY assignment_id DESC LIMIT 1"
+            ).fetchone()
+            variant_index = (int(latest["variant_index"]) + 1) % variant_count if latest else 0
+            connection.execute(
+                """
+                INSERT INTO pro_cta_assignments(publication_event_id, variant_index)
+                VALUES (?, ?)
+                """,
+                (publication_event_id, variant_index),
+            )
+            return variant_index
 
     def admin_summary(self) -> dict[str, Any]:
         tables = {

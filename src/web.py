@@ -65,6 +65,13 @@ from src.domain.models import (
     UserSettings,
 )
 from src.news import DubaiAutoNewsClient, format_news
+from src.pro_cta import (
+    ProCta,
+    append_pro_cta,
+    pro_cta_count,
+    pro_cta_for_index,
+    validated_subscription_url,
+)
 from src.search import build_saved_search, parse_search
 from src.service import DealService, EvaluatedListing
 from src.sources.json_feed import JsonFeedSource
@@ -149,6 +156,16 @@ def admin_chat_keyboard() -> InlineKeyboardMarkup | None:
     )
 
 
+def publication_cta_keyboard(
+    button_label: str | None, button_url: str | None
+) -> InlineKeyboardMarkup | None:
+    """Создаёт единственную прямую кнопку Pro только для валидной пары полей."""
+    validated_url = validated_subscription_url(button_url or "")
+    if not button_label or not validated_url:
+        return None
+    return InlineKeyboardMarkup([[InlineKeyboardButton(button_label, url=validated_url)]])
+
+
 @app.middleware("http")
 async def restore_gateway_authorization(request: Any, call_next: Any) -> Any:
     """Восстанавливает Firebase bearer, сохранённый API Gateway при backend OIDC."""
@@ -184,6 +201,8 @@ class DeliveryTask(BaseModel):
     template_version: str = "pro/v1"
     format: str = "telegram"
     image_url: str | None = None
+    pro_cta_button_label: str | None = None
+    pro_cta_button_url: str | None = None
 
 
 class SourceAdminRequest(BaseModel):
@@ -249,6 +268,8 @@ class ContentDeliveryTask(BaseModel):
     text: str
     template_version: str = "content/v1"
     image_url: str | None = None
+    pro_cta_button_label: str | None = None
+    pro_cta_button_url: str | None = None
 
 
 class WhatsAppDeliveryTask(BaseModel):
@@ -1532,6 +1553,17 @@ async def process_listing_task(
         vehicle_id=vehicle_id,
         event_type="deal-candidate",
     )
+    subscription_url = validated_subscription_url(settings.telegram_pro_subscription_url)
+    pro_cta: ProCta | None = None
+    if settings.telegram_channel_id and subscription_url:
+        cta_index = await asyncio.to_thread(
+            service.repository.reserve_pro_cta_variant,
+            event_id,
+            pro_cta_count(),
+        )
+        pro_cta = pro_cta_for_index(cta_index)
+    elif settings.telegram_channel_id:
+        logger.error("Free-публикация заблокирована: ссылка подписки Pro отсутствует или невалидна")
     await asyncio.to_thread(
         service.repository.save_publication_event,
         PublicationEvent(
@@ -1539,7 +1571,13 @@ async def process_listing_task(
             decision_id=current_decision_id,
             vehicle_id=vehicle_id,
             event_type="deal-candidate",
-            template_version="deal/v1",
+            template_version="deal/v2",
+            pro_cta_variant_id=pro_cta.variant_id if pro_cta else None,
+            pro_cta_text=pro_cta.text if pro_cta else None,
+            pro_cta_button_label=pro_cta.button_label if pro_cta else None,
+            pro_cta_target=subscription_url if pro_cta else None,
+            pro_cta_fingerprint=pro_cta.fingerprint if pro_cta else None,
+            pro_cta_template_version=pro_cta.template_version if pro_cta else None,
         ),
     )
     targets: dict[str, tuple[str, str]] = {}
@@ -1570,15 +1608,18 @@ async def process_listing_task(
             )
     if settings.telegram_pro_channel_id:
         targets[settings.telegram_pro_channel_id] = ("en", "pro/v1")
-    if settings.telegram_channel_id:
-        targets[settings.telegram_channel_id] = ("en", "free/v1")
+    if settings.telegram_channel_id and pro_cta and subscription_url:
+        targets[settings.telegram_channel_id] = ("en", "free/v2")
     dispatcher = CloudTaskDispatcher(settings)
     for target_id, (target_language, template_version) in targets.items():
+        is_free_channel = template_version == "free/v2"
         card = (
             format_public_teaser(evaluated.listing, target_language)
-            if template_version in {"free/v1", "personal-free/v1"}
+            if template_version in {"free/v2", "personal-free/v1"}
             else format_card(evaluated.listing, evaluated.decision, target_language)
         )
+        if is_free_channel and pro_cta:
+            card = append_pro_cta(card, pro_cta)
         stable_delivery_id = delivery_id(
             decision_id_value=current_decision_id,
             recipient_id=target_id,
@@ -1596,10 +1637,15 @@ async def process_listing_task(
             "template_version": template_version,
             "format": "telegram",
         }
-        if template_version in {"free/v1", "personal-free/v1"}:
+        if template_version in {"free/v2", "personal-free/v1"}:
             delivery_payload["image_url"] = settings.free_teaser_image_url
         elif evaluated.listing.image_urls:
             delivery_payload["image_url"] = str(evaluated.listing.image_urls[0])
+        if is_free_channel and pro_cta and subscription_url:
+            delivery_payload["pro_cta_button_label"] = pro_cta.button_label
+            delivery_payload["pro_cta_button_url"] = subscription_url
+            delivery_payload["pro_cta_variant_id"] = pro_cta.variant_id
+            delivery_payload["pro_cta_fingerprint"] = pro_cta.fingerprint
         await asyncio.to_thread(
             service.repository.put_outbox,
             OutboxRecord(
@@ -1646,6 +1692,10 @@ async def deliver_telegram_task(
     if claimed is None:
         return {"ok": True}
     try:
+        reply_markup = publication_cta_keyboard(
+            task.pro_cta_button_label,
+            task.pro_cta_button_url,
+        )
         async with Bot(settings.require_bot_token()) as bot:
             if task.image_url:
                 sent = await bot.send_photo(
@@ -1653,12 +1703,14 @@ async def deliver_telegram_task(
                     photo=task.image_url,
                     caption=task.text,
                     parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
                 )
             else:
                 sent = await bot.send_message(
                     chat_id=task.target_id,
                     text=task.text,
                     parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
                 )
     except (TimedOut, NetworkError) as error:
         await asyncio.to_thread(
@@ -1702,6 +1754,10 @@ async def deliver_content_task(
     if claimed is None:
         return {"ok": True}
     try:
+        reply_markup = publication_cta_keyboard(
+            task.pro_cta_button_label,
+            task.pro_cta_button_url,
+        )
         async with Bot(settings.require_bot_token()) as bot:
             if task.image_url:
                 sent = await bot.send_photo(
@@ -1709,12 +1765,14 @@ async def deliver_content_task(
                     photo=task.image_url,
                     caption=task.text,
                     parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
                 )
             else:
                 sent = await bot.send_message(
                     chat_id=task.target_id,
                     text=task.text,
                     parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
                 )
     except (TimedOut, NetworkError) as error:
         await asyncio.to_thread(

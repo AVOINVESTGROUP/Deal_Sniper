@@ -434,11 +434,50 @@ class FirestoreRepository:
                     "event_type": event.event_type,
                     "payload": event.model_dump(mode="json"),
                     "created_at": event.created_at,
-                    "schema_version": "publication-event/v1",
+                    "schema_version": "publication-event/v2",
                 }
             )
         except AlreadyExists:
             return
+
+    def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int:
+        """Атомарно вращает CTA и возвращает прежний выбор при retry."""
+        if variant_count < 1:
+            raise ValueError("Пул CTA не может быть пустым")
+        assignment_ref = self.client.collection("pro_cta_assignments").document(
+            publication_event_id
+        )
+        state_ref = self.client.collection("publication_control").document("pro_cta")
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def reserve(transaction: firestore.Transaction) -> int:
+            existing = assignment_ref.get(transaction=transaction)
+            if existing.exists:
+                return int((existing.to_dict() or {})["variant_index"])
+            state = state_ref.get(transaction=transaction)
+            state_data = state.to_dict() or {}
+            variant_index = (int(state_data.get("last_variant_index", -1)) + 1) % variant_count
+            transaction.set(
+                assignment_ref,
+                {
+                    "publication_event_id": publication_event_id,
+                    "variant_index": variant_index,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "schema_version": "pro-cta-assignment/v1",
+                },
+            )
+            transaction.set(
+                state_ref,
+                {
+                    "last_variant_index": variant_index,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "schema_version": "pro-cta-control/v1",
+                },
+            )
+            return variant_index
+
+        return cast(int, reserve(transaction))
 
     def admin_summary(self) -> dict[str, Any]:
         collections = {

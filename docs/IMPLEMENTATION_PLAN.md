@@ -40,7 +40,7 @@
 | 22 | Production migration, merge, cutover и pilot | запрещено до 21 | ожидает execution |
 | 23 | Чужие Telegram sources: MTProto registry, analyzer и evidence tier | только документация | ожидает утверждения плана |
 | 24 | Telegram discovery и controlled scaling до 50–200 sources | только документация | после успешного Telegram pilot |
-| 25 | Уникальный CTA и кнопка Pro под каждым Free-объявлением | только документация | ожидает утверждения плана |
+| 25 | Уникальный CTA и кнопка Pro под каждым Free-объявлением | реализовано локально, 71 тест | immutable deploy и production smoke |
 
 ## Порядок оставшегося execution
 

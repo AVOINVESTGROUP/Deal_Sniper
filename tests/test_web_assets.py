@@ -49,7 +49,24 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
     assert "/admin/sources/${button.dataset.source}/run" in script
     assert 'call("/admin/source-test"' in script
     assert 'call("/admin/sources"' in script
+    assert "Promise.allSettled" in script
+    assert "getIdToken(true)" in script
+    assert "transientStatuses" in script
     assert "Add source" in page
     assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")
     runtime = json.loads((WEB / "runtime-config.json").read_text(encoding="utf-8"))
     assert runtime["adminApiBase"] == runtime["apiBase"]
+
+
+def test_hosting_csp_allows_required_firebase_and_gateway_connections() -> None:
+    config = json.loads((WEB.parent / "firebase.json").read_text(encoding="utf-8"))
+    headers = config["hosting"]["headers"]
+    csp = next(
+        header["value"]
+        for rule in headers
+        for header in rule["headers"]
+        if header["key"] == "Content-Security-Policy"
+    )
+
+    assert "https://www.gstatic.com" in csp
+    assert "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev" in csp

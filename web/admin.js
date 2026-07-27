@@ -7,15 +7,32 @@ const auth = getAuth(initializeApp(config));
 const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ?? "";
 let token = "";
 let testedSourceKey = "";
+const transientStatuses = new Set([429, 500, 502, 503, 504]);
 const byId = (id) => document.getElementById(id);
 const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
 const number = (value) => new Intl.NumberFormat("en-AE").format(Number(value || 0));
 const money = (value) => `${number(value)} AED`;
 
-async function call(path, options = {}) {
-  const response = await fetch(api + path, {...options, headers: {"Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers}});
+const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+async function call(path, options = {}, attempt = 0) {
+  let response;
+  try {
+    response = await fetch(api + path, {...options, cache: "no-store", headers: {"Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers}});
+  } catch (error) {
+    if (attempt < 2) { await wait(300 * (attempt + 1)); return call(path, options, attempt + 1); }
+    throw new Error(`${path}: network or Gateway error`);
+  }
+  if (response.status === 401 && attempt === 0 && auth.currentUser) {
+    token = await auth.currentUser.getIdToken(true);
+    return call(path, options, attempt + 1);
+  }
+  if (transientStatuses.has(response.status) && attempt < 2) {
+    await wait(300 * (attempt + 1));
+    return call(path, options, attempt + 1);
+  }
   if (!response.ok) {
-    let message = `Request failed (${response.status})`;
+    let message = `${path}: request failed (${response.status})`;
     try { message = (await response.json()).detail || message; } catch { /* response was not JSON */ }
     throw new Error(message);
   }
@@ -134,8 +151,16 @@ async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/$
 async function refresh() {
   byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const [data, pulse, preview, unknown, failed] = await Promise.all([call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed")]);
-    render(data, pulse, preview, [...(unknown.items || []), ...(failed.items || [])]);
+    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed")];
+    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult] = await Promise.allSettled(requests);
+    if (overviewResult.status === "rejected") throw overviewResult.reason;
+    const pulse = pulseResult.status === "fulfilled" ? pulseResult.value : {};
+    const preview = previewResult.status === "fulfilled" ? previewResult.value : {};
+    const unknown = unknownResult.status === "fulfilled" ? unknownResult.value : {items: []};
+    const failed = failedResult.status === "fulfilled" ? failedResult.value : {items: []};
+    render(overviewResult.value, pulse, preview, [...(unknown.items || []), ...(failed.items || [])]);
+    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult].filter((result) => result.status === "rejected");
+    if (partialErrors.length) showError(new Error(`${partialErrors.length} section(s) are temporarily unavailable. Refresh will retry them.`));
     byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
   } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }
 }
