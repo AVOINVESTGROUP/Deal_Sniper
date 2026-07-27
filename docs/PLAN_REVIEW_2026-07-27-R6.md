@@ -163,4 +163,9 @@ R6.1–R6.4:
 уязвимостей, Terraform fmt/validate успешно. GitHub Actions для кандидата `f1bd8fd`
 подтвердил Python 3.11, повторный quality gate, Docker build и Trivy без блокирующих
 HIGH/CRITICAL. Firestore integration, browser smoke и staging rehearsal относятся к
-незавершённым R6.5–R6.6. Production остаётся на прежнем digest.
+незавершённым R6.5–R6.6. Реальный integration-тест в named database
+`deal-sniper-stage-rc2` выявил contention при стандартных пяти попытках Firestore
+transaction; publication/CTA retry budget адресно повышен до 20. Повторный тест с 12
+конкурентными reservations, атомарным event+outbox, стабильным retry и очисткой test IDs
+прошёл успешно. Незавершёнными остаются browser smoke и staging rehearsal. Production
+остаётся на прежнем digest.

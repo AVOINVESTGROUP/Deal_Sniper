@@ -28,6 +28,8 @@ from src.domain.models import (
 )
 from src.storage import snapshot_hash
 
+PUBLICATION_TRANSACTION_MAX_ATTEMPTS = 20
+
 
 class FirestoreRepository:
     """Firestore-реализация контракта Repository."""
@@ -450,7 +452,9 @@ class FirestoreRepository:
             event.publication_event_id
         )
         outbox_ref = self.client.collection("delivery_outbox").document(record.delivery_id)
-        transaction = self.client.transaction()
+        transaction = self.client.transaction(
+            max_attempts=PUBLICATION_TRANSACTION_MAX_ATTEMPTS
+        )
 
         @firestore.transactional
         def commit(transaction: firestore.Transaction) -> OutboxRecord:
@@ -510,7 +514,9 @@ class FirestoreRepository:
             publication_event_id
         )
         state_ref = self.client.collection("publication_control").document("pro_cta")
-        transaction = self.client.transaction()
+        transaction = self.client.transaction(
+            max_attempts=PUBLICATION_TRANSACTION_MAX_ATTEMPTS
+        )
 
         @firestore.transactional
         def reserve(transaction: firestore.Transaction) -> int:

@@ -10,7 +10,9 @@
 - Firebase Hosting очищен от конфликтующих Cloud Run rewrites; Admin сохраняет Gateway-only transport, CSP для Firebase runtime и понятную ошибку истёкшей сессии.
 - Локальный gate: Ruff — green; mypy — green; 80 pytest — green; coverage 56%; pip-audit — без известных уязвимостей; Terraform fmt/validate — green.
 - GitHub Actions кандидата `f1bd8fd` подтвердил Python 3.11, quality, Docker build, Trivy и Terraform; все три jobs завершились успешно.
-- R6.5 не завершён: нужны Firestore/browser integration и staging rehearsal. Production не изменён.
+- Настоящий Firestore integration в `deal-sniper-stage-rc2` воспроизвёл transaction contention при 12 конкурентных CTA reservations; retry budget только publication/CTA транзакций повышен с 5 до 20.
+- Повторная интеграционная проверка прошла: 12 уникальных вариантов, стабильный retry, атомарный event+outbox, отклонение изменённого immutable event и очистка всех test IDs.
+- R6.5 не завершён: нужен browser integration smoke; затем выполняется staging rehearsal. Production не изменён.
 
 ## 27 июля 2026 — остановка кандидата и обязательный сквозной аудит
 

@@ -96,7 +96,8 @@ class FakeFirestoreClient:
     def collection(self, name: str) -> FakeCollectionReference:
         return FakeCollectionReference(self.documents, name)
 
-    def transaction(self) -> FakeTransaction:
+    def transaction(self, *, max_attempts: int = 5) -> FakeTransaction:
+        assert max_attempts >= 5
         return FakeTransaction()
 
 
