@@ -172,6 +172,18 @@
 - Terraform apply до import существующих ресурсов запрещён.
 - WhatsApp включать только после внешних Meta credentials/template approval/opt-in.
 - Любое изменение build context после staging rehearsal требует нового RC и повторного rehearsal.
+
+## 27 июля 2026 — завершение R6.6 в staging
+
+- Владелец явно утвердил план R6; production-развёртывание этим сообщением не разрешалось.
+- Чистый RC commit `2a42735d57af6e3549af1d5fa0a975cee120a76f` прошёл GitHub Actions `30278152829`.
+- Из RC собран commit-labelled образ `r6-2a42735` с неизменяемым digest `sha256:abd5cf8b368e2fffa5cc9fc70023ac68baf4572202942634092dc61bef145d8a`.
+- Exact digest развёрнут только в `deal-sniper-api-staging`, revision `deal-sniper-api-staging-00020-mgd`, с `FIRESTORE_DATABASE=deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false` и `WHATSAPP_ENABLED=false`.
+- `/health` вернул `ok`; `/version` подтвердил RC commit, runtime digest и schema `2`.
+- Реальный Firestore integration прошёл: 12 конкурентных CTA reservations, атомарный PublicationEvent + outbox, стабильный retry, блокировка изменённого retry и очистка тестовых документов.
+- Настоящий headless Chrome прошёл защищённый путь Hosting origin → отдельный staging API Gateway → приватный Cloud Run. `/admin/overview`, `/content/market-pulse`, `/admin/preview` и оба состояния `/admin/outbox` вернули HTTP 200 с browser-enforced CORS.
+- Telegram payload проверялся только как preview; фактическая доставка в Telegram и WhatsApp не выполнялась.
+- Production остаётся на commit `12bdee56c6b299132f55d1afedc0d25e4918ac82` и digest `sha256:561814a852339e454dca7a362d41bc68e27ffe3359fc02e5eedbe6a31597aa3e` до отдельного разрешения владельца на R6.7.
 ## 26 июля 2026 — отдельная браузерная админ-панель
 
 - Документация утверждает отдельный desktop-first Admin Web; Telegram больше не является оболочкой административного интерфейса.

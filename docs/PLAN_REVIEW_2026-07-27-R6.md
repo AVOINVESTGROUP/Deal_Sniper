@@ -1,7 +1,7 @@
 # Проверка кандидата `1ce36ff` и корректирующий план R6
 
-Статус: **утверждён владельцем 27 июля 2026; R6.1–R6.5 завершены,
-R6.6 выполняется, production deploy ещё не разрешён**.
+Статус: **утверждён владельцем 27 июля 2026; R6.1–R6.6 завершены,
+production deploy R6.7 ещё не разрешён**.
 
 ## 1. Проверенный контур
 
@@ -174,7 +174,14 @@ Authenticated browser smoke затем выполнен в headless Chrome че�
 API Gateway: `/admin/overview`, `/content/market-pulse`, `/admin/preview` и два состояния
 `/admin/outbox` вернули 200 при настоящем browser CORS с Hosting-origin. Live CSP ожидаемо
 блокировал незаявленный staging hostname; тестовый route добавлял его только в изолированный
-ответ Chrome, не меняя production Hosting. R6.5 завершён. Первый staging runtime
-`409aa18`/`sha256:16ab3816…74301` подтвердил `/version` и `DELIVERY_ENABLED=false`, но
-считается промежуточным: browser test/evidence создают новый commit, после которого требуется
-финальная commit-labelled сборка и повтор R6.6.
+ответ Chrome, не меняя production Hosting. R6.5 завершён.
+
+Финальный R6.6 выполнен на чистом RC commit
+`2a42735d57af6e3549af1d5fa0a975cee120a76f`. GitHub Actions `30278152829` успешен;
+commit-labelled image имеет digest
+`sha256:abd5cf8b368e2fffa5cc9fc70023ac68baf4572202942634092dc61bef145d8a` и развёрнут
+только в staging revision `deal-sniper-api-staging-00020-mgd`. Конфигурация использует
+`deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false`, `WHATSAPP_ENABLED=false`; `/health` и
+`/version` успешны. Повторный реальный Firestore integration и authenticated browser smoke
+прошли. Telegram payload проверен через Admin preview без фактической доставки. Production
+остаётся на прежнем commit/digest до отдельного разрешения владельца на R6.7.
