@@ -1,7 +1,7 @@
 # Проверка кандидата `1ce36ff` и корректирующий план R6
 
-Статус: **утверждён владельцем 27 июля 2026; R6.1–R6.5 выполняются,
-staging и production deploy ещё не разрешены**.
+Статус: **утверждён владельцем 27 июля 2026; R6.1–R6.5 завершены,
+R6.6 выполняется, production deploy ещё не разрешён**.
 
 ## 1. Проверенный контур
 
@@ -169,3 +169,12 @@ transaction; publication/CTA retry budget адресно повышен до 20.
 конкурентными reservations, атомарным event+outbox, стабильным retry и очисткой test IDs
 прошёл успешно. Незавершёнными остаются browser smoke и staging rehearsal. Production
 остаётся на прежнем digest.
+
+Authenticated browser smoke затем выполнен в headless Chrome через отдельный staging
+API Gateway: `/admin/overview`, `/content/market-pulse`, `/admin/preview` и два состояния
+`/admin/outbox` вернули 200 при настоящем browser CORS с Hosting-origin. Live CSP ожидаемо
+блокировал незаявленный staging hostname; тестовый route добавлял его только в изолированный
+ответ Chrome, не меняя production Hosting. R6.5 завершён. Первый staging runtime
+`409aa18`/`sha256:16ab3816…74301` подтвердил `/version` и `DELIVERY_ENABLED=false`, но
+считается промежуточным: browser test/evidence создают новый commit, после которого требуется
+финальная commit-labelled сборка и повтор R6.6.

@@ -12,7 +12,10 @@
 - GitHub Actions кандидата `f1bd8fd` подтвердил Python 3.11, quality, Docker build, Trivy и Terraform; все три jobs завершились успешно.
 - Настоящий Firestore integration в `deal-sniper-stage-rc2` воспроизвёл transaction contention при 12 конкурентных CTA reservations; retry budget только publication/CTA транзакций повышен с 5 до 20.
 - Повторная интеграционная проверка прошла: 12 уникальных вариантов, стабильный retry, атомарный event+outbox, отклонение изменённого immutable event и очистка всех test IDs.
-- R6.5 не завершён: нужен browser integration smoke; затем выполняется staging rehearsal. Production не изменён.
+- Отдельный staging API Gateway направлен только на `deal-sniper-api-staging`; production Gateway не переключался. После выдачи ему `run.invoker` `/version` подтвердил commit `409aa18`, digest `sha256:16ab3816…74301` и schema 2.
+- Серверная и настоящая headless Chrome матрицы прошли пять authenticated Admin endpoints с HTTP 200 и browser-enforced CORS от `https://avo-deal-sniper.web.app`.
+- Live CSP ожидаемо запрещает staging hostname; Playwright меняет `connect-src` только в перехваченном тестовом ответе. Production Hosting не изменён.
+- R6.5 завершён. Первый staging digest промежуточный: после фиксации browser test/evidence требуется финальная commit-labelled сборка и полный повтор R6.6. Production не изменён.
 
 ## 27 июля 2026 — остановка кандидата и обязательный сквозной аудит
 
