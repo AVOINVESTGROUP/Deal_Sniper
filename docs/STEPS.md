@@ -245,3 +245,5 @@
 - API Gateway и Terraform дополнены маршрутами R7 и минимальной ролью Scheduler operator.
 - Локальный gate успешен: Ruff, strict mypy, 89 тестов, coverage 56,15%, dependency audit, JavaScript syntax, Terraform format/validate и `git diff --check` прошли. Секреты в изменённых и новых файлах не обнаружены.
 - Локальная container build не выполнена: Docker Desktop Linux engine выключен. Immutable image, Trivy, staging и release evidence ещё не созданы; production R6 не изменялся.
+- Коммиты плана `4f4e3b2` и реализации `2cb2bd2` отправлены в ветку `production/deal-sniper-complete`. GitHub Actions run `30336329612` успешно выполнил Python 3.11 quality, container build, Trivy и Terraform. Artifact Registry digest, staging rehearsal и production deploy ещё не выполнялись.
+- Создан предварительный `docs/RELEASE_EVIDENCE_2026-07-28-R7.md`. Staging остановлен до повторной интерактивной авторизации `gcloud` и подтверждения отдельного тестового Pro-канала; production Pro-канал для этих проверок не используется.
