@@ -263,3 +263,5 @@
 - GitHub Actions `30342104177` прошёл quality, container/Trivy и Terraform. Cloud Build `6d7de8fd-8088-4b87-a74e-26afe9a1e7fd` собрал новый immutable digest `sha256:c45e544ce9cc128353a9c8f1f96443809aded61f31c06ebde42d0b77ca2f6e2a` из RC `80872e0`.
 - Exact digest развёрнут только в staging revision `deal-sniper-api-staging-00033-v7k`; `/version` совпадает с RC/digest, delivery выключена, временные Firebase users отсутствуют.
 - Настоящий Hosting Preview UI успешно вошёл через Firebase Auth, загрузил Dashboard без ошибок и открыл все десять разделов. Preview CORS preflight возвращает HTTP 200; staging allowlist восстановлен после smoke.
+- Владелец уточнил, что отдельный тестовый Pro-канал не нужен: платных пользователей пока нет, цена должна меняться только в Admin, а новая Telegram Stars link должна создаваться backend автоматически.
+- Read-only аудит production обнаружил 3 текущих `INSPECT`, 5 исторических `pro/v1` outbox и отсутствие Pro reconciliation в периодическом publisher. Подготовлен `docs/PLAN_R7_1_PRO_PUBLICATION.md`; до его утверждения код и production не менять.
