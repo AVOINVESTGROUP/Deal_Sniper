@@ -291,3 +291,11 @@
 - Два staging execution успешны. Изолированный fixture подтвердил `selected=1, created=1, failed=0`, атомарный PublicationEvent/outbox и правильный staging recipient; все тестовые документы удалены по точным ID, тестовая Cloud Task отсутствует.
 - Production повторно проверен и не изменён: API `deal-sniper-api-00060-kkc`, R6 digest `sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112`, Gateway `deal-sniper-config-source-12bdee5`, Hosting `c110b289b2855e7f`.
 - Осталась только ручная authenticated проверка раздела Publications в Hosting Preview. Production deploy по-прежнему требует отдельного явного разрешения владельца.
+
+## 28 июля 2026 — план R7.2 для Google Admin Sign-In
+
+- Владелец сообщил, что пароль Firebase утрачен, и потребовал вход через Google-аккаунт.
+- Read-only аудит подтвердил: Google provider включён, но связан с IAP OAuth client `Dubai Deal Sniper Admin Web`; именно это вызвало прежний `redirect_uri_mismatch`.
+- Backend уже использует Firebase ID token и `ADMIN_EMAILS`, поэтому модель административной авторизации сохраняется; меняется только способ входа.
+- Создан `docs/PLAN_R7_2_GOOGLE_ADMIN_AUTH.md`: отдельный Web OAuth client, Google popup, обязательный `email_verified`, миграция существующей password-account, staging и rollback.
+- До утверждения R7.2 код, Firebase provider и production не изменяются.
