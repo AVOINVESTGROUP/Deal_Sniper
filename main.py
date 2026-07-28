@@ -84,10 +84,14 @@ def main() -> None:
             raise RuntimeError("DELIVERY_ENABLED=false: Telegram long polling запрещён")
         run_bot(settings)
     elif args.command == "content":
-        from src.content_job import enqueue_market_pulse
+        from src.content_job import run_content_publication
 
-        event_id = asyncio.run(enqueue_market_pulse(settings))
-        print(f"PublicationEvent: {event_id or 'channel-not-configured'}")
+        event_id, pro = asyncio.run(run_content_publication(settings))
+        print(
+            f"PublicationEvent: {event_id or 'channel-not-configured'}; "
+            f"Pro: selected={pro.selected}, created={pro.created}, "
+            f"requeued={pro.requeued}, skipped={pro.skipped}, failed={pro.failures}"
+        )
     elif args.command == "collect":
         asyncio.run(collect_once(settings, args.source))
     elif args.command == "replay":

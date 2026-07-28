@@ -9,6 +9,7 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 
 SCHEDULER_ACTIONS = frozenset({"run", "pause", "resume"})
+PUBLISHER_JOB_NAME = "deal-sniper-publisher"
 
 
 def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
@@ -95,4 +96,27 @@ def scheduler_action(project_id: str, region: str, job_name: str, action: str) -
         "name": payload.get("name", job_name),
         "state": payload.get("state", "UNKNOWN"),
         "action": action,
+    }
+
+
+def run_publisher_job(project_id: str, region: str) -> dict[str, Any]:
+    """Запускает только установленный publisher job без произвольных аргументов."""
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    session = _authorized_session(credentials, project_id)
+    url = (
+        f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/jobs/"
+        f"{PUBLISHER_JOB_NAME}:run"
+    )
+    response = session.post(url, json={}, timeout=15)
+    if not response.ok:
+        raise RuntimeError(
+            f"Cloud Run отклонил запуск publisher: HTTP {response.status_code}"
+        )
+    payload = response.json()
+    return {
+        "job": PUBLISHER_JOB_NAME,
+        "operation": payload.get("name", "started"),
+        "state": "STARTED",
     }

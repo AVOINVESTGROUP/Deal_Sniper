@@ -266,3 +266,13 @@
 - Владелец уточнил, что отдельный тестовый Pro-канал не нужен: платных пользователей пока нет, цена должна меняться только в Admin, а новая Telegram Stars link должна создаваться backend автоматически.
 - Read-only аудит production обнаружил 3 текущих `INSPECT`, 5 исторических `pro/v1` outbox и отсутствие Pro reconciliation в периодическом publisher. Подготовлен `docs/PLAN_R7_1_PRO_PUBLICATION.md`; до его утверждения код и production не менять.
 - Владелец явно утвердил `docs/PLAN_R7_1_PRO_PUBLICATION.md`. Разрешены реализация и staging R7.1; production deploy по-прежнему требует отдельной команды после нового release evidence.
+## 28 июля 2026 — R7.1 реализован локально
+
+- Утверждённый план R7.1 реализован без изменения production R6.
+- Добавлен периодический Pro reconciliation текущих подтверждённых `CONTACT`/`INSPECT`: стабильные ID, атомарный PublicationEvent/outbox, повторная постановка только `pending`, fail-closed для `sent`/`sending`/`unknown`/`failed` и ограничение batch.
+- Publisher выполняет Pro reconciliation до Free/Market Pulse, поэтому ошибка Free-контента не лишает Pro-контур очередной сверки.
+- В Admin Web раздел Publications показывает publishable/sent/pending/sending/unknown/failed/missing, последний запуск и кнопку `Publish Pro now` с точным подтверждением; браузер запускает только Cloud Run Job `deal-sniper-publisher`.
+- Цена AED и Stars остаётся управляемой в Settings. Price-only revision не меняет версию финансовой политики и не инвалидирует действующие расчёты автомобилей.
+- Добавлены защищённые Gateway routes `/admin/pro-publications` и `/admin/pro-publications/run`.
+- Локальный gate: 94 теста прошли, 2 условно пропущены; Ruff, strict mypy, JavaScript ES-module syntax и `git diff --check` успешны.
+- Следующий разрешённый этап: commit/push, immutable build и staging rehearsal. Production deploy по-прежнему требует отдельного явного разрешения владельца.

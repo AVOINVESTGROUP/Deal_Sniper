@@ -84,7 +84,31 @@ def test_effective_settings_falls_back_and_applies_active_revision(
     assert effective.pro_price_aed == 125
     assert effective.pro_price_stars == 1800
     assert effective.target_profit_aed == Decimal("7000")
-    assert effective.financial_config_version == "r7-effective"
+    assert effective.financial_config_version.startswith("r7-policy-")
+
+
+def test_price_only_revision_does_not_invalidate_financial_decisions(tmp_path: Path) -> None:
+    baseline = Settings.from_env()
+    repository = LocalRepository(tmp_path / "price-only.db")
+    revision = RuntimeConfiguration(
+        version="r7-price-only",
+        pro_price_aed=125,
+        pro_price_stars=1800,
+        pro_subscription_url="https://t.me/+price-only",
+        target_profit_aed=baseline.target_profit_aed,
+        min_roi_percent=baseline.min_roi_percent,
+        min_comparables_count=baseline.min_comparables_count,
+        channel_max_posts_per_run=baseline.channel_max_posts_per_run,
+        created_at=datetime(2026, 7, 28, 13, tzinfo=UTC),
+        created_by="owner@example.com",
+    )
+    repository.activate_runtime_configuration(revision.model_dump(mode="json"), "op-price-only")
+
+    effective = effective_settings(repository, baseline)
+
+    assert effective.pro_price_aed == 125
+    assert effective.pro_price_stars == 1800
+    assert effective.financial_config_version == baseline.financial_config_version
 
 
 def test_runtime_configuration_rejects_invalid_stars_and_period() -> None:

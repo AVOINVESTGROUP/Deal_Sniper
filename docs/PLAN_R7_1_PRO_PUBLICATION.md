@@ -2,6 +2,8 @@
 
 Статус: **утверждён владельцем 28 июля 2026; разрешены реализация и staging, production deploy требует отдельного разрешения**.
 
+Статус реализации: **локальная реализация завершена 28 июля 2026; production не изменён**.
+
 ## 1. Подтверждённая проблема
 
 Production настроен на Free и Pro Telegram-каналы, delivery включена, publisher job запускается успешно. При этом Firestore содержит 3 текущих решения `INSPECT`, а история outbox содержит только 5 доставок `pro/v1`.
@@ -63,3 +65,13 @@ Production настроен на Free и Pro Telegram-каналы, delivery в�
 - Pro-канал получает новые подходящие автомобили автоматически;
 - Free-канал продолжает публиковать только безопасный teaser/Market Watch;
 - production deploy выполняется только после нового immutable build, staging evidence и отдельного разрешения владельца.
+
+## 7. Реализованный кандидат
+
+- periodic `content` job сначала выполняет идемпотентный Pro reconciliation, затем Free/Market Pulse;
+- для `decision + Pro recipient + pro/v1` используются стабильные publication и delivery ID;
+- `pending` повторно ставится в Cloud Tasks, `sent`, `sending`, `unknown` и `failed` не дублируются;
+- отсутствующая пара PublicationEvent/outbox создаётся атомарно, размер запуска ограничен активным `Posts per run`;
+- Admin Web показывает покрытие Pro-публикаций и запускает только allowlisted Cloud Run Job `deal-sniper-publisher` после точного подтверждения;
+- изменение только цены AED/Stars больше не инвалидирует автомобильные решения; версия финансовой политики меняется только при изменении порогов расчёта;
+- локальный gate: 94 теста прошли, 2 условно пропущены; Ruff, strict mypy, ES-module syntax и `git diff --check` прошли.

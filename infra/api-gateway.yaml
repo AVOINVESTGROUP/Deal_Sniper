@@ -123,6 +123,12 @@ paths:
   /admin/preview:
     get: {operationId: adminPreview, responses: {"200": {description: Preview}}}
     options: {operationId: adminPreviewOptions, responses: {"200": {description: CORS}}}
+  /admin/pro-publications:
+    get: {operationId: adminProPublications, responses: {"200": {description: Pro publication coverage}}}
+    options: {operationId: adminProPublicationsOptions, responses: {"200": {description: CORS}}}
+  /admin/pro-publications/run:
+    post: {operationId: adminRunProPublications, responses: {"200": {description: Publisher started}}}
+    options: {operationId: adminRunProPublicationsOptions, responses: {"200": {description: CORS}}}
   /content/market-pulse:
     get: {operationId: marketPulse, responses: {"200": {description: Pulse}}}
     options: {operationId: marketPulseOptions, responses: {"200": {description: CORS}}}

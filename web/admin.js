@@ -8,6 +8,7 @@ const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ??
 let token = "";
 let testedSourceKey = "";
 let settingsDraft = null;
+let proPublicationPreview = null;
 const transientStatuses = new Set([429, 500, 502, 503, 504]);
 const byId = (id) => document.getElementById(id);
 const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
@@ -228,11 +229,31 @@ function render(data, pulse, preview, unknown, failed) {
 
 function showError(caught) { byId("error").hidden = false; byId("error").textContent = caught instanceof Error ? caught.message : String(caught); }
 async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/${encodeURIComponent(deliveryId)}/reconcile`, {method: "POST", body: JSON.stringify({action})}); await refresh(); } catch (error) { showError(error); } }
+function renderProPublications(payload = {}) {
+  proPublicationPreview = payload;
+  byId("pro-publication-status").innerHTML = keyValues({publishable: payload.publishable, delivered: payload.sent, pending: payload.pending, sending: payload.sending, unknown: payload.unknown, failed: payload.failed, missing: payload.missing, batch_limit: payload.batch_limit, last_reconciliation: payload.last_reconciliation?.created_at || "Never"});
+  byId("publish-pro").disabled = !Number(payload.pending_actions || 0);
+}
+
+async function publishProNow() {
+  const count = Number(proPublicationPreview?.pending_actions || 0);
+  if (!count) return;
+  const required = `PUBLISH ${count} PRO`;
+  const confirmation = window.prompt(`This starts the idempotent publisher job for up to ${count} Pro publication(s). Type exactly: ${required}`);
+  if (confirmation !== required) return;
+  byId("publish-pro").disabled = true;
+  try {
+    const result = await call("/admin/pro-publications/run", {method: "POST", body: JSON.stringify({operation_id: crypto.randomUUID(), confirmation})});
+    const box = byId("pro-publication-result"); box.hidden = false;
+    box.innerHTML = `<strong>${result.started ? "Publisher started" : "Nothing to publish"}</strong><span>Selected by preview: ${number(result.preview?.publishable)}; missing: ${number(result.preview?.missing)}; pending: ${number(result.preview?.pending)}.</span>`;
+    window.setTimeout(refresh, 5000);
+  } catch (error) { showError(error); byId("publish-pro").disabled = false; }
+}
 async function refresh() {
   byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings")];
-    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult] = await Promise.allSettled(requests);
+    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings"), call("/admin/pro-publications")];
+    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult] = await Promise.allSettled(requests);
     if (overviewResult.status === "rejected") throw overviewResult.reason;
     const pulse = pulseResult.status === "fulfilled" ? pulseResult.value : {};
     const preview = previewResult.status === "fulfilled" ? previewResult.value : {};
@@ -240,7 +261,8 @@ async function refresh() {
     const failed = failedResult.status === "fulfilled" ? failedResult.value : {items: []};
     render(overviewResult.value, pulse, preview, unknown.items || [], failed.items || []);
     if (runsResult.status === "fulfilled") renderRuns(runsResult.value); if (listingsResult.status === "fulfilled") renderListings(listingsResult.value); if (decisionsResult.status === "fulfilled") renderDecisions(decisionsResult.value); if (usersResult.status === "fulfilled") renderUsers(usersResult.value); if (errorsResult.status === "fulfilled") renderErrors(errorsResult.value); if (settingsResult.status === "fulfilled") renderSettings(settingsResult.value);
-    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult].filter((result) => result.status === "rejected");
+    if (proPublicationsResult.status === "fulfilled") renderProPublications(proPublicationsResult.value);
+    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult].filter((result) => result.status === "rejected");
     if (partialErrors.length) showError(new Error(`${partialErrors.length} section(s) are temporarily unavailable. Refresh will retry them.`));
     byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
   } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }
@@ -266,6 +288,7 @@ byId("login").addEventListener("click", async () => {
 byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
 byId("test-source").addEventListener("click", testNewSource); byId("add-source").addEventListener("click", addNewSource);
 byId("preview-settings").addEventListener("click", previewSettings); byId("apply-settings").addEventListener("click", applySettings);
+byId("publish-pro").addEventListener("click", publishProNow);
 [byId("source-name"), byId("source-url")].forEach((input) => input.addEventListener("input", () => { testedSourceKey = ""; byId("add-source").disabled = true; }));
 onAuthStateChanged(auth, async (user) => {
   if (!user) {

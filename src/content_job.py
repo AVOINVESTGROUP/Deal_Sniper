@@ -27,6 +27,7 @@ from src.pro_cta import (
     pro_cta_for_index,
     validated_subscription_url,
 )
+from src.pro_publication import ProPublicationSummary, reconcile_pro_publications
 from src.runtime_config import effective_settings
 from src.service import DealService
 from src.tasks import CloudTaskDispatcher
@@ -228,3 +229,19 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
         await dispatcher.enqueue_content_delivery(dict(stored.payload))
         published += 1
     return event_id
+
+
+async def run_content_publication(
+    settings: Settings,
+) -> tuple[str | None, ProPublicationSummary]:
+    """Публикует Free-контент и независимо сверяет очередь Pro-канала."""
+    service = DealService.from_settings(settings)
+    current = effective_settings(service.repository, settings)
+    dispatcher = CloudTaskDispatcher(current)
+    pro_summary = await reconcile_pro_publications(
+        service.repository,
+        current,
+        dispatcher,
+    )
+    event_id = await enqueue_market_pulse(settings)
+    return event_id, pro_summary

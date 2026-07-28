@@ -25,7 +25,7 @@ from telegram import (
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, TimedOut
 
-from src.admin_cloud import cloud_runtime_status, scheduler_action
+from src.admin_cloud import cloud_runtime_status, run_publisher_job, scheduler_action
 from src.auth import Principal, verify_firebase_bearer, verify_telegram_init_data
 from src.billing import (
     create_telegram_subscription_link,
@@ -79,6 +79,7 @@ from src.pro_cta import (
     pro_cta_for_index,
     validated_subscription_url,
 )
+from src.pro_publication import preview_pro_reconciliation
 from src.runtime_config import (
     RuntimeConfiguration,
     active_configuration,
@@ -249,6 +250,11 @@ class RuntimeRollbackRequest(BaseModel):
 
 class SchedulerActionRequest(BaseModel):
     action: str = Field(pattern=r"^(run|pause|resume)$")
+    operation_id: str = Field(min_length=8, max_length=120)
+    confirmation: str = Field(min_length=1, max_length=120)
+
+
+class ProPublicationRunRequest(BaseModel):
     operation_id: str = Field(min_length=8, max_length=120)
     confirmation: str = Field(min_length=1, max_length=120)
 
@@ -1208,6 +1214,115 @@ async def admin_preview(
     return {
         "free": format_public_teaser(listing, "en"),
         "pro": format_card(listing, decision, "en"),
+    }
+
+
+@app.get("/admin/pro-publications")
+async def admin_pro_publications(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает фактическое покрытие текущих Pro-решений outbox-записями."""
+    firebase_principal(authorization, require_admin=True)
+    current = runtime_settings()
+    summary, audits = await asyncio.gather(
+        asyncio.to_thread(preview_pro_reconciliation, service.repository, current),
+        asyncio.to_thread(service.repository.list_audit_events, 100),
+    )
+    last = next(
+        (
+            item
+            for item in audits
+            if item.get("event_type") == "pro_publication_reconciliation"
+        ),
+        None,
+    )
+    pending_actions = min(
+        summary.pending + summary.missing,
+        current.channel_max_posts_per_run,
+    )
+    return {
+        **summary.public_dict(),
+        "pending_actions": pending_actions,
+        "batch_limit": current.channel_max_posts_per_run,
+        "confirmation_required": f"PUBLISH {pending_actions} PRO",
+        "last_reconciliation": last,
+    }
+
+
+@app.post("/admin/pro-publications/run")
+async def admin_run_pro_publications(
+    request: ProPublicationRunRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Запускает allowlisted publisher job после preview и точного подтверждения."""
+    principal = firebase_principal(authorization, require_admin=True)
+    current = runtime_settings()
+    preview = await asyncio.to_thread(
+        preview_pro_reconciliation,
+        service.repository,
+        current,
+    )
+    pending_actions = min(
+        preview.pending + preview.missing,
+        current.channel_max_posts_per_run,
+    )
+    required = f"PUBLISH {pending_actions} PRO"
+    if request.confirmation != required:
+        raise HTTPException(status_code=422, detail=f"Введите: {required}")
+    if pending_actions == 0:
+        return {"ok": True, "started": False, "preview": preview.public_dict()}
+    operation_payload = {
+        "pending_actions": pending_actions,
+        "batch_limit": current.channel_max_posts_per_run,
+    }
+    claimed = await asyncio.to_thread(
+        service.repository.claim_admin_operation,
+        request.operation_id,
+        "run_pro_publisher",
+        operation_payload,
+    )
+    if not claimed:
+        previous = await asyncio.to_thread(
+            service.repository.get_admin_operation,
+            request.operation_id,
+        )
+        if previous is None or previous.get("operation") != "run_pro_publisher":
+            raise HTTPException(status_code=409, detail="Operation ID уже использован")
+        return {"ok": previous.get("state") == "completed", "replayed": True, **previous}
+    try:
+        result = await asyncio.to_thread(
+            run_publisher_job,
+            settings.google_cloud_project,
+            settings.google_cloud_region,
+        )
+    except RuntimeError as error:
+        await asyncio.to_thread(
+            service.repository.complete_admin_operation,
+            request.operation_id,
+            "failed",
+            {"error": str(error)},
+        )
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    await asyncio.to_thread(
+        service.repository.complete_admin_operation,
+        request.operation_id,
+        "completed",
+        result,
+    )
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_pro_publisher_started",
+        {
+            "operation_id": request.operation_id,
+            "actor": principal.email or principal.subject,
+            "pending_actions": pending_actions,
+        },
+    )
+    return {
+        "ok": True,
+        "started": True,
+        "preview": preview.public_dict(),
+        **result,
     }
 
 

@@ -75,6 +75,9 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
     assert "Preview change" in page
     assert 'call("/admin/settings/preview"' in script
     assert 'call("/admin/settings/apply"' in script
+    assert 'call("/admin/pro-publications"' in script
+    assert 'call("/admin/pro-publications/run"' in script
+    assert "Publication coverage" in page
     assert "/admin/schedulers/${encodeURIComponent(job)}/action" in script
     assert "Historical failed records are diagnostic only" in script
     assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")

@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.config import Settings
+from src.domain.ids import canonical_hash
 
 SUBSCRIPTION_PERIOD_SECONDS = 30 * 24 * 60 * 60
 
@@ -95,6 +96,32 @@ def active_configuration(repository: Any, settings: Settings) -> RuntimeConfigur
 def effective_settings(repository: Any, settings: Settings) -> Settings:
     """Накладывает active revision на immutable environment settings."""
     active = active_configuration(repository, settings)
+    financial_values_changed = (
+        active.target_profit_aed != settings.target_profit_aed
+        or active.min_roi_percent != settings.min_roi_percent
+        or active.min_comparables_count != settings.min_comparables_count
+    )
+    financial_version = settings.financial_config_version
+    if financial_values_changed:
+        financial_version = "r7-policy-" + canonical_hash(
+            "financial-policy/v1",
+            {
+                "target_profit_aed": active.target_profit_aed,
+                "min_roi_percent": active.min_roi_percent,
+                "min_comparables_count": active.min_comparables_count,
+                "default_cost_aed": settings.default_cost_aed,
+                "inspection_cost_aed": settings.inspection_cost_aed,
+                "registration_cost_aed": settings.registration_cost_aed,
+                "preparation_cost_aed": settings.preparation_cost_aed,
+                "repair_expected_aed": settings.repair_expected_aed,
+                "holding_cost_per_day_aed": settings.holding_cost_per_day_aed,
+                "expected_hold_days": settings.expected_hold_days,
+                "annual_capital_rate": settings.annual_capital_rate,
+                "selling_rate": settings.selling_rate,
+                "risk_rate": settings.risk_rate,
+                "liquidity_discount_rate": settings.liquidity_discount_rate,
+            },
+        )[:16]
     return replace(
         settings,
         telegram_pro_subscription_url=active.pro_subscription_url,
@@ -104,7 +131,7 @@ def effective_settings(repository: Any, settings: Settings) -> Settings:
         min_roi_percent=active.min_roi_percent,
         min_comparables_count=active.min_comparables_count,
         channel_max_posts_per_run=active.channel_max_posts_per_run,
-        financial_config_version=active.version,
+        financial_config_version=financial_version,
     )
 
 
