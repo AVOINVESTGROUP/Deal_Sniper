@@ -1,0 +1,117 @@
+"""Версионированная несекретная конфигурация Control Center R7."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.config import Settings
+
+SUBSCRIPTION_PERIOD_SECONDS = 30 * 24 * 60 * 60
+
+
+class RuntimeConfiguration(BaseModel):
+    """Immutable revision коммерческих и операционных настроек."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version: str
+    state: str = "active"
+    pro_price_aed: int = Field(ge=1, le=1_000_000)
+    pro_price_stars: int = Field(ge=1, le=10_000)
+    pro_subscription_url: str
+    subscription_period_seconds: int = SUBSCRIPTION_PERIOD_SECONDS
+    target_profit_aed: Decimal = Field(ge=0)
+    min_roi_percent: Decimal = Field(ge=0, le=1_000)
+    min_comparables_count: int = Field(ge=2, le=100)
+    channel_max_posts_per_run: int = Field(ge=1, le=100)
+    created_at: datetime
+    created_by: str
+    previous_version: str | None = None
+    telegram_link_name: str = ""
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, value: str) -> str:
+        if value not in {"active", "archived"}:
+            raise ValueError("state должен быть active или archived")
+        return value
+
+    @field_validator("pro_subscription_url")
+    @classmethod
+    def validate_subscription_url(cls, value: str) -> str:
+        cleaned = value.strip()
+        if cleaned and not cleaned.startswith(("https://t.me/", "https://telegram.me/")):
+            raise ValueError("Разрешена только Telegram subscription URL")
+        return cleaned
+
+    @field_validator("subscription_period_seconds")
+    @classmethod
+    def validate_period(cls, value: int) -> int:
+        if value != SUBSCRIPTION_PERIOD_SECONDS:
+            raise ValueError("Telegram subscription period должен составлять 30 дней")
+        return value
+
+    def public_dict(self) -> dict[str, Any]:
+        """Возвращает безопасное представление без раскрытия полного invite link."""
+        payload = self.model_dump(mode="json")
+        payload["subscription_url_configured"] = bool(self.pro_subscription_url)
+        payload["pro_subscription_url"] = mask_subscription_url(self.pro_subscription_url)
+        return payload
+
+
+def configuration_from_settings(settings: Settings) -> RuntimeConfiguration:
+    """Строит fail-safe baseline из environment-конфигурации R6."""
+    return RuntimeConfiguration(
+        version=settings.financial_config_version,
+        pro_price_aed=settings.pro_price_aed,
+        pro_price_stars=settings.pro_price_stars,
+        pro_subscription_url=settings.telegram_pro_subscription_url,
+        target_profit_aed=settings.target_profit_aed,
+        min_roi_percent=settings.min_roi_percent,
+        min_comparables_count=settings.min_comparables_count,
+        channel_max_posts_per_run=settings.channel_max_posts_per_run,
+        created_at=datetime.fromtimestamp(0, UTC),
+        created_by="environment",
+        telegram_link_name="environment-baseline",
+    )
+
+
+def active_configuration(repository: Any, settings: Settings) -> RuntimeConfiguration:
+    """Читает active revision либо безопасно возвращает environment baseline."""
+    try:
+        stored = repository.get_active_runtime_configuration()
+        if stored is not None:
+            return RuntimeConfiguration.model_validate(stored)
+    except Exception:
+        pass
+    return configuration_from_settings(settings)
+
+
+def effective_settings(repository: Any, settings: Settings) -> Settings:
+    """Накладывает active revision на immutable environment settings."""
+    active = active_configuration(repository, settings)
+    return replace(
+        settings,
+        telegram_pro_subscription_url=active.pro_subscription_url,
+        pro_price_aed=active.pro_price_aed,
+        pro_price_stars=active.pro_price_stars,
+        target_profit_aed=active.target_profit_aed,
+        min_roi_percent=active.min_roi_percent,
+        min_comparables_count=active.min_comparables_count,
+        channel_max_posts_per_run=active.channel_max_posts_per_run,
+        financial_config_version=active.version,
+    )
+
+
+def mask_subscription_url(value: str) -> str:
+    """Маскирует платную invite link для административного ответа."""
+    if not value:
+        return "not configured"
+    if len(value) <= 18:
+        return "configured"
+    return f"{value[:13]}…{value[-4:]}"

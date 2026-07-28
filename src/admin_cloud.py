@@ -1,4 +1,4 @@
-"""Read-only состояние Scheduler, Cloud Tasks и Cloud Run для admin panel."""
+"""Состояние и allowlisted-управление Cloud runtime из Admin Web."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from typing import Any
 
 import google.auth
 from google.auth.transport.requests import AuthorizedSession
+
+SCHEDULER_ACTIONS = frozenset({"run", "pause", "resume"})
 
 
 def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
@@ -65,3 +67,32 @@ def _get_items(
         for item in payload.get(key, [])
         if isinstance(item, dict)
     ]
+
+
+def scheduler_action(project_id: str, region: str, job_name: str, action: str) -> dict[str, Any]:
+    """Выполняет ограниченное действие только над ресурсами Deal Sniper."""
+    if action not in SCHEDULER_ACTIONS:
+        raise ValueError("Разрешены только run, pause и resume")
+    if (
+        not job_name.startswith("deal-sniper-")
+        or len(job_name) > 63
+        or not all(char.islower() or char.isdigit() or char == "-" for char in job_name)
+    ):
+        raise ValueError("Scheduler job не входит в allowlist Deal Sniper")
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    session = _authorized_session(credentials, project_id)
+    url = (
+        f"https://cloudscheduler.googleapis.com/v1/projects/{project_id}/locations/"
+        f"{region}/jobs/{job_name}:{action}"
+    )
+    response = session.post(url, json={}, timeout=15)
+    if not response.ok:
+        raise RuntimeError(f"Cloud Scheduler отклонил действие: HTTP {response.status_code}")
+    payload = response.json()
+    return {
+        "name": payload.get("name", job_name),
+        "state": payload.get("state", "UNKNOWN"),
+        "action": action,
+    }

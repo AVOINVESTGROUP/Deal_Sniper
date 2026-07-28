@@ -48,7 +48,19 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
     assert "telegram-web-app.js" not in page
     assert 'id="login-password"' in page
     assert "Cloud runtime" in page
-    assert "Subscriptions" in page
+    for section in (
+        "Dashboard",
+        "Sources",
+        "Runs",
+        "Listings",
+        "Decisions",
+        "Publications",
+        "Users",
+        "Revenue",
+        "Errors",
+        "Settings",
+    ):
+        assert section in page
     assert "signInWithEmailAndPassword" in script
     assert "runtime.adminApiBase" in script
     assert 'api + "/tma/auth"' not in script
@@ -59,6 +71,11 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
     assert "getIdToken(true)" in script
     assert "transientStatuses" in script
     assert "Add source" in page
+    assert "Preview change" in page
+    assert 'call("/admin/settings/preview"' in script
+    assert 'call("/admin/settings/apply"' in script
+    assert "/admin/schedulers/${encodeURIComponent(job)}/action" in script
+    assert "Historical failed records are diagnostic only" in script
     assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")
     runtime = json.loads((WEB / "runtime-config.json").read_text(encoding="utf-8"))
     assert runtime["adminApiBase"] == runtime["apiBase"]
@@ -83,6 +100,16 @@ def test_gateway_declares_preflight_for_every_admin_browser_route() -> None:
     gateway = (ROOT / "infra" / "api-gateway.yaml").read_text(encoding="utf-8")
     paths = (
         "/admin/overview",
+        "/admin/settings",
+        "/admin/settings/preview",
+        "/admin/settings/apply",
+        "/admin/settings/rollback",
+        "/admin/runs",
+        "/admin/schedulers/{job_name}/action",
+        "/admin/listings",
+        "/admin/decisions",
+        "/admin/users",
+        "/admin/errors",
         "/admin/sources",
         "/admin/source-test",
         "/admin/sources/{source_name}",

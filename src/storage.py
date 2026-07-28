@@ -6,7 +6,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from src.domain.ids import canonical_hash
 from src.domain.models import (
@@ -169,6 +169,30 @@ class Repository(Protocol):
     def admin_summary(self) -> dict[str, Any]: ...
 
     def schema_version(self) -> str: ...
+
+    def get_active_runtime_configuration(self) -> dict[str, Any] | None: ...
+
+    def list_runtime_configurations(self, limit: int = 20) -> list[dict[str, Any]]: ...
+
+    def activate_runtime_configuration(
+        self, payload: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]: ...
+
+    def runtime_configuration_for_operation(self, operation_id: str) -> dict[str, Any] | None: ...
+
+    def claim_admin_operation(
+        self, operation_id: str, operation: str, payload: dict[str, Any]
+    ) -> bool: ...
+
+    def complete_admin_operation(
+        self, operation_id: str, state: str, result: dict[str, Any]
+    ) -> None: ...
+
+    def get_admin_operation(self, operation_id: str) -> dict[str, Any] | None: ...
+
+    def list_admin_users(self, limit: int = 100) -> list[dict[str, Any]]: ...
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]: ...
 
 
 def snapshot_hash(snapshot: ListingSnapshot) -> str:
@@ -373,6 +397,26 @@ class LocalRepository:
                     publication_event_id TEXT NOT NULL UNIQUE,
                     variant_index INTEGER NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS runtime_configurations (
+                    version TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    operation_id TEXT NOT NULL UNIQUE,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS runtime_configuration_active (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    version TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS admin_operations (
+                    operation_id TEXT PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    result_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 """
             )
@@ -946,6 +990,164 @@ class LocalRepository:
 
     def schema_version(self) -> str:
         return "2"
+
+    def get_active_runtime_configuration(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT revision.payload_json
+                FROM runtime_configuration_active AS active
+                JOIN runtime_configurations AS revision ON revision.version = active.version
+                WHERE active.singleton = 1
+                """
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def list_runtime_configurations(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM runtime_configurations ORDER BY created_at DESC LIMIT ?",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def activate_runtime_configuration(
+        self, payload: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]:
+        version = str(payload["version"])
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            repeated = connection.execute(
+                "SELECT payload_json FROM runtime_configurations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if repeated:
+                return cast(dict[str, Any], json.loads(repeated["payload_json"]))
+            active = connection.execute(
+                "SELECT version FROM runtime_configuration_active WHERE singleton = 1"
+            ).fetchone()
+            previous_version = str(active["version"]) if active else None
+            if previous_version:
+                previous = connection.execute(
+                    "SELECT payload_json FROM runtime_configurations WHERE version = ?",
+                    (previous_version,),
+                ).fetchone()
+                if previous:
+                    previous_payload = json.loads(previous["payload_json"])
+                    previous_payload["state"] = "archived"
+                    connection.execute(
+                        "UPDATE runtime_configurations SET state = 'archived', "
+                        "payload_json = ? WHERE version = ?",
+                        (json.dumps(previous_payload, ensure_ascii=False), previous_version),
+                    )
+            stored = {**payload, "state": "active", "previous_version": previous_version}
+            connection.execute(
+                "INSERT INTO runtime_configurations"
+                "(version, state, operation_id, payload_json) "
+                "VALUES (?, 'active', ?, ?)",
+                (version, operation_id, json.dumps(stored, ensure_ascii=False)),
+            )
+            connection.execute(
+                "INSERT INTO runtime_configuration_active(singleton, version) VALUES (1, ?) "
+                "ON CONFLICT(singleton) DO UPDATE SET version = excluded.version",
+                (version,),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(event_type, payload_json) VALUES (?, ?)",
+                (
+                    "runtime_configuration_activated",
+                    json.dumps(
+                        {
+                            "operation_id": operation_id,
+                            "version": version,
+                            "previous_version": previous_version,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+        return stored
+
+    def runtime_configuration_for_operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM runtime_configurations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        return cast(dict[str, Any], json.loads(row["payload_json"])) if row else None
+
+    def claim_admin_operation(
+        self, operation_id: str, operation: str, payload: dict[str, Any]
+    ) -> bool:
+        """Атомарно резервирует идентификатор административной операции."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO admin_operations"
+                "(operation_id, operation, state, payload_json) VALUES (?, ?, 'running', ?)",
+                (operation_id, operation, json.dumps(payload, ensure_ascii=False)),
+            )
+        return cursor.rowcount == 1
+
+    def complete_admin_operation(
+        self, operation_id: str, state: str, result: dict[str, Any]
+    ) -> None:
+        if state not in {"completed", "failed"}:
+            raise ValueError("Недопустимое состояние административной операции")
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE admin_operations SET state = ?, result_json = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE operation_id = ?",
+                (state, json.dumps(result, ensure_ascii=False), operation_id),
+            )
+
+    def get_admin_operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT operation_id, operation, state, payload_json, result_json "
+                "FROM admin_operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "operation_id": row["operation_id"],
+            "operation": row["operation"],
+            "state": row["state"],
+            "payload": json.loads(row["payload_json"]),
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        }
+
+    def list_admin_users(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT user_id, payload_json, updated_at FROM user_settings "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return [
+            {
+                "user_id": int(row["user_id"]),
+                "settings": json.loads(row["payload_json"]),
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT event_type, payload_json, created_at FROM audit_events "
+                "ORDER BY event_id DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return [
+            {
+                "event_type": row["event_type"],
+                "payload": json.loads(row["payload_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
         """Идемпотентно сохраняет решение для конкретной версии."""

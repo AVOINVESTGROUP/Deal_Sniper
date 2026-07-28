@@ -13,9 +13,14 @@
       <nav class="admin-nav" aria-label="Administration">
         <button class="active" data-view="dashboard">Dashboard</button>
         <button data-view="sources">Sources</button>
-        <button data-view="runtime">Cloud runtime</button>
+        <button data-view="runs">Runs</button>
+        <button data-view="listings">Listings</button>
+        <button data-view="decisions">Decisions</button>
         <button data-view="delivery">Publications</button>
-        <button data-view="business">Subscriptions</button>
+        <button data-view="users">Users</button>
+        <button data-view="business">Revenue</button>
+        <button data-view="errors">Errors</button>
+        <button data-view="settings">Settings</button>
       </nav>
       <div class="admin-account">
         <span id="identity">Not signed in</span>
@@ -44,9 +49,15 @@
         <section class="admin-card source-add-card"><div class="card-heading"><div><p class="eyebrow">NEW CONNECTION</p><h2>Add source</h2><p class="muted">Connect a public HTTPS JSON feed. We test real records and fixed AED prices before anything is saved.</p></div></div><div class="source-form"><label>Source name<input id="source-name" autocomplete="off" placeholder="dealer_feed" pattern="[a-z][a-z0-9_-]{2,39}"></label><label>JSON feed URL<input id="source-url" type="url" autocomplete="off" placeholder="https://example.com/vehicles.json"></label><div class="row-actions"><button id="test-source" class="secondary">Test connection</button><button id="add-source" disabled>Add source</button></div><div id="source-test-result" class="muted">The source will be added paused. You choose when to enable it.</div></div></section>
         <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">COLLECTORS</p><h2>Marketplace sources</h2><p class="muted">Enable, pause or run a source. A regular marketplace website without a structured feed needs a tested code adapter.</p></div></div><div id="sources" class="data-list"></div></section>
       </section>
-      <section class="admin-view" data-panel="runtime">
-        <div id="cloud" class="admin-grid"></div>
-        <section class="admin-card"><p class="eyebrow">PROCESSING</p><h2>Database operations</h2><div id="operations" class="key-value-grid"></div></section>
+      <section class="admin-view" data-panel="runs">
+        <div class="card-heading"><div><p class="eyebrow">GOOGLE CLOUD</p><h2>Cloud runtime</h2></div></div><div id="cloud" class="admin-grid"></div>
+        <section class="admin-card"><p class="eyebrow">RECENT ACTIVITY</p><h2>Collector and system runs</h2><div id="runs" class="data-list"></div></section>
+      </section>
+      <section class="admin-view" data-panel="listings">
+        <section class="admin-card"><p class="eyebrow">INVENTORY</p><h2>Current listings</h2><div id="listings" class="data-list"></div></section>
+      </section>
+      <section class="admin-view" data-panel="decisions">
+        <section class="admin-card"><p class="eyebrow">DEAL ENGINE</p><h2>Current decisions</h2><div id="decisions" class="data-list"></div></section>
       </section>
       <section class="admin-view" data-panel="delivery">
         <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">RECONCILIATION</p><h2>Delivery exceptions</h2><p class="muted">Only failed or ambiguous messages require action.</p></div></div><div id="unknown" class="data-list"></div></section>
@@ -54,10 +65,33 @@
       </section>
       <section class="admin-view" data-panel="business">
         <div id="business-metrics" class="metric-grid"></div>
-        <section class="admin-card"><p class="eyebrow">PRICING</p><h2>Current commercial settings</h2><div id="financial" class="key-value-grid"></div></section>
+        <section class="admin-card"><p class="eyebrow">PRICING</p><h2>Commercial overview</h2><div id="financial" class="key-value-grid"></div></section>
+      </section>
+      <section class="admin-view" data-panel="users">
+        <section class="admin-card"><p class="eyebrow">AUDIENCE</p><h2>Users and subscriptions</h2><div id="users" class="data-list"></div></section>
+      </section>
+      <section class="admin-view" data-panel="errors">
+        <section class="admin-card"><p class="eyebrow">ATTENTION REQUIRED</p><h2>Operational errors</h2><div id="errors-list" class="data-list"></div></section>
+      </section>
+      <section class="admin-view" data-panel="settings">
+        <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">VERSIONED CONFIGURATION</p><h2>Pro price and deal thresholds</h2><p class="muted">AED is the commercial display price. Stars is the actual recurring Telegram charge every 30 days. Apply creates a new paid link when Stars changes.</p></div></div>
+          <div class="settings-form">
+            <label>Commercial price, AED<input id="price-aed" type="number" min="1"></label>
+            <label>Telegram charge, Stars<input id="price-stars" type="number" min="1" max="10000"></label>
+            <label>Target profit, AED<input id="target-profit" type="number" min="0"></label>
+            <label>Minimum ROI, %<input id="min-roi" type="number" min="0" step="0.1"></label>
+            <label>Minimum comparables<input id="min-comparables" type="number" min="2" max="100"></label>
+            <label>Posts per run<input id="posts-per-run" type="number" min="1" max="100"></label>
+          </div>
+          <div class="row-actions settings-actions"><button id="preview-settings" class="secondary">Preview change</button><button id="apply-settings" disabled>Apply confirmed change</button></div>
+          <div id="settings-preview" class="notice" hidden></div>
+        </section>
+        <section class="admin-card"><p class="eyebrow">ACTIVE REVISION</p><h2>Current settings</h2><div id="active-settings" class="key-value-grid"></div></section>
+        <section class="admin-card"><p class="eyebrow">HISTORY</p><h2>Configuration revisions</h2><div id="settings-history" class="data-list"></div></section>
+        <section class="admin-card"><p class="eyebrow">PROCESSING</p><h2>Database operations</h2><div id="operations" class="key-value-grid"></div></section>
       </section>
     </main>
   </div>
-  <script type="module" src="/admin.js?v=browser-admin-6"></script>
+  <script type="module" src="/admin.js?v=browser-admin-7"></script>
 </body>
 </html>

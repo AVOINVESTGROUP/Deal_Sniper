@@ -580,6 +580,148 @@ class FirestoreRepository:
         data = self.client.collection("schema_ledger").document("current").get().to_dict()
         return str((data or {}).get("schema_version", "legacy"))
 
+    def get_active_runtime_configuration(self) -> dict[str, Any] | None:
+        data = self.client.collection("runtime_configuration").document("active").get().to_dict()
+        return data
+
+    def list_runtime_configurations(self, limit: int = 20) -> list[dict[str, Any]]:
+        query = (
+            self.client.collection("runtime_configuration_revisions")
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(max(1, min(limit, 100)))
+        )
+        return [cast(dict[str, Any], document.to_dict()) for document in query.stream()]
+
+    def activate_runtime_configuration(
+        self, payload: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]:
+        version = str(payload["version"])
+        active_ref = self.client.collection("runtime_configuration").document("active")
+        revision_ref = self.client.collection("runtime_configuration_revisions").document(version)
+        operation_ref = self.client.collection("admin_operations").document(operation_id)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def activate(transaction: firestore.Transaction) -> dict[str, Any]:
+            repeated = operation_ref.get(transaction=transaction)
+            if repeated.exists:
+                repeated_data = repeated.to_dict() or {}
+                existing_version = str(repeated_data.get("version", ""))
+                existing = (
+                    self.client.collection("runtime_configuration_revisions")
+                    .document(existing_version)
+                    .get(transaction=transaction)
+                    .to_dict()
+                )
+                if existing is None:
+                    raise RuntimeError("Повторная операция ссылается на отсутствующую revision")
+                return existing
+            if revision_ref.get(transaction=transaction).exists:
+                raise ValueError("Версия конфигурации уже существует")
+            active = active_ref.get(transaction=transaction)
+            previous_data = active.to_dict() or {}
+            previous_version = str(previous_data.get("version", "")) or None
+            if previous_version:
+                previous_ref = self.client.collection("runtime_configuration_revisions").document(
+                    previous_version
+                )
+                transaction.set(previous_ref, {"state": "archived"}, merge=True)
+            stored = {**payload, "state": "active", "previous_version": previous_version}
+            transaction.create(revision_ref, stored)
+            transaction.set(active_ref, stored)
+            transaction.create(
+                operation_ref,
+                {
+                    "operation_id": operation_id,
+                    "version": version,
+                    "operation": "runtime_configuration_activated",
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            return stored
+
+        result = cast(dict[str, Any], activate(transaction))
+        self.record_audit_event(
+            "runtime_configuration_activated",
+            {
+                "operation_id": operation_id,
+                "version": result["version"],
+                "previous_version": result.get("previous_version"),
+            },
+        )
+        return result
+
+    def runtime_configuration_for_operation(self, operation_id: str) -> dict[str, Any] | None:
+        operation = self.client.collection("admin_operations").document(operation_id).get()
+        data = operation.to_dict() or {}
+        version = str(data.get("version", ""))
+        if not version:
+            return None
+        return (
+            self.client.collection("runtime_configuration_revisions")
+            .document(version)
+            .get()
+            .to_dict()
+        )
+
+    def claim_admin_operation(
+        self, operation_id: str, operation: str, payload: dict[str, Any]
+    ) -> bool:
+        """Создаёт operation record один раз до внешней мутации."""
+        try:
+            self.client.collection("admin_operations").document(operation_id).create(
+                {
+                    "operation_id": operation_id,
+                    "operation": operation,
+                    "state": "running",
+                    "payload": payload,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+        except AlreadyExists:
+            return False
+        return True
+
+    def complete_admin_operation(
+        self, operation_id: str, state: str, result: dict[str, Any]
+    ) -> None:
+        if state not in {"completed", "failed"}:
+            raise ValueError("Недопустимое состояние административной операции")
+        self.client.collection("admin_operations").document(operation_id).set(
+            {
+                "state": state,
+                "result": result,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+    def get_admin_operation(self, operation_id: str) -> dict[str, Any] | None:
+        data = (
+            self.client.collection("admin_operations").document(operation_id).get().to_dict()
+        )
+        return data if data else None
+
+    def list_admin_users(self, limit: int = 100) -> list[dict[str, Any]]:
+        query = self.client.collection("user_settings").limit(max(1, min(limit, 500)))
+        return [
+            {
+                "user_id": document.id,
+                "settings": (data := document.to_dict() or {}).get("payload", data),
+                "updated_at": data.get("updated_at"),
+            }
+            for document in query.stream()
+        ]
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        query = (
+            self.client.collection("audit_events")
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(max(1, min(limit, 500)))
+        )
+        return [cast(dict[str, Any], document.to_dict()) for document in query.stream()]
+
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
         immutable_id = decision.decision_id or _stable_id(
             listing_id, content_hash, decision.engine_version

@@ -48,7 +48,7 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 
 ## Данные
 
-Ключевые коллекции: `listings`, вложенные `snapshots`, `listing_current`, `verification_evidence`, `vehicle_identities`, `normalized_vehicles`, `decisions`, `current_decisions`, `delivery_outbox`, `telegram_updates`, `user_settings`, `saved_searches`, `user_actions`, `outcomes`, `publication_events`, `migration_ledger`, `migration_replay_requests`. Telegram Sources добавляет `telegram_sources`, `telegram_source_candidates`, `telegram_messages`, `telegram_source_reports` и отдельные cursor/lease records.
+Ключевые коллекции: `listings`, вложенные `snapshots`, `listing_current`, `verification_evidence`, `vehicle_identities`, `normalized_vehicles`, `decisions`, `current_decisions`, `delivery_outbox`, `telegram_updates`, `user_settings`, `saved_searches`, `user_actions`, `outcomes`, `publication_events`, `migration_ledger`, `migration_replay_requests`. R7 добавляет `runtime_configuration/active`, неизменяемые `runtime_configuration_revisions`, идемпотентные `admin_operations` и административный audit trail. Telegram Sources добавляет `telegram_sources`, `telegram_source_candidates`, `telegram_messages`, `telegram_source_reports` и отдельные cursor/lease records.
 
 Immutable сущности создаются по каноническому ID; operational freshness и leases обновляются отдельно. Старый current pointer не удаляет историю.
 
@@ -56,7 +56,7 @@ Immutable сущности создаются по каноническому ID
 
 Telegram MTProto raw messages также не входят в verified market автоматически. Они создают evidence tier `seller_stated`; только source-bound внешняя проверка, независимый verified marketplace listing или ручная проверка с provenance повышает evidence до `verified_listing`.
 
-Pro entitlement определяется нативным членством пользователя в приватном платном Telegram-канале. Цена продукта хранится как `100 AED/30 дней`, платёжная цена — отдельным целым числом Stars. Приложение не хранит банковские данные и не создаёт собственный успешный платёж: Telegram является источником истины по подписке и членству.
+Pro entitlement определяется нативным членством пользователя в приватном платном Telegram-канале. Коммерческая цена AED, платёжная цена Stars и активная subscription link читаются из единой версионированной runtime-конфигурации; переменные окружения являются только fallback baseline. Смена Stars создаёт новую Telegram subscription link, после чего активная версия переключается транзакционно. Приложение не хранит банковские данные и не создаёт собственный успешный платёж: Telegram является источником истины по подписке и членству.
 
 ## Безопасный релиз
 

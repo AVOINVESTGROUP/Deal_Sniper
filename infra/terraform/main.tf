@@ -421,6 +421,25 @@ resource "google_project_iam_member" "runtime_roles" {
   member   = "serviceAccount:${google_service_account.runtime.email}"
 }
 
+resource "google_project_iam_custom_role" "runtime_scheduler_operator" {
+  role_id     = "dealSniperSchedulerOperator"
+  title       = "Deal Sniper Scheduler Operator"
+  description = "Минимальные права Control Center для allowlisted Scheduler jobs"
+  permissions = [
+    "cloudscheduler.jobs.get",
+    "cloudscheduler.jobs.list",
+    "cloudscheduler.jobs.run",
+    "cloudscheduler.jobs.pause",
+    "cloudscheduler.jobs.enable",
+  ]
+}
+
+resource "google_project_iam_member" "runtime_scheduler_operator" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.runtime_scheduler_operator.name
+  member  = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 resource "google_project_iam_member" "collector_roles" {
   for_each = toset(["roles/datastore.user", "roles/cloudtasks.enqueuer", "roles/logging.logWriter", "roles/monitoring.metricWriter", "roles/run.invoker"])
   project  = var.project_id

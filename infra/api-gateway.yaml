@@ -56,6 +56,38 @@ paths:
   /admin/overview:
     get: {operationId: adminOverview, responses: {"200": {description: Overview}}}
     options: {operationId: adminOverviewOptions, responses: {"200": {description: CORS}}}
+  /admin/settings:
+    get: {operationId: adminSettings, responses: {"200": {description: Settings}}}
+    options: {operationId: adminSettingsOptions, responses: {"200": {description: CORS}}}
+  /admin/settings/preview:
+    post: {operationId: adminSettingsPreview, responses: {"200": {description: Preview}}}
+    options: {operationId: adminSettingsPreviewOptions, responses: {"200": {description: CORS}}}
+  /admin/settings/apply:
+    post: {operationId: adminSettingsApply, responses: {"200": {description: Applied}}}
+    options: {operationId: adminSettingsApplyOptions, responses: {"200": {description: CORS}}}
+  /admin/settings/rollback:
+    post: {operationId: adminSettingsRollback, responses: {"200": {description: Rolled back}}}
+    options: {operationId: adminSettingsRollbackOptions, responses: {"200": {description: CORS}}}
+  /admin/runs:
+    get: {operationId: adminRuns, responses: {"200": {description: Runs}}}
+    options: {operationId: adminRunsOptions, responses: {"200": {description: CORS}}}
+  /admin/schedulers/{job_name}/action:
+    parameters:
+      - {name: job_name, in: path, required: true, type: string}
+    post: {operationId: adminSchedulerAction, responses: {"200": {description: Updated}}}
+    options: {operationId: adminSchedulerActionOptions, responses: {"200": {description: CORS}}}
+  /admin/listings:
+    get: {operationId: adminListings, responses: {"200": {description: Listings}}}
+    options: {operationId: adminListingsOptions, responses: {"200": {description: CORS}}}
+  /admin/decisions:
+    get: {operationId: adminDecisions, responses: {"200": {description: Decisions}}}
+    options: {operationId: adminDecisionsOptions, responses: {"200": {description: CORS}}}
+  /admin/users:
+    get: {operationId: adminUsers, responses: {"200": {description: Users}}}
+    options: {operationId: adminUsersOptions, responses: {"200": {description: CORS}}}
+  /admin/errors:
+    get: {operationId: adminErrors, responses: {"200": {description: Errors}}}
+    options: {operationId: adminErrorsOptions, responses: {"200": {description: CORS}}}
   /admin/sources:
     post: {operationId: adminAddSource, responses: {"200": {description: Added}}}
     options: {operationId: adminAddSourceOptions, responses: {"200": {description: CORS}}}

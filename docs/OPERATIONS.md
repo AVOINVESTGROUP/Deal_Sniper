@@ -62,3 +62,18 @@ WhatsApp включается отдельно только после нали�
 - данные не удалять: использовать export, migration ledger и rollback reader;
 - ambiguous sends оставить `unknown`, не повторять автоматически;
 - задокументировать watermark, affected IDs и reconciliation.
+
+## 7. Дополнительный rehearsal R7
+
+Перед выпуском Control Center обязательны отдельные проверки поверх общего staging rehearsal:
+
+1. Развернуть immutable runtime digest и Hosting preview без production delivery.
+2. Создать активную runtime-конфигурацию из fallback baseline и проверить одинаковую версию в Admin, bot/TMA preview и content preview.
+3. Выполнить Preview без мутации, затем Apply с тестовой ценой Stars в отдельном тестовом Pro-канале. Production Pro-канал для staging не использовать.
+4. Подтвердить создание ровно одной subscription link при повторе того же operation ID, корректное маскирование URL и отсутствие токена в API/audit/logs.
+5. Проверить rollback как создание новой active revision и убедиться, что старые outbox payload не изменились.
+6. Проверить все десять разделов Control Center, CORS/OPTIONS и Firebase allowlist настоящим браузером.
+7. Проверить run/pause/resume только для разрешённых scheduler jobs; произвольное имя и произвольное действие должны завершаться отказом.
+8. Записать commit, image digest, Hosting preview, тестовую active version и результаты smoke в `docs/RELEASE_EVIDENCE_2026-07-28-R7.md`.
+
+Production deploy R7 запрещён до отдельного явного разрешения владельца после изучения release evidence.

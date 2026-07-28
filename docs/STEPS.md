@@ -234,3 +234,14 @@
 - Подтверждены блокеры baseline: статичная цена из окружения, отсутствие безопасной ротации Stars subscription link, неполный набор административных разделов и ложные reconcile-действия для исторических `failed`.
 - Полный контракт данных, API, интерфейса, тестов и выпуска зафиксирован в `docs/ADMIN_CONTROL_CENTER_PLAN_R7.md`.
 - Production R6 остаётся без изменений. R7 допускается к реализации и staging, но production deploy требует отдельного разрешения владельца после release evidence.
+
+## 28 июля 2026 — кандидат реализации R7
+
+- Реализована единая версионированная runtime-конфигурация с active pointer, immutable revisions, audit trail и SQLite-эквивалентом для локальных тестов. При недоступности или невалидности active revision runtime использует значения окружения как fail-safe fallback.
+- Добавлены Preview, Apply и Rollback для цены AED/Stars, финансовых порогов и лимита публикаций. Смена Stars создаёт новую 30-дневную Telegram subscription link; повтор операции с тем же operation ID не создаёт вторую активную версию.
+- Bot, TMA, content publisher и новые Free CTA читают одну активную конфигурацию. Старый outbox payload при retry не переписывается.
+- Admin Web содержит Dashboard, Sources, Runs, Listings, Decisions, Publications, Users, Revenue, Errors и Settings. Для исторического `failed` доступны только диагностические данные; reconcile-действия показываются исключительно для `unknown`.
+- Добавлено allowlisted управление Scheduler: run, pause и resume. Произвольные имена Cloud-ресурсов и произвольные действия запрещены.
+- API Gateway и Terraform дополнены маршрутами R7 и минимальной ролью Scheduler operator.
+- Локальный gate успешен: Ruff, strict mypy, 89 тестов, coverage 56,15%, dependency audit, JavaScript syntax, Terraform format/validate и `git diff --check` прошли. Секреты в изменённых и новых файлах не обнаружены.
+- Локальная container build не выполнена: Docker Desktop Linux engine выключен. Immutable image, Trivy, staging и release evidence ещё не созданы; production R6 не изменялся.

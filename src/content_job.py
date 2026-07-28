@@ -27,6 +27,7 @@ from src.pro_cta import (
     pro_cta_for_index,
     validated_subscription_url,
 )
+from src.runtime_config import effective_settings
 from src.service import DealService
 from src.tasks import CloudTaskDispatcher
 
@@ -52,6 +53,7 @@ async def enqueue_market_pulse(settings: Settings) -> str | None:
     if not target:
         return None
     service = DealService.from_settings(settings)
+    settings = effective_settings(service.repository, settings)
     report = await asyncio.to_thread(market_pulse, service.repository)
     current = await asyncio.to_thread(service.repository.current_decisions, 10_000)
     watch = [item for item in current if item[1].market is not None]

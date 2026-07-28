@@ -7,6 +7,7 @@ const auth = getAuth(initializeApp(config));
 const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ?? "";
 let token = "";
 let testedSourceKey = "";
+let settingsDraft = null;
 const transientStatuses = new Set([429, 500, 502, 503, 504]);
 const byId = (id) => document.getElementById(id);
 const safe = (value) => String(value ?? "—").replace(/[&<>'"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]));
@@ -125,12 +126,89 @@ function renderCloud(cloud = {}) {
   byId("cloud").innerHTML = groups.map(([label, items]) => {
     const values = Array.isArray(items) ? items : [];
     const unavailable = values.some((item) => item.state === "UNAVAILABLE");
-    const body = unavailable ? '<div class="empty-state error-state">Status unavailable. Check runtime viewer permissions.</div>' : values.map((item) => `<div class="brief-row"><strong>${safe(shortName(item.name))}</strong>${statusPill(item.state || (item.latestReadyRevision ? "Ready" : "Active"), true)}</div>`).join("") || '<div class="empty-state">No resources found.</div>';
+    const body = unavailable ? '<div class="empty-state error-state">Status unavailable. Check runtime viewer permissions.</div>' : values.map((item) => { const name = shortName(item.name); const controls = label === "Scheduler" ? `<div class="row-actions"><button class="secondary scheduler-action" data-job="${safe(name)}" data-action="run">Run now</button><button class="secondary scheduler-action" data-job="${safe(name)}" data-action="${item.state === "PAUSED" ? "resume" : "pause"}">${item.state === "PAUSED" ? "Resume" : "Pause"}</button></div>` : statusPill(item.state || (item.latestReadyRevision ? "Ready" : "Active"), true); return `<div class="brief-row"><div><strong>${safe(name)}</strong>${label === "Scheduler" ? statusPill(item.state || "Unknown", item.state !== "PAUSED") : ""}</div>${controls}</div>`; }).join("") || '<div class="empty-state">No resources found.</div>';
     return `<section class="admin-card"><div class="card-heading"><div><p class="eyebrow">GOOGLE CLOUD</p><h2>${safe(label)}</h2></div>${statusPill(unavailable ? "Unavailable" : "Connected", !unavailable)}</div>${body}</section>`;
   }).join("");
+  document.querySelectorAll(".scheduler-action").forEach((button) => button.addEventListener("click", () => changeScheduler(button.dataset.job, button.dataset.action)));
 }
 
-function render(data, pulse, preview, exceptions) {
+async function changeScheduler(job, action) {
+  const required = `${action.toUpperCase()} ${job}`;
+  const confirmation = window.prompt(`This changes a live schedule. Type exactly: ${required}`);
+  if (confirmation !== required) return;
+  try { await call(`/admin/schedulers/${encodeURIComponent(job)}/action`, {method: "POST", body: JSON.stringify({action, operation_id: crypto.randomUUID(), confirmation})}); await refresh(); }
+  catch (error) { showError(error); }
+}
+
+function renderRuns(payload = {}) {
+  byId("runs").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><strong>${safe(item.source || item.event_type)}</strong><div class="row-meta"><span>${safe(item.success === true ? "Successful" : item.success === false ? "Failed" : "Recorded")}</span><span>${number(item.fetched)} fetched</span><span>${safe(item.duration_seconds || "—")} sec</span></div>${item.error ? `<span class="source-error">${safe(item.error)}</span>` : ""}</div></article>`).join("") || '<div class="empty-state">No runs recorded.</div>';
+}
+
+function renderListings(payload = {}) {
+  byId("listings").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><strong>${safe(item.title)}</strong><div class="row-meta"><span>${safe(item.source)}</span><span>${money(item.price_aed)}</span><span>${safe(item.year || "Year unknown")}</span></div></div><a class="button secondary" href="${safe(item.url)}" target="_blank" rel="noopener">Open listing</a></article>`).join("") || '<div class="empty-state">No current listings.</div>';
+}
+
+function renderDecisions(payload = {}) {
+  byId("decisions").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><div><strong>${safe(item.title)}</strong>${statusPill(item.action, ["CONTACT", "INSPECT"].includes(item.action))}</div><div class="row-meta"><span>${money(item.price_aed)}</span><span>Profit ${money(item.expected_profit_aed)}</span><span>ROI ${safe(item.roi_percent || "—")}%</span><span>${number(item.comparables_count)} comparables</span></div><span class="muted">Config ${safe(item.financial_config_version)} · Engine ${safe(item.engine_version)}</span></div></article>`).join("") || '<div class="empty-state">No current decisions.</div>';
+}
+
+function renderUsers(payload = {}) {
+  byId("users").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><div><strong>User ${safe(item.user_id)}</strong>${statusPill(item.tariff || "free", item.tariff === "pro")}</div><div class="row-meta"><span>${safe(item.language_code || "en").toUpperCase()}</span><span>${safe((item.makes || []).join(", ") || "All makes")}</span><span>${safe((item.models || []).join(", ") || "All models")}</span></div></div></article>`).join("") || '<div class="empty-state">No user profiles recorded.</div>';
+}
+
+function renderErrors(payload = {}) {
+  byId("errors-list").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><div><strong>${safe(item.id)}</strong>${statusPill(item.kind, false)}</div><span class="source-error">${safe(item.message || "No detail")}</span></div></article>`).join("") || '<div class="empty-state">No operational errors require attention.</div>';
+}
+
+function settingsPayload() {
+  return {
+    pro_price_aed: Number(byId("price-aed").value),
+    pro_price_stars: Number(byId("price-stars").value),
+    target_profit_aed: byId("target-profit").value,
+    min_roi_percent: byId("min-roi").value,
+    min_comparables_count: Number(byId("min-comparables").value),
+    channel_max_posts_per_run: Number(byId("posts-per-run").value),
+    operation_id: crypto.randomUUID(),
+    confirmation: "",
+  };
+}
+
+function renderSettings(payload = {}) {
+  const active = payload.active || {};
+  byId("active-settings").innerHTML = keyValues({version: active.version, commercial_price_aed: active.pro_price_aed, telegram_charge_stars: active.pro_price_stars, subscription_link: active.pro_subscription_url, target_profit_aed: active.target_profit_aed, min_roi_percent: active.min_roi_percent, min_comparables: active.min_comparables_count, posts_per_run: active.channel_max_posts_per_run, activated_by: active.created_by});
+  [["price-aed", active.pro_price_aed], ["price-stars", active.pro_price_stars], ["target-profit", active.target_profit_aed], ["min-roi", active.min_roi_percent], ["min-comparables", active.min_comparables_count], ["posts-per-run", active.channel_max_posts_per_run]].forEach(([id, value]) => { if (document.activeElement !== byId(id)) byId(id).value = value ?? ""; });
+  byId("settings-history").innerHTML = (payload.revisions || []).map((item) => `<article class="data-row ${item.state === "active" ? "revision-active" : ""}"><div class="data-primary"><div><strong>${safe(item.version)}</strong>${statusPill(item.state, item.state === "active")}</div><div class="row-meta"><span>${money(item.pro_price_aed)}</span><span>${number(item.pro_price_stars)} Stars</span><span>${safe(item.created_by)}</span></div></div>${item.state === "archived" ? `<button class="secondary rollback-settings" data-version="${safe(item.version)}">Rollback</button>` : ""}</article>`).join("") || '<div class="empty-state">Environment baseline is active; no revisions yet.</div>';
+  document.querySelectorAll(".rollback-settings").forEach((button) => button.addEventListener("click", () => rollbackSettings(button.dataset.version)));
+}
+
+async function previewSettings() {
+  try {
+    settingsDraft = settingsPayload();
+    const preview = await call("/admin/settings/preview", {method: "POST", body: JSON.stringify(settingsDraft)});
+    const box = byId("settings-preview"); box.hidden = false; box.innerHTML = `<strong>Validated change</strong><span>${money(preview.current.pro_price_aed)} → ${money(preview.candidate.pro_price_aed)}; ${number(preview.current.pro_price_stars)} → ${number(preview.candidate.pro_price_stars)} Stars.</span><span>${preview.creates_new_telegram_link ? "A new Telegram paid link will be created." : "The existing paid link will remain active."}</span><span>Confirmation: ${safe(preview.confirmation_required)}</span>`;
+    byId("apply-settings").disabled = false;
+  } catch (error) { settingsDraft = null; byId("apply-settings").disabled = true; showError(error); }
+}
+
+async function applySettings() {
+  if (!settingsDraft) return;
+  const required = `APPLY ${settingsDraft.pro_price_stars} STARS`;
+  const confirmation = window.prompt(`This changes the live Pro offer. Type exactly: ${required}`);
+  if (confirmation !== required) { showError(new Error("The confirmation did not match. Nothing was changed.")); return; }
+  byId("apply-settings").disabled = true;
+  try { await call("/admin/settings/apply", {method: "POST", body: JSON.stringify({...settingsDraft, confirmation})}); settingsDraft = null; await refresh(); }
+  catch (error) { showError(error); byId("apply-settings").disabled = false; }
+}
+
+async function rollbackSettings(version) {
+  const required = `ROLLBACK ${version}`;
+  const confirmation = window.prompt(`Rollback creates a new paid link and active revision. Type exactly: ${required}`);
+  if (confirmation !== required) return;
+  try { await call("/admin/settings/rollback", {method: "POST", body: JSON.stringify({version, operation_id: crypto.randomUUID(), confirmation})}); await refresh(); }
+  catch (error) { showError(error); }
+}
+
+function render(data, pulse, preview, unknown, failed) {
   const sourceEntries = Object.entries(data.source_switches || {});
   const sourceHealthy = sourceEntries.filter(([name, enabled]) => sourceState(data.sources?.[name], enabled).good).length;
   byId("overview").innerHTML = metric("Listings stored", number(data.snapshot_count), "immutable snapshots") + metric("Sources healthy", `${sourceHealthy}/${sourceEntries.length}`, "installed adapters") + metric("Delivery", data.delivery_enabled ? "Running" : "Paused", "Telegram publishing") + metric("Schema", `v${data.schema_version}`, "production data");
@@ -138,11 +216,13 @@ function render(data, pulse, preview, exceptions) {
   byId("operations").innerHTML = keyValues(data.operations);
   byId("pulse").textContent = pulse.text || pulse.summary || "No market update is currently available.";
   byId("free").textContent = preview.free || "No current deal."; byId("pro").textContent = preview.pro || "No current deal.";
-  byId("queue-brief").innerHTML = keyValues({delivery: data.delivery_enabled ? "running" : "paused", exceptions: exceptions.length, whatsapp: data.whatsapp_status});
+  byId("queue-brief").innerHTML = keyValues({delivery: data.delivery_enabled ? "running" : "paused", unknown: unknown.length, failed_history: failed.length, whatsapp: data.whatsapp_status});
   byId("subscription-brief").innerHTML = keyValues({price: money(data.subscription?.price_aed), active: data.subscription?.active || 0, total: data.subscription?.total || 0});
   byId("business-metrics").innerHTML = metric("Monthly price", money(data.subscription?.price_aed), "per Pro subscriber") + metric("Active Pro", number(data.subscription?.active), "Telegram subscriptions") + metric("Referrals", number(data.referrals?.total), "recorded invitations") + metric("WhatsApp", data.whatsapp_status, "channel relay");
   byId("financial").innerHTML = keyValues({...data.financial_config, pro_price_aed: data.subscription?.price_aed});
-  byId("unknown").innerHTML = exceptions.map((item) => `<article class="data-row"><div class="data-primary"><strong>${safe(item.delivery_id)}</strong><span class="source-error">${safe(item.last_error || "Ambiguous delivery result")}</span></div><div class="row-actions">${["mark_sent", "mark_failed", "retry_once"].map((action) => `<button class="secondary reconcile" data-id="${safe(item.delivery_id)}" data-action="${action}">${safe(action.replaceAll("_", " "))}</button>`).join("")}</div></article>`).join("") || '<div class="empty-state">No delivery exceptions. Everything is reconciled.</div>';
+  const unknownRows = unknown.map((item) => `<article class="data-row"><div class="data-primary"><div><strong>${safe(item.delivery_id)}</strong>${statusPill("unknown", false)}</div><span class="source-error">${safe(item.last_error || "Ambiguous delivery result")}</span></div><div class="row-actions">${["mark_sent", "mark_failed", "retry_once"].map((action) => `<button class="secondary reconcile" data-id="${safe(item.delivery_id)}" data-action="${action}">${safe(action.replaceAll("_", " "))}</button>`).join("")}</div></article>`).join("");
+  const failedRows = failed.map((item) => `<article class="data-row"><div class="data-primary"><div><strong>${safe(item.delivery_id)}</strong>${statusPill("failed history", false)}</div><span class="source-error">${safe(item.last_error || "Delivery failed")}</span><span class="muted">Historical failed records are diagnostic only. Reconciliation is available only for unknown delivery.</span></div></article>`).join("");
+  byId("unknown").innerHTML = unknownRows + failedRows || '<div class="empty-state">No delivery exceptions. Everything is reconciled.</div>';
   document.querySelectorAll(".reconcile").forEach((button) => button.addEventListener("click", () => reconcile(button.dataset.id, button.dataset.action)));
 }
 
@@ -151,15 +231,16 @@ async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/$
 async function refresh() {
   byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed")];
-    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult] = await Promise.allSettled(requests);
+    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings")];
+    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult] = await Promise.allSettled(requests);
     if (overviewResult.status === "rejected") throw overviewResult.reason;
     const pulse = pulseResult.status === "fulfilled" ? pulseResult.value : {};
     const preview = previewResult.status === "fulfilled" ? previewResult.value : {};
     const unknown = unknownResult.status === "fulfilled" ? unknownResult.value : {items: []};
     const failed = failedResult.status === "fulfilled" ? failedResult.value : {items: []};
-    render(overviewResult.value, pulse, preview, [...(unknown.items || []), ...(failed.items || [])]);
-    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult].filter((result) => result.status === "rejected");
+    render(overviewResult.value, pulse, preview, unknown.items || [], failed.items || []);
+    if (runsResult.status === "fulfilled") renderRuns(runsResult.value); if (listingsResult.status === "fulfilled") renderListings(listingsResult.value); if (decisionsResult.status === "fulfilled") renderDecisions(decisionsResult.value); if (usersResult.status === "fulfilled") renderUsers(usersResult.value); if (errorsResult.status === "fulfilled") renderErrors(errorsResult.value); if (settingsResult.status === "fulfilled") renderSettings(settingsResult.value);
+    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult].filter((result) => result.status === "rejected");
     if (partialErrors.length) showError(new Error(`${partialErrors.length} section(s) are temporarily unavailable. Refresh will retry them.`));
     byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
   } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }
@@ -184,6 +265,7 @@ byId("login").addEventListener("click", async () => {
 });
 byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
 byId("test-source").addEventListener("click", testNewSource); byId("add-source").addEventListener("click", addNewSource);
+byId("preview-settings").addEventListener("click", previewSettings); byId("apply-settings").addEventListener("click", applySettings);
 [byId("source-name"), byId("source-url")].forEach((input) => input.addEventListener("input", () => { testedSourceKey = ""; byId("add-source").disabled = true; }));
 onAuthStateChanged(auth, async (user) => {
   if (!user) {

@@ -7,4 +7,6 @@
 @media(max-width:520px){.admin-header{display:grid}.metric-grid{grid-template-columns:1fr}.key-value-grid{grid-template-columns:1fr}.toolbar{flex-wrap:wrap}.row-actions{width:100%}.row-actions button{flex:1}}
 .admin-header .toolbar input{min-width:230px;width:auto;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--text);padding:10px 12px}.admin-header .toolbar input::placeholder{color:var(--muted)}
 .source-add-card{margin-bottom:16px}.source-form{display:grid;grid-template-columns:minmax(180px,.45fr) minmax(320px,1fr) auto;gap:14px;align-items:end}.source-form label{display:grid;gap:7px;color:#9fb0c7;font-size:12px}.source-form .row-actions{padding-bottom:1px}.source-form #source-test-result{grid-column:1/-1;min-height:20px}.source-form .test-good{color:#78e1ac}.source-form .test-bad{color:#ff9aa9}
+.settings-form{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:14px}.settings-form label{display:grid;gap:7px;color:#9fb0c7;font-size:12px}.settings-actions{margin-top:18px}.revision-active{border-left:3px solid #78e1ac;padding-left:12px}
 @media(max-width:1050px){.source-form{grid-template-columns:1fr 1fr}.source-form .row-actions{grid-column:1/-1}}
+@media(max-width:800px){.settings-form{grid-template-columns:1fr 1fr}}
