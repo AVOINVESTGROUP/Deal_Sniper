@@ -7,12 +7,12 @@
 - ветка: `production/deal-sniper-complete`;
 - план R7: `4f4e3b2`;
 - реализация R7: `2cb2bd20310743bc5d88706ea25c21d98f16c24e`;
-- evidence head: `02fcb6f919c22d5f6504dd46667d2439ca8e9d55`;
+- CORS RC: `80872e0e70f292189864e829824f07dcf3e6591f`;
 - GitHub Actions: `30336329612` — success;
-- финальный GitHub Actions: `30336520291` — success;
-- Cloud Build: `1a47a7e3-cf4c-4613-ac3f-543a3ee3c0b6`;
-- staging digest: `sha256:ab0b8880041985c47bf2a7eb69b638ed6d2370a21e3e5044b42ebfe4e2ffe94a`;
-- staging Cloud Run revision: `deal-sniper-api-staging-00026-cfj`;
+- финальный GitHub Actions: `30342104177` — success;
+- Cloud Build: `6d7de8fd-8088-4b87-a74e-26afe9a1e7fd`;
+- staging digest: `sha256:c45e544ce9cc128353a9c8f1f96443809aded61f31c06ebde42d0b77ca2f6e2a`;
+- staging Cloud Run revision: `deal-sniper-api-staging-00033-v7k`;
 - staging Gateway config: `r7-02fcb6f`;
 - production baseline остаётся `851ddaf26852aaaa0547df1b60e222d7f74b5d9a` / `sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112`.
 
@@ -20,8 +20,8 @@
 
 - Ruff — success;
 - strict mypy — success;
-- pytest — 89 passed, 2 skipped;
-- coverage — 56,15% при пороге 45%;
+- pytest — 90 passed, 2 skipped;
+- coverage — 64% при пороге 45%;
 - dependency audit — уязвимости не обнаружены;
 - JavaScript module syntax — success;
 - Terraform format/validate — success;
@@ -35,18 +35,17 @@
 - настоящий headless Chrome прошёл Firebase Auth и browser-enforced CORS для `/admin/overview`, Market Pulse, preview и двух outbox states;
 - дополнительные защищённые endpoints Runs, Listings, Decisions, Users, Errors и Settings вернули HTTP 200;
 - краткоживущий Firebase test user удалён, staging `ADMIN_EMAILS` восстановлен, временный доступ отсутствует.
+- Hosting Preview `https://avo-deal-sniper--r7-02fcb6f-gswik35m.web.app` направлен только на staging Gateway и автоматически истекает 29 июля 2026;
+- реальный Preview UI вошёл через Firebase Auth, загрузил Dashboard без ошибок и открыл Dashboard, Sources, Runs, Listings, Decisions, Publications, Users, Revenue, Errors и Settings;
+- preview-origin получил CORS preflight HTTP 200; wildcard origins отсутствуют.
 
 ## Невыполненные проверки
 
-- Firebase Hosting preview;
 - тестовая смена Stars и rollback в отдельном тестовом Pro-канале;
 - подтверждение единой active revision в bot, TMA, Admin и новом CTA.
 
 ## Текущие блокеры
 
-1. Hosting Preview создан после `firebase login --reauth`, однако реальный UI-smoke выявил HTTP 400 на CORS preflight: backend жёстко разрешает только production Hosting origins. Требуется новый RC с явным staging CORS allowlist и полный повтор staging.
-2. До мутационного smoke нужен отдельный тестовый Pro-канал с тестовым ботом или изолированными staging credentials. Production Pro-канал использовать для staging запрещено.
-
-Адресная CORS-поправка реализована в рабочем кандидате: `CORS_ALLOWED_ORIGINS` принимает только точные HTTPS origins, отклоняет wildcard/пустое значение и сохраняет production fallback. Локальный gate нового кандидата: Ruff, strict mypy, 90 passed / 2 skipped, coverage 64%, dependency audit и Terraform validate — success. До нового commit-labelled immutable build прежний staging digest считается аннулированным.
+До мутационного smoke нужен отдельный тестовый Pro-канал с тестовым ботом или изолированными staging credentials. Production Pro-канал использовать для staging запрещено.
 
 Production deploy R7 не разрешён и не выполнялся.
