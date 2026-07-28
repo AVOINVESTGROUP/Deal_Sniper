@@ -103,6 +103,7 @@ class Settings:
     git_commit: str
     runtime_image_digest: str
     collector_job_prefix: str
+    publisher_job_name: str
     storage_backend: str
     database_path: Path
     local_raw_snapshots_path: Path
@@ -184,6 +185,9 @@ class Settings:
             git_commit=os.getenv("GIT_COMMIT", "unknown").strip(),
             runtime_image_digest=os.getenv("RUNTIME_IMAGE_DIGEST", "unknown").strip(),
             collector_job_prefix=os.getenv("COLLECTOR_JOB_PREFIX", "deal-sniper-collector").strip(),
+            publisher_job_name=os.getenv(
+                "PUBLISHER_JOB_NAME", "deal-sniper-publisher"
+            ).strip(),
             storage_backend=os.getenv("STORAGE_BACKEND", "local").strip().lower(),
             database_path=Path(os.getenv("LOCAL_DATABASE_PATH", "data/deal_sniper.db")),
             local_raw_snapshots_path=Path(os.getenv("LOCAL_RAW_SNAPSHOTS_PATH", "data/raw")),

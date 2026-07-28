@@ -9,7 +9,9 @@ import google.auth
 from google.auth.transport.requests import AuthorizedSession
 
 SCHEDULER_ACTIONS = frozenset({"run", "pause", "resume"})
-PUBLISHER_JOB_NAME = "deal-sniper-publisher"
+PUBLISHER_JOB_NAMES = frozenset(
+    {"deal-sniper-publisher", "deal-sniper-publisher-staging"}
+)
 
 
 def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
@@ -99,15 +101,17 @@ def scheduler_action(project_id: str, region: str, job_name: str, action: str) -
     }
 
 
-def run_publisher_job(project_id: str, region: str) -> dict[str, Any]:
+def run_publisher_job(project_id: str, region: str, job_name: str) -> dict[str, Any]:
     """Запускает только установленный publisher job без произвольных аргументов."""
+    if job_name not in PUBLISHER_JOB_NAMES:
+        raise ValueError("Publisher job не входит в точный allowlist")
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
     session = _authorized_session(credentials, project_id)
     url = (
         f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/jobs/"
-        f"{PUBLISHER_JOB_NAME}:run"
+        f"{job_name}:run"
     )
     response = session.post(url, json={}, timeout=15)
     if not response.ok:
@@ -116,7 +120,7 @@ def run_publisher_job(project_id: str, region: str) -> dict[str, Any]:
         )
     payload = response.json()
     return {
-        "job": PUBLISHER_JOB_NAME,
+        "job": job_name,
         "operation": payload.get("name", "started"),
         "state": "STARTED",
     }

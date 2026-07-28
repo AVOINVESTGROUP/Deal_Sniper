@@ -1294,8 +1294,9 @@ async def admin_run_pro_publications(
             run_publisher_job,
             settings.google_cloud_project,
             settings.google_cloud_region,
+            current.publisher_job_name,
         )
-    except RuntimeError as error:
+    except (RuntimeError, ValueError) as error:
         await asyncio.to_thread(
             service.repository.complete_admin_operation,
             request.operation_id,

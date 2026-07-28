@@ -72,6 +72,7 @@ Production настроен на Free и Pro Telegram-каналы, delivery в�
 - для `decision + Pro recipient + pro/v1` используются стабильные publication и delivery ID;
 - `pending` повторно ставится в Cloud Tasks, `sent`, `sending`, `unknown` и `failed` не дублируются;
 - отсутствующая пара PublicationEvent/outbox создаётся атомарно, размер запуска ограничен активным `Posts per run`;
-- Admin Web показывает покрытие Pro-публикаций и запускает только allowlisted Cloud Run Job `deal-sniper-publisher` после точного подтверждения;
+- Admin Web показывает покрытие Pro-публикаций и запускает после точного подтверждения только явно настроенный allowlisted Job: `deal-sniper-publisher` в production или `deal-sniper-publisher-staging` в staging;
+- staging API никогда не запускает production publisher: staging Job использует отдельную Firestore database, exact staging digest и `DELIVERY_ENABLED=false`;
 - изменение только цены AED/Stars больше не инвалидирует автомобильные решения; версия финансовой политики меняется только при изменении порогов расчёта;
 - локальный gate: 94 теста прошли, 2 условно пропущены; Ruff, strict mypy, ES-module syntax и `git diff --check` прошли.

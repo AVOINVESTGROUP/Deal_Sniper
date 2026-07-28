@@ -1,6 +1,6 @@
 # Release evidence R7.1 — staging
 
-Статус: **immutable build и безопасное staging-развёртывание выполнены; production не изменён**.
+Статус: **staging-проверка выявила связь Admin-кнопки с production Job; выполняется отдельный исправленный immutable build, production не изменён**.
 
 ## Зафиксированные версии
 

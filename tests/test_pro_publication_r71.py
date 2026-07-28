@@ -172,11 +172,11 @@ async def test_admin_previews_and_starts_allowlisted_publisher(
             subject="owner", email="owner@example.com", admin=require_admin
         ),
     )
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[str, str, str]] = []
 
-    def fake_run(project: str, region: str) -> dict[str, str]:
-        calls.append((project, region))
-        return {"job": "deal-sniper-publisher", "operation": "operations/1", "state": "STARTED"}
+    def fake_run(project: str, region: str, job_name: str) -> dict[str, str]:
+        calls.append((project, region, job_name))
+        return {"job": job_name, "operation": "operations/1", "state": "STARTED"}
 
     monkeypatch.setattr(web, "run_publisher_job", fake_run)
     transport = httpx.ASGITransport(app=web.app)
@@ -195,3 +195,4 @@ async def test_admin_previews_and_starts_allowlisted_publisher(
     assert started.status_code == 200
     assert started.json()["started"] is True
     assert len(calls) == 1
+    assert calls[0][2] == "deal-sniper-publisher"
