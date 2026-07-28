@@ -265,3 +265,4 @@
 - Настоящий Hosting Preview UI успешно вошёл через Firebase Auth, загрузил Dashboard без ошибок и открыл все десять разделов. Preview CORS preflight возвращает HTTP 200; staging allowlist восстановлен после smoke.
 - Владелец уточнил, что отдельный тестовый Pro-канал не нужен: платных пользователей пока нет, цена должна меняться только в Admin, а новая Telegram Stars link должна создаваться backend автоматически.
 - Read-only аудит production обнаружил 3 текущих `INSPECT`, 5 исторических `pro/v1` outbox и отсутствие Pro reconciliation в периодическом publisher. Подготовлен `docs/PLAN_R7_1_PRO_PUBLICATION.md`; до его утверждения код и production не менять.
+- Владелец явно утвердил `docs/PLAN_R7_1_PRO_PUBLICATION.md`. Разрешены реализация и staging R7.1; production deploy по-прежнему требует отдельной команды после нового release evidence.
