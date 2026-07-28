@@ -276,3 +276,12 @@
 - Добавлены защищённые Gateway routes `/admin/pro-publications` и `/admin/pro-publications/run`.
 - Локальный gate: 94 теста прошли, 2 условно пропущены; Ruff, strict mypy, JavaScript ES-module syntax и `git diff --check` успешны.
 - Следующий разрешённый этап: commit/push, immutable build и staging rehearsal. Production deploy по-прежнему требует отдельного явного разрешения владельца.
+
+## 28 июля 2026 — staging R7.1
+
+- Commit `07e89b79e3a46deade619a87b115157d3df4209a` отправлен в Draft PR #3; оба GitHub Actions запуска завершились успешно.
+- Cloud Build `18c2f73a-d5e5-4ec4-84dc-e948c7f9b706` собрал из точного `git archive` immutable digest `sha256:d1fa347b8b4a528b89ba93ad6ab0a3ca11c86813ad514c44097cf8300d92998c`.
+- Exact digest развёрнут только в staging revision `deal-sniper-api-staging-00035-gst`; отдельная база `deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false` и `WHATSAPP_ENABLED=false` сохранены.
+- Staging Gateway активен на config `r71-07e89b7`; `/version`, `/health`, `/ready` и CORS preflight успешны, новый защищённый Pro endpoint без Firebase-сессии возвращает 401.
+- Hosting Preview version `06e7b909a8895569` содержит UI R7.1 и направлен только на staging Gateway. Production API/Gateway/publisher/live Hosting остаются на R6.
+- Для завершения staging evidence владелец должен открыть Publications в Preview своей существующей Firebase-сессией. Автоматический временный Firebase login не создавался из-за отсутствия у оператора `iam.serviceAccounts.signBlob` и истёкших локальных ADC.
