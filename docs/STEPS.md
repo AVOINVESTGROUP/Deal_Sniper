@@ -308,3 +308,5 @@
 - Полный локальный gate успешен: 99 тестов прошли, 2 условно пропущены, coverage 57,55%; Ruff, strict mypy, JavaScript ES-module syntax, dependency audit, Terraform validate и `git diff --check` прошли без ошибок.
 - Облачный Google provider пока не переключался с IAP client, Hosting и production не изменялись.
 - Дополнительный аудит подтвердил отсутствие периодических Pro-новостей и отсутствие R7.1 reconciliation в production R6. Создан черновик `docs/PLAN_R7_3_PRO_CHANNEL_CONTENT.md`; его код не реализуется до отдельного утверждения.
+- Commit `fe13453392f2b9007e97b84d3695f9dd9fe749c4` отправлен в Draft PR #3. GitHub Actions `30382432905` и `30382437156` завершились успешно: quality на Python 3.11, container build, Trivy и Terraform прошли.
+- Следующий разрешённый этап R7.2: создать отдельный Web OAuth client, переключить Firebase Google provider и выполнить настоящий Google Sign-In smoke только в Hosting Preview/staging. Production остаётся на R6 до отдельной команды владельца.
