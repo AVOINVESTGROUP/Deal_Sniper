@@ -88,7 +88,7 @@ def current_pro_candidates(
 ) -> list[ProPublicationCandidate]:
     """Возвращает только текущие, подтверждённые решения актуальной конфигурации."""
     recipient = settings.telegram_pro_channel_id
-    if not recipient:
+    if not recipient or not settings.pro_deals_enabled:
         return []
     current = repository.current_decisions(10_000)
     eligible = [
@@ -134,6 +134,8 @@ async def reconcile_pro_publications(
     dispatcher: DeliveryDispatcher,
 ) -> ProPublicationSummary:
     """Создаёт отсутствующие Pro-публикации и переочередяет только pending."""
+    if not settings.pro_deals_enabled:
+        return ProPublicationSummary()
     candidates = current_pro_candidates(repository, settings)
     preview = await asyncio.to_thread(preview_pro_reconciliation, repository, settings)
     limit = settings.channel_max_posts_per_run

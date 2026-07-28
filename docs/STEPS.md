@@ -310,3 +310,12 @@
 - Дополнительный аудит подтвердил отсутствие периодических Pro-новостей и отсутствие R7.1 reconciliation в production R6. Создан черновик `docs/PLAN_R7_3_PRO_CHANNEL_CONTENT.md`; его код не реализуется до отдельного утверждения.
 - Commit `fe13453392f2b9007e97b84d3695f9dd9fe749c4` отправлен в Draft PR #3. GitHub Actions `30382432905` и `30382437156` завершились успешно: quality на Python 3.11, container build, Trivy и Terraform прошли.
 - Следующий разрешённый этап R7.2: создать отдельный Web OAuth client, переключить Firebase Google provider и выполнить настоящий Google Sign-In smoke только в Hosting Preview/staging. Production остаётся на R6 до отдельной команды владельца.
+
+## 28 июля 2026 — локальная реализация R7.3
+
+- Владелец утвердил `docs/PLAN_R7_3_PRO_CHANNEL_CONTENT.md`; перед кодом повторно проверены content job, R7.1 Pro reconciliation, outbox, runtime revisions, Admin API/Web, RSS-клиент и API Gateway.
+- Плановый publisher теперь независимо выполняет сверку полных Pro-карточек и нового англоязычного Dubai/UAE automotive digest. Новости принимаются только из HTTPS RSS/Atom, проходят freshness/relevance/provenance-фильтры и дедупликацию по semantic fingerprint.
+- Создан управляемый реестр новостных лент для SQLite и Firestore. Admin Web позволяет проверить и добавить ленту, включить, приостановить или удалить её без удаления истории публикаций.
+- В versioned Settings добавлены отдельные переключатели Pro deals и Pro news, размер дайджеста 1–3, интервал публикации и опциональное вступление Vertex AI. При недоступности модели используется детерминированный текст; модель не определяет цены и инвестиционные решения.
+- Раздел Publications раздельно показывает состояния сделок и новостей; ручной запуск остаётся идемпотентным и использует allowlisted publisher job. `pending` переочередяется, а финальные состояния не публикуются повторно.
+- Локальный gate успешен: 105 тестов прошли, 2 условно пропущены, coverage 58,82%; Ruff, strict mypy, JavaScript ES-module syntax, dependency audit, Terraform validate и `git diff --check` прошли. Локальный container build недоступен, потому что Docker Desktop Linux engine выключен; его обязан заменить CI container/Trivy и последующая immutable Cloud Build. Production R6 не изменялся; immutable build и staging ещё не выполнялись.

@@ -13,6 +13,7 @@ from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
+    NewsFeedConfiguration,
     NormalizedVehicle,
     OutboxRecord,
     OutboxState,
@@ -91,6 +92,12 @@ class Repository(Protocol):
     def save_source_configuration(self, config: SourceConfiguration) -> None: ...
 
     def delete_source_configuration(self, source_name: str) -> bool: ...
+
+    def list_news_feed_configurations(self) -> list[NewsFeedConfiguration]: ...
+
+    def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None: ...
+
+    def delete_news_feed_configuration(self, name: str) -> bool: ...
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None: ...
 
@@ -304,6 +311,11 @@ class LocalRepository:
                 );
                 CREATE TABLE IF NOT EXISTS source_configurations (
                     source_name TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS news_feed_configurations (
+                    name TEXT PRIMARY KEY,
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -1412,6 +1424,33 @@ class LocalRepository:
                 "DELETE FROM source_configurations WHERE source_name = ?", (source_name,)
             )
             connection.execute("DELETE FROM source_registry WHERE source_name = ?", (source_name,))
+        return cursor.rowcount > 0
+
+    def list_news_feed_configurations(self) -> list[NewsFeedConfiguration]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM news_feed_configurations ORDER BY name"
+            ).fetchall()
+        return [NewsFeedConfiguration.model_validate_json(row["payload_json"]) for row in rows]
+
+    def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO news_feed_configurations(name, payload_json, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(name) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (config.name, config.model_dump_json()),
+            )
+
+    def delete_news_feed_configuration(self, name: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM news_feed_configurations WHERE name = ?", (name,)
+            )
         return cursor.rowcount > 0
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:

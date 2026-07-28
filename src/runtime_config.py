@@ -30,6 +30,11 @@ class RuntimeConfiguration(BaseModel):
     min_roi_percent: Decimal = Field(ge=0, le=1_000)
     min_comparables_count: int = Field(ge=2, le=100)
     channel_max_posts_per_run: int = Field(ge=1, le=100)
+    pro_deals_enabled: bool = True
+    pro_news_enabled: bool = False
+    pro_news_max_items: int = Field(default=3, ge=1, le=3)
+    pro_news_min_interval_hours: int = Field(default=6, ge=1, le=168)
+    pro_news_ai_summary_enabled: bool = False
     created_at: datetime
     created_by: str
     previous_version: str | None = None
@@ -76,6 +81,11 @@ def configuration_from_settings(settings: Settings) -> RuntimeConfiguration:
         min_roi_percent=settings.min_roi_percent,
         min_comparables_count=settings.min_comparables_count,
         channel_max_posts_per_run=settings.channel_max_posts_per_run,
+        pro_deals_enabled=settings.pro_deals_enabled,
+        pro_news_enabled=settings.pro_news_enabled,
+        pro_news_max_items=settings.pro_news_max_items,
+        pro_news_min_interval_hours=settings.pro_news_min_interval_hours,
+        pro_news_ai_summary_enabled=settings.pro_news_ai_summary_enabled,
         created_at=datetime.fromtimestamp(0, UTC),
         created_by="environment",
         telegram_link_name="environment-baseline",
@@ -131,6 +141,11 @@ def effective_settings(repository: Any, settings: Settings) -> Settings:
         min_roi_percent=active.min_roi_percent,
         min_comparables_count=active.min_comparables_count,
         channel_max_posts_per_run=active.channel_max_posts_per_run,
+        pro_deals_enabled=active.pro_deals_enabled,
+        pro_news_enabled=active.pro_news_enabled,
+        pro_news_max_items=active.pro_news_max_items,
+        pro_news_min_interval_hours=active.pro_news_min_interval_hours,
+        pro_news_ai_summary_enabled=active.pro_news_ai_summary_enabled,
         financial_config_version=financial_version,
     )
 

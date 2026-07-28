@@ -11,6 +11,7 @@ from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
+    NewsFeedConfiguration,
     NormalizedVehicle,
     OutboxRecord,
     OutboxState,
@@ -1018,6 +1019,34 @@ class FirestoreRepository:
         snapshot = reference.get()
         data = snapshot.to_dict() or {}
         if not isinstance(data.get("configuration"), dict):
+            return False
+        reference.delete()
+        return True
+
+    def list_news_feed_configurations(self) -> list[NewsFeedConfiguration]:
+        results: list[NewsFeedConfiguration] = []
+        for document in self.client.collection("news_feed_registry").stream():
+            data = document.to_dict() or {}
+            config = data.get("configuration")
+            if isinstance(config, dict):
+                results.append(NewsFeedConfiguration.model_validate(config))
+        return sorted(results, key=lambda item: item.name)
+
+    def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None:
+        self.client.collection("news_feed_registry").document(config.name).set(
+            {
+                "name": config.name,
+                "enabled": config.enabled,
+                "configuration": config.model_dump(mode="json"),
+                "updated_at": datetime.now(UTC),
+            },
+            merge=True,
+        )
+
+    def delete_news_feed_configuration(self, name: str) -> bool:
+        reference = self.client.collection("news_feed_registry").document(name)
+        snapshot = reference.get()
+        if not snapshot.exists:
             return False
         reference.delete()
         return True

@@ -63,6 +63,7 @@ from src.domain.ids import (
     verification_key,
 )
 from src.domain.models import (
+    NewsFeedConfiguration,
     OutboxRecord,
     OutboxState,
     Outcome,
@@ -79,6 +80,7 @@ from src.pro_cta import (
     pro_cta_for_index,
     validated_subscription_url,
 )
+from src.pro_news import preview_pro_news_publication
 from src.pro_publication import preview_pro_reconciliation
 from src.runtime_config import (
     RuntimeConfiguration,
@@ -238,6 +240,11 @@ class RuntimeSettingsRequest(BaseModel):
     min_roi_percent: Decimal = Field(ge=0, le=1_000)
     min_comparables_count: int = Field(ge=2, le=100)
     channel_max_posts_per_run: int = Field(ge=1, le=100)
+    pro_deals_enabled: bool = True
+    pro_news_enabled: bool = False
+    pro_news_max_items: int = Field(default=3, ge=1, le=3)
+    pro_news_min_interval_hours: int = Field(default=6, ge=1, le=168)
+    pro_news_ai_summary_enabled: bool = False
     operation_id: str = Field(min_length=8, max_length=120)
     confirmation: str = Field(default="", max_length=100)
 
@@ -257,6 +264,16 @@ class SchedulerActionRequest(BaseModel):
 class ProPublicationRunRequest(BaseModel):
     operation_id: str = Field(min_length=8, max_length=120)
     confirmation: str = Field(min_length=1, max_length=120)
+
+
+class NewsFeedCreateRequest(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
+    publisher: str = Field(min_length=2, max_length=120)
+    url: HttpUrl
+
+
+class NewsFeedStateRequest(BaseModel):
+    enabled: bool
 
 
 class TmaAuthRequest(BaseModel):
@@ -629,6 +646,11 @@ def _runtime_candidate(
             "min_roi_percent": str(request.min_roi_percent),
             "min_comparables_count": request.min_comparables_count,
             "channel_max_posts_per_run": request.channel_max_posts_per_run,
+            "pro_deals_enabled": request.pro_deals_enabled,
+            "pro_news_enabled": request.pro_news_enabled,
+            "pro_news_max_items": request.pro_news_max_items,
+            "pro_news_min_interval_hours": request.pro_news_min_interval_hours,
+            "pro_news_ai_summary_enabled": request.pro_news_ai_summary_enabled,
         },
     )[:12]
     return RuntimeConfiguration(
@@ -640,6 +662,11 @@ def _runtime_candidate(
         min_roi_percent=request.min_roi_percent,
         min_comparables_count=request.min_comparables_count,
         channel_max_posts_per_run=request.channel_max_posts_per_run,
+        pro_deals_enabled=request.pro_deals_enabled,
+        pro_news_enabled=request.pro_news_enabled,
+        pro_news_max_items=request.pro_news_max_items,
+        pro_news_min_interval_hours=request.pro_news_min_interval_hours,
+        pro_news_ai_summary_enabled=request.pro_news_ai_summary_enabled,
         created_at=now,
         created_by=actor,
         telegram_link_name=telegram_link_name,
@@ -952,6 +979,11 @@ async def admin_settings_rollback(
         min_roi_percent=previous.min_roi_percent,
         min_comparables_count=previous.min_comparables_count,
         channel_max_posts_per_run=previous.channel_max_posts_per_run,
+        pro_deals_enabled=previous.pro_deals_enabled,
+        pro_news_enabled=previous.pro_news_enabled,
+        pro_news_max_items=previous.pro_news_max_items,
+        pro_news_min_interval_hours=previous.pro_news_min_interval_hours,
+        pro_news_ai_summary_enabled=previous.pro_news_ai_summary_enabled,
         operation_id=request.operation_id,
         confirmation=f"APPLY {previous.pro_price_stars} STARS",
     )
@@ -1224,10 +1256,12 @@ async def admin_pro_publications(
     """Показывает фактическое покрытие текущих Pro-решений outbox-записями."""
     firebase_principal(authorization, require_admin=True)
     current = runtime_settings()
-    summary, audits = await asyncio.gather(
+    summary, news_preview_result, audits = await asyncio.gather(
         asyncio.to_thread(preview_pro_reconciliation, service.repository, current),
+        preview_pro_news_publication(service.repository, current),
         asyncio.to_thread(service.repository.list_audit_events, 100),
     )
+    news_summary, _news_items = news_preview_result
     last = next(
         (
             item
@@ -1236,16 +1270,31 @@ async def admin_pro_publications(
         ),
         None,
     )
+    last_news = next(
+        (item for item in audits if item.get("event_type") == "pro_news_publication"),
+        None,
+    )
     pending_actions = min(
         summary.pending + summary.missing,
         current.channel_max_posts_per_run,
     )
+    news_pending = int(
+        news_summary.enabled
+        and (
+            news_summary.pending > 0
+            or (news_summary.interval_open and news_summary.unpublished > 0)
+        )
+    )
+    pending_actions += news_pending
     return {
         **summary.public_dict(),
+        "deals": summary.public_dict(),
+        "news": news_summary.public_dict(),
         "pending_actions": pending_actions,
         "batch_limit": current.channel_max_posts_per_run,
         "confirmation_required": f"PUBLISH {pending_actions} PRO",
         "last_reconciliation": last,
+        "last_news_reconciliation": last_news,
     }
 
 
@@ -1257,14 +1306,25 @@ async def admin_run_pro_publications(
     """Запускает allowlisted publisher job после preview и точного подтверждения."""
     principal = firebase_principal(authorization, require_admin=True)
     current = runtime_settings()
-    preview = await asyncio.to_thread(
-        preview_pro_reconciliation,
-        service.repository,
-        current,
+    preview, news_preview_result = await asyncio.gather(
+        asyncio.to_thread(
+            preview_pro_reconciliation,
+            service.repository,
+            current,
+        ),
+        preview_pro_news_publication(service.repository, current),
     )
+    news_preview, _news_items = news_preview_result
     pending_actions = min(
         preview.pending + preview.missing,
         current.channel_max_posts_per_run,
+    )
+    pending_actions += int(
+        news_preview.enabled
+        and (
+            news_preview.pending > 0
+            or (news_preview.interval_open and news_preview.unpublished > 0)
+        )
     )
     required = f"PUBLISH {pending_actions} PRO"
     if request.confirmation != required:
@@ -1323,8 +1383,113 @@ async def admin_run_pro_publications(
         "ok": True,
         "started": True,
         "preview": preview.public_dict(),
+        "news_preview": news_preview.public_dict(),
         **result,
     }
+
+
+@app.get("/admin/news-feeds")
+async def admin_news_feeds(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает установленный проверяемый registry новостных лент."""
+    firebase_principal(authorization, require_admin=True)
+    feeds = await asyncio.to_thread(service.repository.list_news_feed_configurations)
+    return {"items": [item.model_dump(mode="json") for item in feeds]}
+
+
+@app.post("/admin/news-feeds")
+async def admin_add_news_feed(
+    request: NewsFeedCreateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Сохраняет ленту только после живого HTTPS/parse/relevance теста."""
+    principal = firebase_principal(authorization, require_admin=True)
+    if not str(request.url).startswith("https://"):
+        raise HTTPException(status_code=422, detail="Разрешены только HTTPS-ленты")
+    client = DubaiAutoNewsClient(
+        str(request.url),
+        settings.request_timeout_seconds,
+        settings.auto_news_max_age_days,
+        5,
+        publisher_hint=request.publisher,
+    )
+    sample = await client.latest()
+    if not sample:
+        raise HTTPException(
+            status_code=422,
+            detail="Лента не вернула свежие релевантные Dubai/UAE automotive материалы",
+        )
+    now = datetime.now(UTC)
+    config = NewsFeedConfiguration(
+        name=request.name,
+        publisher=request.publisher,
+        url=request.url,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        sample_count=len(sample),
+    )
+    await asyncio.to_thread(service.repository.save_news_feed_configuration, config)
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_news_feed_saved",
+        {
+            "name": config.name,
+            "publisher": config.publisher,
+            "actor": principal.email or principal.subject,
+            "sample_count": config.sample_count,
+        },
+    )
+    return {"ok": True, "feed": config.model_dump(mode="json")}
+
+
+@app.post("/admin/news-feeds/{name}")
+async def admin_set_news_feed_state(
+    name: str,
+    request: NewsFeedStateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Включает или приостанавливает установленную ленту."""
+    principal = firebase_principal(authorization, require_admin=True)
+    feeds = await asyncio.to_thread(service.repository.list_news_feed_configurations)
+    selected = next((item for item in feeds if item.name == name), None)
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Новостная лента не найдена")
+    updated = selected.model_copy(
+        update={"enabled": request.enabled, "updated_at": datetime.now(UTC)}
+    )
+    await asyncio.to_thread(service.repository.save_news_feed_configuration, updated)
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_news_feed_state",
+        {
+            "name": name,
+            "enabled": request.enabled,
+            "actor": principal.email or principal.subject,
+        },
+    )
+    return {"ok": True, "feed": updated.model_dump(mode="json")}
+
+
+@app.post("/admin/news-feeds/{name}/remove")
+async def admin_remove_news_feed(
+    name: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Удаляет только registry entry, не затрагивая историю публикаций."""
+    principal = firebase_principal(authorization, require_admin=True)
+    removed = await asyncio.to_thread(
+        service.repository.delete_news_feed_configuration, name
+    )
+    if not removed:
+        raise HTTPException(status_code=404, detail="Новостная лента не найдена")
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_news_feed_removed",
+        {"name": name, "actor": principal.email or principal.subject},
+    )
+    return {"ok": True, "name": name}
 
 
 @app.get("/content/market-pulse")

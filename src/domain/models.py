@@ -67,6 +67,18 @@ class SourceConfiguration(BaseModel):
     sample_count: int = Field(default=0, ge=0)
 
 
+class NewsFeedConfiguration(BaseModel):
+    """Проверенная HTTPS-лента автомобильных новостей."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
+    publisher: str = Field(min_length=2, max_length=120)
+    url: HttpUrl
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sample_count: int = Field(default=0, ge=0)
+
+
 class OutboxState(StrEnum):
     """Состояние внешней доставки без ложного exactly-once."""
 

@@ -129,6 +129,20 @@ paths:
   /admin/pro-publications/run:
     post: {operationId: adminRunProPublications, responses: {"200": {description: Publisher started}}}
     options: {operationId: adminRunProPublicationsOptions, responses: {"200": {description: CORS}}}
+  /admin/news-feeds:
+    get: {operationId: adminNewsFeeds, responses: {"200": {description: News feeds}}}
+    post: {operationId: adminAddNewsFeed, responses: {"200": {description: News feed added}}}
+    options: {operationId: adminNewsFeedsOptions, responses: {"200": {description: CORS}}}
+  /admin/news-feeds/{name}:
+    parameters:
+      - {name: name, in: path, required: true, type: string}
+    post: {operationId: adminSetNewsFeedState, responses: {"200": {description: News feed updated}}}
+    options: {operationId: adminSetNewsFeedStateOptions, responses: {"200": {description: CORS}}}
+  /admin/news-feeds/{name}/remove:
+    parameters:
+      - {name: name, in: path, required: true, type: string}
+    post: {operationId: adminRemoveNewsFeed, responses: {"200": {description: News feed removed}}}
+    options: {operationId: adminRemoveNewsFeedOptions, responses: {"200": {description: CORS}}}
   /content/market-pulse:
     get: {operationId: marketPulse, responses: {"200": {description: Pulse}}}
     options: {operationId: marketPulseOptions, responses: {"200": {description: CORS}}}

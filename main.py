@@ -86,11 +86,13 @@ def main() -> None:
     elif args.command == "content":
         from src.content_job import run_content_publication
 
-        event_id, pro = asyncio.run(run_content_publication(settings))
+        event_id, pro, news = asyncio.run(run_content_publication(settings))
         print(
             f"PublicationEvent: {event_id or 'channel-not-configured'}; "
             f"Pro: selected={pro.selected}, created={pro.created}, "
-            f"requeued={pro.requeued}, skipped={pro.skipped}, failed={pro.failures}"
+            f"requeued={pro.requeued}, skipped={pro.skipped}, failed={pro.failures}; "
+            f"News: selected={news.selected}, created={news.created}, "
+            f"requeued={news.requeued}, skipped={news.skipped}, failed={news.failures}"
         )
     elif args.command == "collect":
         asyncio.run(collect_once(settings, args.source))

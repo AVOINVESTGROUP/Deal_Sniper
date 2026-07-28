@@ -48,6 +48,7 @@
       <section class="admin-view" data-panel="sources">
         <section class="admin-card source-add-card"><div class="card-heading"><div><p class="eyebrow">NEW CONNECTION</p><h2>Add source</h2><p class="muted">Connect a public HTTPS JSON feed. We test real records and fixed AED prices before anything is saved.</p></div></div><div class="source-form"><label>Source name<input id="source-name" autocomplete="off" placeholder="dealer_feed" pattern="[a-z][a-z0-9_-]{2,39}"></label><label>JSON feed URL<input id="source-url" type="url" autocomplete="off" placeholder="https://example.com/vehicles.json"></label><div class="row-actions"><button id="test-source" class="secondary">Test connection</button><button id="add-source" disabled>Add source</button></div><div id="source-test-result" class="muted">The source will be added paused. You choose when to enable it.</div></div></section>
         <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">COLLECTORS</p><h2>Marketplace sources</h2><p class="muted">Enable, pause or run a source. A regular marketplace website without a structured feed needs a tested code adapter.</p></div></div><div id="sources" class="data-list"></div></section>
+        <section class="admin-card source-add-card"><div class="card-heading"><div><p class="eyebrow">PRO CONTENT</p><h2>Automotive news feeds</h2><p class="muted">Add a public HTTPS RSS or Atom feed. The backend validates fresh Dubai/UAE automotive items before saving it.</p></div></div><div class="source-form"><label>Feed name<input id="news-feed-name" autocomplete="off" placeholder="uae_auto_news"></label><label>Publisher<input id="news-feed-publisher" autocomplete="off" placeholder="Publisher name"></label><label>RSS / Atom URL<input id="news-feed-url" type="url" autocomplete="off" placeholder="https://example.com/feed.xml"></label><div class="row-actions"><button id="add-news-feed">Validate and add</button></div><div id="news-feed-result" class="muted">Saved feeds can be paused or removed without losing publication history.</div></div><div id="news-feeds" class="data-list"></div></section>
       </section>
       <section class="admin-view" data-panel="runs">
         <div class="card-heading"><div><p class="eyebrow">GOOGLE CLOUD</p><h2>Cloud runtime</h2></div></div><div id="cloud" class="admin-grid"></div>
@@ -60,7 +61,7 @@
         <section class="admin-card"><p class="eyebrow">DEAL ENGINE</p><h2>Current decisions</h2><div id="decisions" class="data-list"></div></section>
       </section>
       <section class="admin-view" data-panel="delivery">
-        <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">PRO CHANNEL</p><h2>Publication coverage</h2><p class="muted">Current verified CONTACT and INSPECT decisions are reconciled with the Pro channel without duplicates.</p></div><button id="publish-pro" disabled>Publish Pro now</button></div><div id="pro-publication-status" class="key-value-grid"></div><div id="pro-publication-result" class="notice" hidden></div></section>
+        <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">PRO CHANNEL</p><h2>Publication coverage</h2><p class="muted">Verified deals and sourced automotive news are reconciled independently without duplicate messages.</p></div><button id="publish-pro" disabled>Publish Pro now</button></div><h3>Deal cards</h3><div id="pro-publication-status" class="key-value-grid"></div><h3>Automotive news</h3><div id="pro-news-publication-status" class="key-value-grid"></div><div id="pro-publication-result" class="notice" hidden></div></section>
         <section class="admin-card"><div class="card-heading"><div><p class="eyebrow">RECONCILIATION</p><h2>Delivery exceptions</h2><p class="muted">Only failed or ambiguous messages require action.</p></div></div><div id="unknown" class="data-list"></div></section>
         <div class="admin-grid"><section class="admin-card"><p class="eyebrow">FREE CHANNEL</p><h2>Latest preview</h2><div id="free" class="content-preview">No current deal.</div></section><section class="admin-card"><p class="eyebrow">PRO CHANNEL</p><h2>Latest preview</h2><div id="pro" class="content-preview">No current deal.</div></section></div>
       </section>
@@ -83,6 +84,11 @@
             <label>Minimum ROI, %<input id="min-roi" type="number" min="0" step="0.1"></label>
             <label>Minimum comparables<input id="min-comparables" type="number" min="2" max="100"></label>
             <label>Posts per run<input id="posts-per-run" type="number" min="1" max="100"></label>
+            <label>News items per digest<input id="news-items-per-digest" type="number" min="1" max="3"></label>
+            <label>News interval, hours<input id="news-interval-hours" type="number" min="1" max="168"></label>
+            <label class="checkbox-label"><input id="pro-deals-enabled" type="checkbox"> Publish verified deal cards</label>
+            <label class="checkbox-label"><input id="pro-news-enabled" type="checkbox"> Publish sourced automotive news</label>
+            <label class="checkbox-label"><input id="pro-news-ai-enabled" type="checkbox"> Use Vertex AI for the sourced intro</label>
           </div>
           <div class="row-actions settings-actions"><button id="preview-settings" class="secondary">Preview change</button><button id="apply-settings" disabled>Apply confirmed change</button></div>
           <div id="settings-preview" class="notice" hidden></div>
@@ -93,6 +99,6 @@
       </section>
     </main>
   </div>
-  <script type="module" src="/admin.js?v=browser-admin-72"></script>
+  <script type="module" src="/admin.js?v=browser-admin-73"></script>
 </body>
 </html>

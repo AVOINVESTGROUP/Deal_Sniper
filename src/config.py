@@ -97,6 +97,13 @@ class Settings:
     auto_news_rss_url: str
     auto_news_max_age_days: int
     auto_news_limit: int
+    pro_deals_enabled: bool
+    pro_news_enabled: bool
+    pro_news_max_items: int
+    pro_news_min_interval_hours: int
+    pro_news_ai_summary_enabled: bool
+    vertex_ai_location: str
+    vertex_ai_model: str
     free_teaser_image_url: str
     schema_version: str
     migration_tool_version: str
@@ -179,6 +186,19 @@ class Settings:
             ).strip(),
             auto_news_max_age_days=max(1, int(os.getenv("AUTO_NEWS_MAX_AGE_DAYS", "45"))),
             auto_news_limit=max(1, min(5, int(os.getenv("AUTO_NEWS_LIMIT", "3")))),
+            pro_deals_enabled=_enabled(os.getenv("PRO_DEALS_ENABLED", "true")),
+            pro_news_enabled=_enabled(os.getenv("PRO_NEWS_ENABLED", "false")),
+            pro_news_max_items=max(
+                1, min(3, int(os.getenv("PRO_NEWS_MAX_ITEMS", "3")))
+            ),
+            pro_news_min_interval_hours=max(
+                1, min(168, int(os.getenv("PRO_NEWS_MIN_INTERVAL_HOURS", "6")))
+            ),
+            pro_news_ai_summary_enabled=_enabled(
+                os.getenv("PRO_NEWS_AI_SUMMARY_ENABLED", "false")
+            ),
+            vertex_ai_location=os.getenv("VERTEX_AI_LOCATION", "global").strip(),
+            vertex_ai_model=os.getenv("VERTEX_AI_MODEL", "").strip(),
             free_teaser_image_url=os.getenv("FREE_TEASER_IMAGE_URL", "").strip(),
             schema_version=os.getenv("SCHEMA_VERSION", "2").strip(),
             migration_tool_version=os.getenv("MIGRATION_TOOL_VERSION", "1.1.0").strip(),

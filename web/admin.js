@@ -124,6 +124,39 @@ async function addNewSource() {
   } catch (error) { byId("source-test-result").className = "test-bad"; byId("source-test-result").textContent = error instanceof Error ? error.message : String(error); }
 }
 
+function renderNewsFeeds(payload = {}) {
+  const items = payload.items || [];
+  byId("news-feeds").innerHTML = items.map((item) => `<article class="data-row"><div class="data-primary"><div><strong>${safe(item.publisher)}</strong>${statusPill(item.enabled ? "Enabled" : "Paused", item.enabled)}</div><div class="row-meta"><span>${safe(item.name)}</span><span>${number(item.sample_count)} validated items</span><a href="${safe(item.url)}" target="_blank" rel="noopener">Open feed</a></div></div><div class="row-actions"><button class="secondary toggle-news-feed" data-name="${safe(item.name)}" data-enabled="${item.enabled}">${item.enabled ? "Pause" : "Enable"}</button><button class="danger-button remove-news-feed" data-name="${safe(item.name)}">Remove</button></div></article>`).join("") || '<div class="empty-state">No custom news feeds. The environment baseline is used when configured.</div>';
+  document.querySelectorAll(".toggle-news-feed").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    try { await call(`/admin/news-feeds/${encodeURIComponent(button.dataset.name)}`, {method: "POST", body: JSON.stringify({enabled: button.dataset.enabled !== "true"})}); await refresh(); }
+    catch (error) { showError(error); button.disabled = false; }
+  }));
+  document.querySelectorAll(".remove-news-feed").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.confirm(`Remove news feed ${button.dataset.name}? Publication history will be kept.`)) return;
+    button.disabled = true;
+    try { await call(`/admin/news-feeds/${encodeURIComponent(button.dataset.name)}/remove`, {method: "POST"}); await refresh(); }
+    catch (error) { showError(error); button.disabled = false; }
+  }));
+}
+
+async function addNewsFeed() {
+  const name = byId("news-feed-name").value.trim().toLowerCase();
+  const publisher = byId("news-feed-publisher").value.trim();
+  const url = byId("news-feed-url").value.trim();
+  const result = byId("news-feed-result");
+  if (!/^[a-z][a-z0-9_-]{2,39}$/.test(name)) { showError(new Error("Use 3–40 lowercase letters, numbers, _ or - for the feed name.")); return; }
+  if (publisher.length < 2 || !url.startsWith("https://")) { showError(new Error("Enter a publisher and a public HTTPS RSS or Atom URL.")); return; }
+  byId("add-news-feed").disabled = true; result.textContent = "Validating fresh automotive items…";
+  try {
+    const response = await call("/admin/news-feeds", {method: "POST", body: JSON.stringify({name, publisher, url})});
+    result.className = "test-good"; result.textContent = `${number(response.feed.sample_count)} relevant items validated. Feed enabled.`;
+    byId("news-feed-name").value = ""; byId("news-feed-publisher").value = ""; byId("news-feed-url").value = "";
+    await refresh();
+  } catch (error) { result.className = "test-bad"; result.textContent = error instanceof Error ? error.message : String(error); }
+  finally { byId("add-news-feed").disabled = false; }
+}
+
 function renderCloud(cloud = {}) {
   const groups = [["Scheduler", cloud.scheduler], ["Task queues", cloud.queues], ["Cloud Run", cloud.services]];
   byId("cloud").innerHTML = groups.map(([label, items]) => {
@@ -171,6 +204,11 @@ function settingsPayload() {
     min_roi_percent: byId("min-roi").value,
     min_comparables_count: Number(byId("min-comparables").value),
     channel_max_posts_per_run: Number(byId("posts-per-run").value),
+    pro_deals_enabled: byId("pro-deals-enabled").checked,
+    pro_news_enabled: byId("pro-news-enabled").checked,
+    pro_news_max_items: Number(byId("news-items-per-digest").value),
+    pro_news_min_interval_hours: Number(byId("news-interval-hours").value),
+    pro_news_ai_summary_enabled: byId("pro-news-ai-enabled").checked,
     operation_id: crypto.randomUUID(),
     confirmation: "",
   };
@@ -178,8 +216,9 @@ function settingsPayload() {
 
 function renderSettings(payload = {}) {
   const active = payload.active || {};
-  byId("active-settings").innerHTML = keyValues({version: active.version, commercial_price_aed: active.pro_price_aed, telegram_charge_stars: active.pro_price_stars, subscription_link: active.pro_subscription_url, target_profit_aed: active.target_profit_aed, min_roi_percent: active.min_roi_percent, min_comparables: active.min_comparables_count, posts_per_run: active.channel_max_posts_per_run, activated_by: active.created_by});
-  [["price-aed", active.pro_price_aed], ["price-stars", active.pro_price_stars], ["target-profit", active.target_profit_aed], ["min-roi", active.min_roi_percent], ["min-comparables", active.min_comparables_count], ["posts-per-run", active.channel_max_posts_per_run]].forEach(([id, value]) => { if (document.activeElement !== byId(id)) byId(id).value = value ?? ""; });
+  byId("active-settings").innerHTML = keyValues({version: active.version, commercial_price_aed: active.pro_price_aed, telegram_charge_stars: active.pro_price_stars, subscription_link: active.pro_subscription_url, target_profit_aed: active.target_profit_aed, min_roi_percent: active.min_roi_percent, min_comparables: active.min_comparables_count, posts_per_run: active.channel_max_posts_per_run, deal_cards: active.pro_deals_enabled, automotive_news: active.pro_news_enabled, news_items: active.pro_news_max_items, news_interval_hours: active.pro_news_min_interval_hours, vertex_intro: active.pro_news_ai_summary_enabled, activated_by: active.created_by});
+  [["price-aed", active.pro_price_aed], ["price-stars", active.pro_price_stars], ["target-profit", active.target_profit_aed], ["min-roi", active.min_roi_percent], ["min-comparables", active.min_comparables_count], ["posts-per-run", active.channel_max_posts_per_run], ["news-items-per-digest", active.pro_news_max_items], ["news-interval-hours", active.pro_news_min_interval_hours]].forEach(([id, value]) => { if (document.activeElement !== byId(id)) byId(id).value = value ?? ""; });
+  [["pro-deals-enabled", active.pro_deals_enabled], ["pro-news-enabled", active.pro_news_enabled], ["pro-news-ai-enabled", active.pro_news_ai_summary_enabled]].forEach(([id, value]) => { if (document.activeElement !== byId(id)) byId(id).checked = Boolean(value); });
   byId("settings-history").innerHTML = (payload.revisions || []).map((item) => `<article class="data-row ${item.state === "active" ? "revision-active" : ""}"><div class="data-primary"><div><strong>${safe(item.version)}</strong>${statusPill(item.state, item.state === "active")}</div><div class="row-meta"><span>${money(item.pro_price_aed)}</span><span>${number(item.pro_price_stars)} Stars</span><span>${safe(item.created_by)}</span></div></div>${item.state === "archived" ? `<button class="secondary rollback-settings" data-version="${safe(item.version)}">Rollback</button>` : ""}</article>`).join("") || '<div class="empty-state">Environment baseline is active; no revisions yet.</div>';
   document.querySelectorAll(".rollback-settings").forEach((button) => button.addEventListener("click", () => rollbackSettings(button.dataset.version)));
 }
@@ -234,6 +273,8 @@ async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/$
 function renderProPublications(payload = {}) {
   proPublicationPreview = payload;
   byId("pro-publication-status").innerHTML = keyValues({publishable: payload.publishable, delivered: payload.sent, pending: payload.pending, sending: payload.sending, unknown: payload.unknown, failed: payload.failed, missing: payload.missing, batch_limit: payload.batch_limit, last_reconciliation: payload.last_reconciliation?.created_at || "Never"});
+  const news = payload.news || {};
+  byId("pro-news-publication-status").innerHTML = keyValues({enabled: news.enabled, feeds: news.feeds, fetched: news.fetched, unpublished: news.unpublished, pending: news.pending, sent: news.sent, failed: news.failed, interval_open: news.interval_open, ai_intro_used: news.ai_used, last_reconciliation: payload.last_news_reconciliation?.created_at || "Never"});
   byId("publish-pro").disabled = !Number(payload.pending_actions || 0);
 }
 
@@ -254,8 +295,8 @@ async function publishProNow() {
 async function refresh() {
   byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings"), call("/admin/pro-publications")];
-    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult] = await Promise.allSettled(requests);
+    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings"), call("/admin/pro-publications"), call("/admin/news-feeds")];
+    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult] = await Promise.allSettled(requests);
     if (overviewResult.status === "rejected") throw overviewResult.reason;
     const pulse = pulseResult.status === "fulfilled" ? pulseResult.value : {};
     const preview = previewResult.status === "fulfilled" ? previewResult.value : {};
@@ -264,7 +305,8 @@ async function refresh() {
     render(overviewResult.value, pulse, preview, unknown.items || [], failed.items || []);
     if (runsResult.status === "fulfilled") renderRuns(runsResult.value); if (listingsResult.status === "fulfilled") renderListings(listingsResult.value); if (decisionsResult.status === "fulfilled") renderDecisions(decisionsResult.value); if (usersResult.status === "fulfilled") renderUsers(usersResult.value); if (errorsResult.status === "fulfilled") renderErrors(errorsResult.value); if (settingsResult.status === "fulfilled") renderSettings(settingsResult.value);
     if (proPublicationsResult.status === "fulfilled") renderProPublications(proPublicationsResult.value);
-    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult].filter((result) => result.status === "rejected");
+    if (newsFeedsResult.status === "fulfilled") renderNewsFeeds(newsFeedsResult.value);
+    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult].filter((result) => result.status === "rejected");
     if (partialErrors.length) showError(new Error(`${partialErrors.length} section(s) are temporarily unavailable. Refresh will retry them.`));
     byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
   } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }
@@ -301,6 +343,7 @@ byId("login-redirect").addEventListener("click", async () => {
 });
 byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
 byId("test-source").addEventListener("click", testNewSource); byId("add-source").addEventListener("click", addNewSource);
+byId("add-news-feed").addEventListener("click", addNewsFeed);
 byId("preview-settings").addEventListener("click", previewSettings); byId("apply-settings").addEventListener("click", applySettings);
 byId("publish-pro").addEventListener("click", publishProNow);
 [byId("source-name"), byId("source-url")].forEach((input) => input.addEventListener("input", () => { testedSourceKey = ""; byId("add-source").disabled = true; }));
