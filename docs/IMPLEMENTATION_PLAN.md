@@ -1,5 +1,7 @@
 # План реализации Dubai Deal Sniper
 
+> Дополнение R7 утверждено владельцем 28 июля 2026 года. Контракт полноценного Control Center и управляемой монетизации находится в `docs/ADMIN_CONTROL_CENTER_PLAN_R7.md`. R7 реализуется поверх production baseline R6 и не разрешает production deploy без отдельного подтверждения после staging.
+
 Статус: кодовая часть RC подготовлена; production остаётся остановлен до прохождения immutable release, staging rehearsal, migration и cutover.
 
 ## Правила выполнения

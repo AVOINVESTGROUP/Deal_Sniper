@@ -226,3 +226,11 @@
 - Telegram webhook подтверждён: pending updates 0, последняя ошибка отсутствует. Обе Cloud Tasks queues работают.
 - Production pilot отправил ровно 30 новых Free-карточек с CTA: 30 уникальных fingerprints, 0 соседних повторов, 0 карточек без CTA или кнопки, очередь доставки 0.
 - После пилота: 6 819 snapshots, 1 489 current decisions, outbox 94 (`sent=92`, `pending=0`, `sending=0`, `unknown=0`, две исторические `failed` относятся к delivery-disabled cutover). Все четыре marketplace sources имеют статус `healthy`.
+
+## 28 июля 2026 — утверждение R7
+
+- Владелец утвердил план R7: полноценный браузерный Control Center и управляемая монетизация.
+- До изменения кода повторно проверены SPEC, план реализации, облачная архитектура, production evidence R6, API, repository contract, Admin Web и тесты.
+- Подтверждены блокеры baseline: статичная цена из окружения, отсутствие безопасной ротации Stars subscription link, неполный набор административных разделов и ложные reconcile-действия для исторических `failed`.
+- Полный контракт данных, API, интерфейса, тестов и выпуска зафиксирован в `docs/ADMIN_CONTROL_CENTER_PLAN_R7.md`.
+- Production R6 остаётся без изменений. R7 допускается к реализации и staging, но production deploy требует отдельного разрешения владельца после release evidence.

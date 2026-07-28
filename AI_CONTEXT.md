@@ -152,3 +152,13 @@ R6 утверждён владельцем и отдельно разрешён 
 Перед cutover выполнен Firestore export `r6-production-20260727-193058` (69 251 документ). Staging и production authenticated Chrome smoke проходят для `/admin/overview`, `/content/market-pulse`, `/admin/preview`, failed и unknown outbox. Admin timeout устранён параллельным чтением Cloud API и Firestore aggregation counts.
 
 Активны четыре отдельных collector scheduler, content scheduler и обе очереди. Aggregate collector scheduler остаётся PAUSED как защита от двойного сбора. Telegram delivery включён; webhook pending=0 и без последней ошибки. Финальный pilot: 30/30 Free-карточек доставлены с валидной Pro-кнопкой, 30 уникальных CTA fingerprints, без соседних повторов; delivery queue равна нулю. Текущее наблюдаемое состояние: 6 819 snapshots, 1 489 решений, четыре marketplace sources healthy, outbox `sent=92`, `unknown=0`.
+
+## 28 июля 2026 — утверждён план R7
+
+- Production baseline R6 не меняется до отдельного разрешения на deploy.
+- Владелец утвердил R7: полноценный browser Control Center, динамическая версионированная несекретная конфигурация и безопасная смена цены Pro.
+- Коммерческая сумма AED и фактическая цена Telegram Stars являются разными полями. Смена Stars создаёт новую 30-дневную subscription invite link; затем immutable revision и active pointer переключаются транзакционно.
+- Старая платная ссылка не отзывается автоматически. Retry существующего outbox продолжает использовать исходный сохранённый payload.
+- Итоговый Admin Web обязан содержать Dashboard, Sources, Runs, Listings, Decisions, Publications, Users, Revenue, Errors и Settings. Reconcile разрешён только для `unknown`; исторические `failed` не получают неработающих кнопок.
+- Секреты остаются в Secret Manager/environment и никогда не сохраняются в runtime configuration или Admin Web.
+- Полный обязательный контракт: `docs/ADMIN_CONTROL_CENTER_PLAN_R7.md`.
