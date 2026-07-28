@@ -112,6 +112,6 @@ Mutating endpoints требуют `operation_id`, проверяют допус�
 
 Локальный gate включает unit/integration/API/auth/CORS/browser tests, Telegram Bot API mock, Ruff, strict mypy, pytest/coverage, dependency audit, Terraform validate и container scan.
 
-Staging проверяет immutable image и Hosting preview, Firebase Auth, смену тестовой цены в тестовом Pro channel, единую active revision в bot/TMA/Admin/CTA, rollback и все десять разделов без production-сообщений и платежей.
+Staging проверяет immutable image и Hosting preview, Firebase Auth, смену тестовой цены в тестовом Pro channel, единую active revision в bot/TMA/Admin/CTA, rollback и все десять разделов без production-сообщений и платежей. Допустимые browser origins задаются явным непустым allowlist окружения: production сохраняет только утверждённые Hosting origins, а краткоживущий preview origin добавляется только в staging. Wildcard origins при credentialed CORS запрещены.
 
 После staging формируется `docs/RELEASE_EVIDENCE_2026-07-28-R7.md`. Production deploy выполняется только после отдельной явной команды владельца.

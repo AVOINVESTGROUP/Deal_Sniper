@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from src.config import Settings
 from src.web import app
 
 WEB = Path(__file__).parents[1] / "web"
@@ -161,3 +162,18 @@ async def test_admin_cors_preflight_and_error_response_keep_allowed_origin() -> 
         )
     assert rejected_origin.status_code == 400
     assert "access-control-allow-origin" not in rejected_origin.headers
+
+
+def test_cors_origins_are_explicit_https_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "CORS_ALLOWED_ORIGINS",
+        "https://avo-deal-sniper.web.app,https://preview.example.com/",
+    )
+    assert Settings.from_env().cors_allowed_origins == (
+        "https://avo-deal-sniper.web.app",
+        "https://preview.example.com",
+    )
+
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://*.example.com")
+    with pytest.raises(ValueError, match="точные HTTPS origins"):
+        Settings.from_env()

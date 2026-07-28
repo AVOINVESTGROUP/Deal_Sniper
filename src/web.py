@@ -128,10 +128,7 @@ _market_cache_at = 0.0
 _market_cache_lock = asyncio.Lock()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://avo-deal-sniper.web.app",
-        "https://avo-deal-sniper.firebaseapp.com",
-    ],
+    allow_origins=list(settings.cors_allowed_origins),
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],

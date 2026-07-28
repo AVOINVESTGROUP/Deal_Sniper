@@ -4,6 +4,12 @@ import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
+
+DEFAULT_CORS_ALLOWED_ORIGINS = (
+    "https://avo-deal-sniper.web.app",
+    "https://avo-deal-sniper.firebaseapp.com",
+)
 
 
 def _integer_set(value: str) -> frozenset[int]:
@@ -12,6 +18,33 @@ def _integer_set(value: str) -> frozenset[int]:
 
 def _string_set(value: str) -> frozenset[str]:
     return frozenset(item.strip().casefold() for item in value.split(",") if item.strip())
+
+
+def _cors_origins(value: str) -> tuple[str, ...]:
+    """Проверяет точные HTTPS origins для credentialed CORS без wildcard."""
+    origins: list[str] = []
+    for item in value.split(","):
+        candidate = item.strip().rstrip("/")
+        if not candidate:
+            continue
+        parsed = urlsplit(candidate)
+        if (
+            parsed.scheme.casefold() != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or "*" in candidate
+        ):
+            raise ValueError("CORS_ALLOWED_ORIGINS должен содержать точные HTTPS origins")
+        normalized = f"https://{parsed.netloc.casefold()}"
+        if normalized not in origins:
+            origins.append(normalized)
+    if not origins:
+        raise ValueError("CORS_ALLOWED_ORIGINS не должен быть пустым")
+    return tuple(origins)
 
 
 def _enabled(value: str) -> bool:
@@ -53,6 +86,7 @@ class Settings:
     internal_task_secret: str
     delivery_enabled: bool
     admin_emails: frozenset[str]
+    cors_allowed_origins: tuple[str, ...]
     whatsapp_enabled: bool
     whatsapp_access_token: str
     whatsapp_phone_number_id: str
@@ -128,6 +162,9 @@ class Settings:
             internal_task_secret=os.getenv("INTERNAL_TASK_SECRET", "").strip(),
             delivery_enabled=_enabled(os.getenv("DELIVERY_ENABLED", "false")),
             admin_emails=_string_set(os.getenv("ADMIN_EMAILS", "")),
+            cors_allowed_origins=_cors_origins(
+                os.getenv("CORS_ALLOWED_ORIGINS", ",".join(DEFAULT_CORS_ALLOWED_ORIGINS))
+            ),
             whatsapp_enabled=_enabled(os.getenv("WHATSAPP_ENABLED", "false")),
             whatsapp_access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip(),
             whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip(),

@@ -44,7 +44,9 @@
 
 ## Текущие блокеры
 
-1. Firebase CLI использует отдельную истёкшую сессию и требует `firebase login --reauth`; попытка preview завершилась `invalid_rapt`, Hosting не изменён.
+1. Hosting Preview создан после `firebase login --reauth`, однако реальный UI-smoke выявил HTTP 400 на CORS preflight: backend жёстко разрешает только production Hosting origins. Требуется новый RC с явным staging CORS allowlist и полный повтор staging.
 2. До мутационного smoke нужен отдельный тестовый Pro-канал с тестовым ботом или изолированными staging credentials. Production Pro-канал использовать для staging запрещено.
+
+Адресная CORS-поправка реализована в рабочем кандидате: `CORS_ALLOWED_ORIGINS` принимает только точные HTTPS origins, отклоняет wildcard/пустое значение и сохраняет production fallback. Локальный gate нового кандидата: Ruff, strict mypy, 90 passed / 2 skipped, coverage 64%, dependency audit и Terraform validate — success. До нового commit-labelled immutable build прежний staging digest считается аннулированным.
 
 Production deploy R7 не разрешён и не выполнялся.
