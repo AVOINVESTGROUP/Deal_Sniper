@@ -19,6 +19,7 @@ from google.oauth2 import id_token
 class Principal:
     subject: str
     email: str | None = None
+    email_verified: bool = False
     admin: bool = False
     telegram_user_id: int | None = None
 
@@ -42,12 +43,14 @@ def verify_firebase_bearer(
     if not claims or not claims.get("sub"):
         raise PermissionError("Некорректный Firebase ID token")
     email = str(claims.get("email", "")).casefold() or None
-    admin = bool(claims.get("admin")) or bool(email and email in admin_emails)
+    email_verified = claims.get("email_verified") is True
+    admin = bool(email and email_verified and email in admin_emails)
     telegram_value = claims.get("telegram_user_id")
     telegram_user_id = int(telegram_value) if telegram_value is not None else None
     return Principal(
         subject=str(claims["sub"]),
         email=email,
+        email_verified=email_verified,
         admin=admin,
         telegram_user_id=telegram_user_id,
     )

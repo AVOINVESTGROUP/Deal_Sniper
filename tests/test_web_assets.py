@@ -42,12 +42,14 @@ def test_user_app_contains_pro_subscription_offer() -> None:
     assert "price_aed" in script
 
 
-def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
+def test_admin_is_a_separate_browser_console_with_google_auth() -> None:
     page = (WEB / "admin.html").read_text(encoding="utf-8")
     script = (WEB / "admin.js").read_text(encoding="utf-8")
 
     assert "telegram-web-app.js" not in page
-    assert 'id="login-password"' in page
+    assert 'id="login-password"' not in page
+    assert 'id="login-email"' not in page
+    assert "Continue with Google" in page
     assert "Cloud runtime" in page
     for section in (
         "Dashboard",
@@ -62,7 +64,11 @@ def test_admin_is_a_separate_browser_console_with_email_password_auth() -> None:
         "Settings",
     ):
         assert section in page
-    assert "signInWithEmailAndPassword" in script
+    assert "signInWithEmailAndPassword" not in script
+    assert "GoogleAuthProvider" in script
+    assert "signInWithPopup" in script
+    assert "signInWithRedirect" in script
+    assert "getRedirectResult" in script
     assert "runtime.adminApiBase" in script
     assert 'api + "/tma/auth"' not in script
     assert "/admin/sources/${button.dataset.source}/run" in script

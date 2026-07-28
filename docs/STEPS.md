@@ -299,3 +299,12 @@
 - Backend уже использует Firebase ID token и `ADMIN_EMAILS`, поэтому модель административной авторизации сохраняется; меняется только способ входа.
 - Создан `docs/PLAN_R7_2_GOOGLE_ADMIN_AUTH.md`: отдельный Web OAuth client, Google popup, обязательный `email_verified`, миграция существующей password-account, staging и rollback.
 - До утверждения R7.2 код, Firebase provider и production не изменяются.
+
+## 28 июля 2026 — локальная реализация R7.2
+
+- Владелец утвердил R7.2.
+- Admin Web больше не содержит email/password fields и `signInWithEmailAndPassword`; добавлены **Continue with Google**, desktop popup и явный redirect fallback при блокировке popup.
+- Backend выдаёт административную роль только при `email_verified=true` и совпадении нормализованного email с `ADMIN_EMAILS`; legacy custom claim `admin=true` без подтверждённого allowlisted email больше не открывает Admin API.
+- Полный локальный gate успешен: 99 тестов прошли, 2 условно пропущены, coverage 57,55%; Ruff, strict mypy, JavaScript ES-module syntax, dependency audit, Terraform validate и `git diff --check` прошли без ошибок.
+- Облачный Google provider пока не переключался с IAP client, Hosting и production не изменялись.
+- Дополнительный аудит подтвердил отсутствие периодических Pro-новостей и отсутствие R7.1 reconciliation в production R6. Создан черновик `docs/PLAN_R7_3_PRO_CHANNEL_CONTENT.md`; его код не реализуется до отдельного утверждения.

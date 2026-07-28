@@ -123,12 +123,12 @@ R6.7  deploy exact digest, Hosting release и live smoke
 ## Рабочая браузерная Admin Panel
 
 1. `/admin.html` открывается в обычном desktop-браузере без Telegram-контекста.
-2. Firebase email/password sign-in включён; пароль хранится только в Firebase Authentication, а backend принимает Firebase ID token только для email из `ADMIN_EMAILS`.
-3. Административная роль определяется allowlist `ADMIN_EMAILS`, а не Telegram ID.
-4. Браузерные запросы Admin Web идут через защищённый API Gateway: Firebase Hosting rewrite в приватный Cloud Run запрещён организационной политикой `allUsers`. Backend всё равно проверяет Firebase ID token и `ADMIN_EMAILS`.
-4. Интерфейс содержит разделы Dashboard, Sources, Runs, Listings, Decisions, Publications, Users & subscriptions, Revenue & referrals, Errors и Settings.
-5. Технические JSON/provenance/stack traces скрыты за подробностями; основной экран показывает человекочитаемые статусы и действия.
-6. Collector получает минимальный доступ чтения/записи raw bucket; API получает read-only роли для Scheduler, Tasks и Run.
+2. Firebase Google Sign-In использует отдельный OAuth client типа Web application; IAP OAuth client для этого запрещён.
+3. Backend принимает Firebase ID token только с `email_verified=true` и email из `ADMIN_EMAILS`; наличие Google-аккаунта само по себе не даёт административной роли.
+4. Браузерные запросы Admin Web идут через защищённый API Gateway: Firebase Hosting rewrite в приватный Cloud Run запрещён организационной политикой `allUsers`. Backend всё равно проверяет Firebase ID token, подтверждённый email и `ADMIN_EMAILS`.
+5. Интерфейс содержит разделы Dashboard, Sources, Runs, Listings, Decisions, Publications, Users & subscriptions, Revenue & referrals, Errors и Settings.
+6. Технические JSON/provenance/stack traces скрыты за подробностями; основной экран показывает человекочитаемые статусы и действия.
+7. Collector получает минимальный доступ чтения/записи raw bucket; API получает read-only роли для Scheduler, Tasks и Run.
 7. Ошибка обязательного этапа делает source run неуспешным; противоречие `success=true` вместе с `error` запрещено тестом.
 8. Telegram используется для клиентского продукта и кратких owner alerts, но не как обязательная оболочка панели.
 

@@ -1,9 +1,11 @@
 import {initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import {getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import {getAuth, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const config = await (await fetch("/__/firebase/init.json")).json();
 const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const auth = getAuth(initializeApp(config));
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({prompt: "select_account"});
 const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ?? "";
 let token = "";
 let testedSourceKey = "";
@@ -273,30 +275,43 @@ document.querySelectorAll(".admin-nav button").forEach((button) => button.addEve
   document.querySelectorAll(".admin-view").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === button.dataset.view));
   byId("page-title").textContent = button.textContent;
 }));
+function googleAuthMessage(error) {
+  if (error?.code === "auth/account-exists-with-different-credential") return "This email still has an old password-only Firebase account. The administrator account must be migrated before Google sign-in can continue.";
+  if (error?.code === "auth/unauthorized-domain") return "This Hosting domain is not authorized for Firebase Authentication.";
+  if (error?.code === "auth/popup-blocked") return "The Google popup was blocked. Use Continue in this window.";
+  if (error?.code === "auth/popup-closed-by-user") return "Google sign-in was cancelled.";
+  return error instanceof Error ? error.message : String(error);
+}
+
 byId("login").addEventListener("click", async () => {
   byId("error").hidden = true;
-  const email = byId("login-email").value.trim();
-  const password = byId("login-password").value;
-  if (!email) { showError(new Error("Enter the administrator email address.")); return; }
-  if (!password) { showError(new Error("Enter the administrator password.")); return; }
   byId("login").disabled = true;
   try {
-    await signInWithEmailAndPassword(auth, email, password);
-    byId("login-password").value = "";
-  } catch (error) { showError(error); } finally { byId("login").disabled = false; }
+    await signInWithPopup(auth, googleProvider);
+  } catch (error) {
+    if (error?.code === "auth/popup-blocked") byId("login-redirect").hidden = false;
+    showError(new Error(googleAuthMessage(error)));
+  } finally { byId("login").disabled = false; }
+});
+byId("login-redirect").addEventListener("click", async () => {
+  byId("error").hidden = true;
+  byId("login-redirect").disabled = true;
+  try { await signInWithRedirect(auth, googleProvider); }
+  catch (error) { showError(new Error(googleAuthMessage(error))); byId("login-redirect").disabled = false; }
 });
 byId("logout").addEventListener("click", () => signOut(auth)); byId("refresh").addEventListener("click", refresh);
 byId("test-source").addEventListener("click", testNewSource); byId("add-source").addEventListener("click", addNewSource);
 byId("preview-settings").addEventListener("click", previewSettings); byId("apply-settings").addEventListener("click", applySettings);
 byId("publish-pro").addEventListener("click", publishProNow);
 [byId("source-name"), byId("source-url")].forEach((input) => input.addEventListener("input", () => { testedSourceKey = ""; byId("add-source").disabled = true; }));
+getRedirectResult(auth).catch((error) => showError(new Error(googleAuthMessage(error))));
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("login-email").hidden = false; byId("login-password").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
+    token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
     return;
   }
   try {
-    token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-email").hidden = true; byId("login-password").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
+    token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-redirect").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
   } catch (error) {
     token = ""; byId("refresh").disabled = true;
     showError(new Error("Firebase session could not be established. Reload the page and sign in again."));

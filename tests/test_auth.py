@@ -45,3 +45,48 @@ def test_malformed_firebase_token_is_rejected(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("src.auth.id_token.verify_firebase_token", reject_token)
     with pytest.raises(PermissionError, match="Некорректный Firebase ID token"):
         verify_firebase_bearer("Bearer invalid", "project", frozenset())
+
+
+def test_verified_allowlisted_firebase_email_is_admin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.auth.id_token.verify_firebase_token",
+        lambda *args, **kwargs: {
+            "sub": "google-user",
+            "email": "OWNER@EXAMPLE.COM",
+            "email_verified": True,
+        },
+    )
+    principal = verify_firebase_bearer(
+        "Bearer valid",
+        "project",
+        frozenset({"owner@example.com"}),
+    )
+    assert principal.email == "owner@example.com"
+    assert principal.email_verified is True
+    assert principal.admin is True
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"sub": "unverified", "email": "owner@example.com", "email_verified": False},
+        {"sub": "outsider", "email": "other@example.com", "email_verified": True},
+        {"sub": "legacy-claim", "admin": True},
+    ],
+)
+def test_unverified_or_non_allowlisted_firebase_identity_is_not_admin(
+    monkeypatch: pytest.MonkeyPatch,
+    claims: dict[str, object],
+) -> None:
+    monkeypatch.setattr(
+        "src.auth.id_token.verify_firebase_token",
+        lambda *args, **kwargs: claims,
+    )
+    principal = verify_firebase_bearer(
+        "Bearer valid",
+        "project",
+        frozenset({"owner@example.com"}),
+    )
+    assert principal.admin is False
