@@ -247,3 +247,14 @@
 - Локальная container build не выполнена: Docker Desktop Linux engine выключен. Immutable image, Trivy, staging и release evidence ещё не созданы; production R6 не изменялся.
 - Коммиты плана `4f4e3b2` и реализации `2cb2bd2` отправлены в ветку `production/deal-sniper-complete`. GitHub Actions run `30336329612` успешно выполнил Python 3.11 quality, container build, Trivy и Terraform. Artifact Registry digest, staging rehearsal и production deploy ещё не выполнялись.
 - Создан предварительный `docs/RELEASE_EVIDENCE_2026-07-28-R7.md`. Staging остановлен до повторной интерактивной авторизации `gcloud` и подтверждения отдельного тестового Pro-канала; production Pro-канал для этих проверок не используется.
+
+## 28 июля 2026 — staging R7
+
+- Из evidence head `02fcb6f919c22d5f6504dd46667d2439ca8e9d55` Cloud Build `1a47a7e3-cf4c-4613-ac3f-543a3ee3c0b6` собрал immutable digest `sha256:ab0b8880041985c47bf2a7eb69b638ed6d2370a21e3e5044b42ebfe4e2ffe94a`.
+- Exact digest развёрнут только в staging; актуальная revision `deal-sniper-api-staging-00026-cfj` сохраняет schema `2`, отдельную базу `deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false` и `WHATSAPP_ENABLED=false`.
+- Staging API Gateway активен на config `r7-02fcb6f`; `/health`, `/ready` и `/version` успешны и подтверждают точный commit/digest.
+- Firestore staging integration подтвердил идемпотентную активацию immutable runtime revision и корректное архивирование предыдущей версии без Telegram delivery.
+- Краткоживущий Firebase user, разрешённый только в staging, прошёл настоящий Chrome/CORS smoke. Пять основных Admin read paths и шесть дополнительных R7 endpoints вернули HTTP 200; затем test user удалён, а allowlist восстановлен.
+- Hosting preview пока не создан: отдельная Firebase CLI-сессия завершилась `invalid_rapt`; production Hosting не менялся, временные локальные адреса staging полностью восстановлены.
+- Мутационная смена Stars, rollback и единая revision в bot/TMA/Admin/CTA ожидают отдельный тестовый Pro-канал. Production Pro-канал для staging не используется.
+- Production остаётся на R6 commit `851ddaf26852aaaa0547df1b60e222d7f74b5d9a`, digest `sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112`, revision `deal-sniper-api-00060-kkc`.
