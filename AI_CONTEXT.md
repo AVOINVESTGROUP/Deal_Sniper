@@ -1,5 +1,13 @@
 # AI Context: Dubai Deal Sniper
 
+## Текущее production-состояние R8.1 (29 июля 2026)
+
+R8.1 активен в production. Канонический runtime source commit — `aa261129415065b63d4be85f098cd0e255966ab1`, immutable digest API/publisher — `sha256:0efbc0699d8a79f9c8e4802a15f274debb1b25843d5c19cdc3b47d910c73fd0b`. API работает на revision `deal-sniper-api-00061-tlq`, publisher — generation `41`.
+
+Существующий Pro-канал `-1004319276577` получил проверенную новостную публикацию с Telegram message ID `29`; повторный запуск не создал дубль. Scheduler `deal-sniper-content-every-6h` включён. Новая Pro-сделка публикуется только при прохождении detail-page, market, profit и ROI gates; отсутствие подходящей сделки не подменяется тестовыми данными. Отдельного тестового Telegram-канала нет и создавать его не требуется.
+
+Полное доказательство релиза и rollback находятся в `docs/RELEASE_EVIDENCE_2026-07-29-R8_1.md` и `docs/R8_1_RELEASE_MANIFEST.json`.
+
 29 июля 2026 владелец явно утвердил R8. Реализован локальный R8.1-CODE без изменения
 production: Admin Web снова сохраняет проверенный email/password-вход, а Google UI
 выключен runtime-флагом до R8.2; `DELIVERY_ENABLED=false` теперь запрещает создание

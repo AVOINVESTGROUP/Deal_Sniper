@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 29 июля 2026 — R8.1 активирован в production
+
+- Финальный source commit `aa261129415065b63d4be85f098cd0e255966ab1` прошёл GitHub Actions push `30431337917` и PR `30431341429`.
+- Cloud Build `2ff0f1e7-6828-4e0f-a06a-35503cf1d328` собрал exact digest `sha256:0efbc0699d8a79f9c8e4802a15f274debb1b25843d5c19cdc3b47d910c73fd0b`.
+- Digest развёрнут в production API revision `deal-sniper-api-00061-tlq` и publisher generation `41`; системные endpoints подтвердили commit, digest и готовность.
+- В существующий Pro-канал `-1004319276577` доставлена одна актуальная автомобильная новость: outbox `eaeed9dd00603e3f92cafb675fb0b10a8fdb8c95e512645f6f0daf8c6e8140ad`, Telegram message ID `29`, состояние `sent`.
+- Повторный publisher execution не создал дубль. Подходящей новой сделки во время bounded run не было, поэтому фиктивная карточка не публиковалась.
+- Scheduler `deal-sniper-content-every-6h` возобновлён; очередь delivery, Telegram webhook и личный бот работают. Отдельный тестовый канал не создавался.
+
 ## 27 июля 2026 — утверждение R6 и локальный кандидат R6.1–R6.4
 
 - Владелец явно утвердил `docs/PLAN_REVIEW_2026-07-27-R6.md`; только после этого начаты изменения кода.
