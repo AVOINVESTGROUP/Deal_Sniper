@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 29 июля 2026 — R8.1.1 активирован в production
+
+- Commit `308545a43a3b06d32f984e5d8d5d18294750f87a` прошёл оба GitHub Actions запуска; Cloud Build `ec0856ca-59c3-4b37-b804-382f6e17150c` создал digest `sha256:7a8ed30227434bfe6411e3d457a76b550c5ba39d9dd877560c4fed05223af897`.
+- Delivery-off staging подтвердил commit/digest/schema, успешный publisher и пустую PAUSED-очередь.
+- Production API `deal-sniper-api-00062-s79` и publisher развёрнуты на том же digest. Legacy preview нашёл 75 недоказуемых Free-постов; все 75 точных message ID удалены, `blocked=0`, повторный preview — `unsafe=0`.
+- Новый Free message ID `163` ведёт точно на существующий Pro message ID `27`. Integrity: `eligible=1`, `sent=1`, все blocked/failure/legacy-счётчики равны нулю.
+- Идемпотентный повтор не создал Pro/news-дублей. Очередь `telegram-delivery` работает и пуста, content scheduler включён.
+- Firebase Hosting version `2d5e57e0df831daa` содержит Admin-метрики Free → exact Pro. Полное доказательство и rollback: `docs/RELEASE_EVIDENCE_2026-07-29-R8_1_1.md`.
+
 ## 29 июля 2026 — локальная реализация R8.1.1 Free → Pro
 
 - После утверждения плана удалено независимое создание объектных Free deliveries из `process-listing` и Market Watch.

@@ -1,5 +1,9 @@
 # AI Context: Dubai Deal Sniper
 
+## Production R8.1.1 Free → Pro (29 июля 2026)
+
+R8.1.1 работает в production на source commit `308545a43a3b06d32f984e5d8d5d18294750f87a`, digest `sha256:7a8ed30227434bfe6411e3d457a76b550c5ba39d9dd877560c4fed05223af897`, API revision `deal-sniper-api-00062-s79`. Независимые `free/v2` и объектный `market-watch/v2` отключены; `free/v3` создаётся и доставляется только после exact Pro `sent` той же revision. 75 недоказуемых legacy Free-постов удалены с audit trail, повторный preview показывает `unsafe=0`. Production evidence подтверждает `eligible=1`, `sent=1`, нулевые blocked/failure/legacy-счётчики и точную пару Free message `163` → Pro message `27`. Очередь RUNNING и пуста, content scheduler ENABLED. Полное доказательство: `docs/RELEASE_EVIDENCE_2026-07-29-R8_1_1.md`.
+
 ## Локальный кандидат R8.1.1 Free → Pro (29 июля 2026)
 
 Владелец утвердил `docs/PLAN_R8_1_1_FREE_PRO_INTEGRITY.md`. Локальный кандидат удаляет независимые Free-пути: `free/v3` создаётся только после `sent` Pro outbox с теми же `decision_id + listing_id + content_hash`, сохранённым `telegram_message_id` и parent-связью. Delivery повторно проверяет эту связь; legacy `free/v2` и объектный `market-watch/v2` блокируются. Free получает отдельные кнопки подписки и точного Pro-сообщения. Добавлены Admin-метрики и reconciliation старых публикаций. Mock, synthetic и LLM-invented факты в production запрещены. Последний полный локальный gate: 126 passed, 2 skipped, coverage 60,18%; production ещё работает на R8.1 до immutable build и контролируемого cutover.
