@@ -372,3 +372,11 @@
 - Digest развёрнут только в staging API revision `deal-sniper-api-staging-00041-vp6` и publisher generation `5`; `/health` и `/version` успешны.
 - Два delivery-off запуска publisher (`…k85vj`, `…fcxbg`) завершились успешно, переочередили один и тот же pending news outbox без дубля и создали ноль Cloud Tasks. Staging-очередь остаётся `PAUSED` и пустой.
 - Реальный Telegram smoke ещё не выполнен: требуется отдельный тестовый канал с ботом-администратором. Production R6 не изменён.
+
+## 29 июля 2026 — production preflight R8.1
+
+- Владелец отменил требование отдельного тестового Telegram-канала и потребовал завершить проверку в существующем production Pro-канале ограниченным запуском.
+- До переключения обнаружен дефект news relevance: поиск подстроки `car` ошибочно классифицировал фамилию `Pogacar` как автомобильную тему.
+- Фильтр заменён на проверку целых automotive-терминов; добавлен регрессионный тест. Полный gate успешен: 114 passed, 2 skipped, coverage 59%, Ruff, strict mypy, pip-audit и Terraform validate.
+- Проверен прямой RSS `https://www.dubicars.com/news/feed`: источник возвращает свежие UAE automotive материалы с прямыми ссылками и пригоден для production registry.
+- Production ещё не переключён. Требуется новый CI, immutable build и bounded cutover с сохранённым R6 rollback.

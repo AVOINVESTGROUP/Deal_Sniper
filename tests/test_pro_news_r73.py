@@ -93,6 +93,26 @@ def test_aggregator_article_url_is_rejected() -> None:
     assert items == []
 
 
+def test_person_name_containing_car_is_not_automotive_news() -> None:
+    payload = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <rss><channel><item>
+      <title>UAE Team Emirates best moments for Tadej Pogacar</title>
+      <link>https://publisher.example/sport/cycling/pogacar</link>
+      <pubDate>Wed, 29 Jul 2026 04:29:09 +0000</pubDate>
+      <source>The National</source>
+      <description>Tour de France cycling highlights from the UAE-backed team.</description>
+    </item></channel></rss>"""
+
+    items = parse_news_feed(
+        payload,
+        now=datetime(2026, 7, 29, 7, tzinfo=UTC),
+        max_age_days=7,
+        limit=3,
+    )
+
+    assert items == []
+
+
 def test_news_feed_registry_can_be_managed(tmp_path: Path) -> None:
     repository = LocalRepository(tmp_path / "news-registry.db")
     feed = NewsFeedConfiguration.model_validate(

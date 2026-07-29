@@ -25,6 +25,11 @@ NEWS_AGGREGATOR_HOSTS = frozenset(
         "news.yahoo.com",
     }
 )
+AUTOMOTIVE_TOPIC_PATTERN = re.compile(
+    r"\b(?:cars?|vehicles?|automotive|pre[- ]owned|used\s+autos?|"
+    r"electric\s+vehicles?|evs?|mobility)\b",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,19 +139,7 @@ def parse_news_feed(
         summary = _plain_text(summary_raw)
         normalized_content = f"{title} {summary}".casefold()
         has_location = "dubai" in normalized_content or "uae" in normalized_content
-        has_automotive_topic = any(
-            token in normalized_content
-            for token in (
-                "car",
-                "vehicle",
-                "automotive",
-                "pre-owned",
-                "used auto",
-                "electric vehicle",
-                " ev ",
-                "mobility",
-            )
-        )
+        has_automotive_topic = AUTOMOTIVE_TOPIC_PATTERN.search(normalized_content) is not None
         if (
             not title
             or not publisher
