@@ -449,6 +449,15 @@
 - Предварительный cloud preflight выявил несовпадение IAM: фактический `deal-sniper-publisher` сохраняет news assets, а Terraform выдавал `storage.objectUser` только runtime SA. Контракт исправлен отдельным bucket-level binding для publisher; первый digest `sha256:0e27a52f…f977` аннулирован до повторного CI/build/staging.
 - Первый delivery-off staging rehearsal сохранил 5 реальных DubiCars evidence и выявил, что per-feed `accepted` в source health накапливался между лентами. Метрика исправлена и покрыта двухлентовым regression test; digest `sha256:f51b0a16…4435` аннулирован до нового commit/build/rehearsal.
 - Матрица R8.1.2 дополнена явным regression test transient feed failure: live-fetch возвращает ошибку, но ранее сохранённая evidence остаётся активной до `valid_until`, а source health хранит реальную причину. Runtime-код не менялся; по immutable-контракту digest `sha256:6a0f6e41…1c19` требует замены после изменения test/build context.
+
+## 29 июля 2026 — immutable staging R8.1.2
+
+- Финальный commit `946db4e175fbe3c46f4ce155660bafb2656b9f7f` прошёл оба GitHub Actions запуска `30478854454` и `30478850873`.
+- Cloud Build `91fa7335-18b4-4bf9-a0fe-bfa7154521c3` собрал digest `sha256:6d6d44e29a9512819460c46b648bc037716614d78af9148a76fbcde07e7745aa` из точного git archive.
+- Exact digest работает только в staging revision `deal-sniper-api-staging-00047-k42` и publisher staging; `/version` совпал с commit/digest/schema 2.
+- Реальный DubiCars ingestion сохранил 5 evidence и 5 JPEG/WebP assets. Для двух статей созданы точные `free-news/v1`/`pro-news/v2` пары с одинаковыми evidence ID и image SHA.
+- Повторный publisher не создал дублей; `telegram-delivery-staging` осталась PAUSED и содержит 0 задач.
+- Полное доказательство: `docs/RELEASE_EVIDENCE_2026-07-29-R8_1_2.md`. Production не изменён и требует отдельного разрешения владельца.
 - Добавлены `NewsEvidence`, SQLite/Firestore repository и единый `NewsIngestionService`; чат больше не выполняет отдельный live-fetch.
 - Publisher проверяет final article domain, source-backed RSS/`og:image`, image CDN, HTTPS, MIME, размер и сигнатуру; immutable asset хранится как `news-assets/{sha256}`.
 - Одна evidence revision создаёт отдельные идемпотентные `free-news/v1` и `pro-news/v2` карточки с одинаковыми evidence ID и image SHA-256. Канальная доставка разрешает только `sendPhoto`; text fallback запрещён.
