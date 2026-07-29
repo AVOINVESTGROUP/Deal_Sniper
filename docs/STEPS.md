@@ -320,3 +320,12 @@
 - Раздел Publications раздельно показывает состояния сделок и новостей; ручной запуск остаётся идемпотентным и использует allowlisted publisher job. `pending` переочередяется, а финальные состояния не публикуются повторно.
 - Локальный gate успешен: 105 тестов прошли, 2 условно пропущены, coverage 58,82%; Ruff, strict mypy, JavaScript ES-module syntax, dependency audit, Terraform validate и `git diff --check` прошли. Локальный container build недоступен, потому что Docker Desktop Linux engine выключен; его обязан заменить CI container/Trivy и последующая immutable Cloud Build. Production R6 не изменялся; immutable build и staging ещё не выполнялись.
 - Реализация R7.3 зафиксирована commit `48e3132f12fa2b4fa7f7ad8fdb6cf747543d3cbb` и отправлена в Draft PR #3. GitHub Actions `30387369703` и `30387367900` успешно выполнили quality, container build, Trivy и Terraform. Создан предварительный `docs/RELEASE_EVIDENCE_2026-07-28-R7_3.md`; production остаётся без изменений.
+
+## 28 июля 2026 — immutable staging R7.3
+
+- Evidence commit `c6c283667a889f030581fe3adcc6814d52d8f9cd` прошёл GitHub Actions `30387653569` и `30387651492`.
+- Cloud Build `46d3f002-8073-4ebb-8cf7-3faefa507831` собрал exact digest `sha256:d52c10aae8b19afad46ef380d47887e5ecdcf8d30136a245fdbf05b16cda50f5` из точного git archive.
+- Digest развёрнут только в staging API revision `deal-sniper-api-staging-00038-f2j` и publisher staging generation `3`; delivery и WhatsApp выключены, база `deal-sniper-stage-rc2` сохранена.
+- Активна runtime revision `r73-stage-c6c2836`: Pro deals и Pro news включены, прежние цены/финансовые пороги сохранены.
+- Staging Gateway переключён на config `r73-c6c2836`; health/version и CORS нового news-feed route успешны.
+- Полный publisher/UI smoke остановлен после истечения интерактивных сессий `gcloud` и Firebase CLI. Требуется повторный вход; production R6 не изменён.
