@@ -53,6 +53,14 @@ async def test_delivery_off_creates_no_cloud_task(monkeypatch: pytest.MonkeyPatc
     assert fake.created == []
 
 
+def test_cloud_tasks_client_is_initialized_lazily(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = cloud_settings(monkeypatch, delivery=False)
+
+    dispatcher = CloudTaskDispatcher(settings)
+
+    assert dispatcher.client is None
+
+
 def test_staging_delivery_requires_isolated_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

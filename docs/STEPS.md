@@ -355,3 +355,10 @@
 - Новостной контур принимает только прямые HTTPS-ссылки издателей и отклоняет известные агрегаторы. Environment fallback RSS теперь пуст и fail-closed: без настроенной прямой ленты API работает, но новости не выдумываются.
 - Gate успешен: Ruff, strict mypy, 114 pytest (112 passed, 2 skipped), coverage 59%, pip-audit без известных уязвимостей, JavaScript ES module syntax, Terraform fmt/validate и `git diff --check`.
 - Production R6, Firebase provider, Cloud Run, Jobs, Scheduler, queues, Hosting и Telegram-каналы не изменялись. Следующий этап — commit/CI, immutable build и отдельный настоящий staging Telegram-канал.
+
+## 29 июля 2026 — исправление CI-контракта R8.1
+
+- Первый GitHub Actions gate для R8.1 обнаружил, что `CloudTaskDispatcher` создавал Google Cloud Tasks client уже в конструкторе и требовал ADC даже при `DELIVERY_ENABLED=false`.
+- Клиент переведён на ленивую инициализацию: delivery-off контур не обращается к Google ADC и не создаёт Cloud Tasks; добавлен отдельный регрессионный тест.
+- Повторный локальный gate успешен: Ruff, strict mypy, 115 pytest (113 passed, 2 skipped), coverage 59%, pip-audit без известных уязвимостей и Terraform fmt/validate.
+- Production R6 не изменён. Исправление должно пройти повторный GitHub Actions gate на Python 3.11 до immutable staging build.

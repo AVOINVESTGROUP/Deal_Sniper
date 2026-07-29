@@ -19,7 +19,9 @@ class CloudTaskDispatcher:
         if not settings.cloud_run_api_url or not settings.cloud_tasks_location:
             raise ValueError("Cloud Tasks требует CLOUD_RUN_API_URL и CLOUD_TASKS_LOCATION")
         self.settings = settings
-        self.client = tasks_v2.CloudTasksClient()
+        # Клиент создаётся только при фактической постановке задачи. Это позволяет
+        # delivery-off контурам оставаться полностью изолированными от Google ADC.
+        self.client: tasks_v2.CloudTasksClient | None = None
 
     async def enqueue_processing(
         self,
@@ -129,7 +131,11 @@ class CloudTaskDispatcher:
         payload: dict[str, Any],
         identity: str,
     ) -> None:
-        parent = self.client.queue_path(
+        client = self.client
+        if client is None:
+            client = tasks_v2.CloudTasksClient()
+            self.client = client
+        parent = client.queue_path(
             self.settings.google_cloud_project,
             self.settings.cloud_tasks_location,
             queue_name,
@@ -151,7 +157,7 @@ class CloudTaskDispatcher:
             }
         try:
             await asyncio.to_thread(
-                self.client.create_task,
+                client.create_task,
                 request={"parent": parent, "task": {"name": task_name, "http_request": request}},
             )
         except AlreadyExists:
