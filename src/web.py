@@ -40,7 +40,6 @@ from src.bot import (
     localized,
     select_publishable_decisions,
     telegram_language,
-    validate_free_publication,
 )
 from src.chat import (
     ChatIntent,
@@ -73,15 +72,21 @@ from src.domain.models import (
     UserAction,
     UserSettings,
 )
-from src.news import DubaiAutoNewsClient, format_news
-from src.pro_cta import (
-    append_pro_cta,
-    pro_cta_count,
-    pro_cta_for_index,
-    validated_subscription_url,
+from src.free_publication import (
+    FREE_TEMPLATE_VERSION,
+    preview_free_pro_integrity,
+    reconcile_free_publications,
+    telegram_message_url,
 )
+from src.news import DubaiAutoNewsClient, format_news
+from src.pro_cta import validated_subscription_url
 from src.pro_news import preview_pro_news_publication
-from src.pro_publication import preview_pro_reconciliation
+from src.pro_publication import (
+    PRO_EVENT_TYPE,
+    PRO_TEMPLATE_VERSION,
+    current_pro_candidates,
+    preview_pro_reconciliation,
+)
 from src.runtime_config import (
     RuntimeConfiguration,
     active_configuration,
@@ -169,13 +174,22 @@ def admin_chat_keyboard() -> InlineKeyboardMarkup | None:
 
 
 def publication_cta_keyboard(
-    button_label: str | None, button_url: str | None
+    button_label: str | None,
+    button_url: str | None,
+    object_button_label: str | None = None,
+    object_button_url: str | None = None,
 ) -> InlineKeyboardMarkup | None:
-    """Создаёт единственную прямую кнопку Pro только для валидной пары полей."""
+    """Создаёт отдельные кнопки подписки и точной карточки Pro."""
+    rows: list[list[InlineKeyboardButton]] = []
     validated_url = validated_subscription_url(button_url or "")
-    if not button_label or not validated_url:
+    validated_object_url = validated_subscription_url(object_button_url or "")
+    if button_label and validated_url:
+        rows.append([InlineKeyboardButton(button_label, url=validated_url)])
+    if object_button_label and validated_object_url:
+        rows.append([InlineKeyboardButton(object_button_label, url=validated_object_url)])
+    if not rows:
         return None
-    return InlineKeyboardMarkup([[InlineKeyboardButton(button_label, url=validated_url)]])
+    return InlineKeyboardMarkup(rows)
 
 
 @app.middleware("http")
@@ -327,6 +341,13 @@ class ContentDeliveryTask(BaseModel):
     image_url: str | None = None
     pro_cta_button_label: str | None = None
     pro_cta_button_url: str | None = None
+    pro_object_button_label: str | None = None
+    pro_object_button_url: str | None = None
+    decision_id: str | None = None
+    listing_id: str | None = None
+    content_hash: str | None = None
+    parent_pro_delivery_id: str | None = None
+    parent_pro_message_id: str | None = None
 
 
 class WhatsAppDeliveryTask(BaseModel):
@@ -1256,9 +1277,10 @@ async def admin_pro_publications(
     """Показывает фактическое покрытие текущих Pro-решений outbox-записями."""
     firebase_principal(authorization, require_admin=True)
     current = runtime_settings()
-    summary, news_preview_result, audits = await asyncio.gather(
+    summary, news_preview_result, free_integrity, audits = await asyncio.gather(
         asyncio.to_thread(preview_pro_reconciliation, service.repository, current),
         preview_pro_news_publication(service.repository, current),
+        asyncio.to_thread(preview_free_pro_integrity, service.repository, current),
         asyncio.to_thread(service.repository.list_audit_events, 100),
     )
     news_summary, _news_items = news_preview_result
@@ -1290,6 +1312,7 @@ async def admin_pro_publications(
         **summary.public_dict(),
         "deals": summary.public_dict(),
         "news": news_summary.public_dict(),
+        "free_integrity": free_integrity.public_dict(),
         "pending_actions": pending_actions,
         "batch_limit": current.channel_max_posts_per_run,
         "confirmation_required": f"PUBLISH {pending_actions} PRO",
@@ -2256,9 +2279,6 @@ async def process_listing_task(
         vehicle_id=vehicle_id,
         event_type="deal-candidate",
     )
-    subscription_url = validated_subscription_url(current.telegram_pro_subscription_url)
-    if current.telegram_channel_id and not subscription_url:
-        logger.error("Free-публикация заблокирована: ссылка подписки Pro отсутствует или невалидна")
     await asyncio.to_thread(
         service.repository.save_publication_event,
         PublicationEvent(
@@ -2297,29 +2317,15 @@ async def process_listing_task(
             )
     if current.telegram_pro_channel_id:
         targets[current.telegram_pro_channel_id] = ("en", "pro/v1")
-    if current.telegram_channel_id and subscription_url:
-        targets[current.telegram_channel_id] = ("en", "free/v2")
     dispatcher = CloudTaskDispatcher(current)
     for target_id, (target_language, template_version) in targets.items():
-        is_free_channel = template_version == "free/v2"
-        free_event_id = (
-            publication_revision_id(
-                decision_id_value=current_decision_id,
-                vehicle_id=vehicle_id,
-                event_type="deal-candidate-free",
-                recipient_id=target_id,
-                template_version=template_version,
-            )
-            if is_free_channel
-            else None
-        )
         card = (
             format_public_teaser(evaluated.listing, target_language)
-            if template_version in {"free/v2", "personal-free/v1"}
+            if template_version == "personal-free/v1"
             else format_card(evaluated.listing, evaluated.decision, target_language)
         )
         stable_delivery_id = delivery_id(
-            decision_id_value=free_event_id or current_decision_id,
+            decision_id_value=current_decision_id,
             recipient_id=target_id,
             template_version=template_version,
             format_name="telegram",
@@ -2335,42 +2341,30 @@ async def process_listing_task(
             "template_version": template_version,
             "format": "telegram",
         }
-        if template_version in {"free/v2", "personal-free/v1"}:
+        pro_event: PublicationEvent | None = None
+        if template_version == PRO_TEMPLATE_VERSION:
+            pro_event_id = publication_revision_id(
+                decision_id_value=current_decision_id,
+                vehicle_id=vehicle_id,
+                event_type=PRO_EVENT_TYPE,
+                recipient_id=target_id,
+                template_version=PRO_TEMPLATE_VERSION,
+            )
+            delivery_payload["publication_event_id"] = pro_event_id
+            pro_event = PublicationEvent(
+                publication_event_id=pro_event_id,
+                decision_id=current_decision_id,
+                vehicle_id=vehicle_id,
+                listing_id=task.listing_id,
+                content_hash=task.content_hash,
+                recipient=target_id,
+                event_type=PRO_EVENT_TYPE,
+                template_version=PRO_TEMPLATE_VERSION,
+            )
+        if template_version == "personal-free/v1":
             delivery_payload["image_url"] = current.free_teaser_image_url
         elif evaluated.listing.image_urls:
             delivery_payload["image_url"] = str(evaluated.listing.image_urls[0])
-        publication_event: PublicationEvent | None = None
-        if is_free_channel and subscription_url:
-            assert free_event_id is not None
-            cta_index = await asyncio.to_thread(
-                service.repository.reserve_pro_cta_variant,
-                free_event_id,
-                pro_cta_count(),
-            )
-            pro_cta = pro_cta_for_index(cta_index)
-            card = append_pro_cta(card, pro_cta)
-            validate_free_publication(card)
-            delivery_payload["publication_event_id"] = free_event_id
-            delivery_payload["text"] = card
-            delivery_payload["pro_cta_button_label"] = pro_cta.button_label
-            delivery_payload["pro_cta_button_url"] = subscription_url
-            delivery_payload["pro_cta_variant_id"] = pro_cta.variant_id
-            delivery_payload["pro_cta_fingerprint"] = pro_cta.fingerprint
-            publication_event = PublicationEvent(
-                publication_event_id=free_event_id,
-                parent_publication_event_id=event_id,
-                decision_id=current_decision_id,
-                vehicle_id=vehicle_id,
-                recipient=target_id,
-                event_type="deal-candidate-free",
-                template_version=template_version,
-                pro_cta_variant_id=pro_cta.variant_id,
-                pro_cta_text=pro_cta.text,
-                pro_cta_button_label=pro_cta.button_label,
-                pro_cta_target=subscription_url,
-                pro_cta_fingerprint=pro_cta.fingerprint,
-                pro_cta_template_version=pro_cta.template_version,
-            )
         outbox = OutboxRecord(
             delivery_id=stable_delivery_id,
             decision_id=current_decision_id,
@@ -2379,14 +2373,14 @@ async def process_listing_task(
             format="telegram",
             payload=delivery_payload,
         )
-        if publication_event is not None:
+        if pro_event is None:
+            stored_outbox = await asyncio.to_thread(service.repository.put_outbox, outbox)
+        else:
             stored_outbox = await asyncio.to_thread(
                 service.repository.commit_publication_with_outbox,
-                publication_event,
+                pro_event,
                 outbox,
             )
-        else:
-            stored_outbox = await asyncio.to_thread(service.repository.put_outbox, outbox)
         await dispatcher.enqueue_delivery(dict(stored_outbox.payload))
     return {"ok": True}
 
@@ -2400,6 +2394,17 @@ async def deliver_telegram_task(
     """Доставляет Telegram-карточку ровно один раз на получателя и версию."""
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
     if not settings.delivery_enabled:
+        return {"ok": True}
+    if task.template_version == "free/v2":
+        await asyncio.to_thread(
+            service.repository.record_audit_event,
+            "free_pro_integrity_block",
+            {
+                "delivery_id": task.delivery_id,
+                "reason": "legacy_independent_free_template_disabled",
+                "template_version": task.template_version,
+            },
+        )
         return {"ok": True}
     if task.engine_version != service.decision_engine.version:
         return {"ok": True}
@@ -2464,6 +2469,13 @@ async def deliver_telegram_task(
         OutboxState.SENT,
         telegram_message_id=str(sent.message_id),
     )
+    active = runtime_settings()
+    if task.template_version == "pro/v1" and task.target_id == active.telegram_pro_channel_id:
+        await reconcile_free_publications(
+            service.repository,
+            active,
+            CloudTaskDispatcher(active),
+        )
     return {"ok": True}
 
 
@@ -2476,6 +2488,85 @@ async def deliver_content_task(
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
     if not settings.delivery_enabled:
         return {"ok": True}
+    if task.template_version == "market-watch/v2":
+        await asyncio.to_thread(
+            service.repository.record_audit_event,
+            "free_pro_integrity_block",
+            {
+                "delivery_id": task.delivery_id,
+                "reason": "legacy_independent_market_watch_disabled",
+                "template_version": task.template_version,
+            },
+        )
+        return {"ok": True}
+    if task.template_version == FREE_TEMPLATE_VERSION:
+        required = (
+            task.decision_id,
+            task.listing_id,
+            task.content_hash,
+            task.parent_pro_delivery_id,
+            task.parent_pro_message_id,
+            task.pro_object_button_url,
+        )
+        if not all(required):
+            return {"ok": True}
+        assert task.parent_pro_delivery_id is not None
+        assert task.parent_pro_message_id is not None
+        assert task.decision_id is not None
+        assert task.listing_id is not None
+        assert task.content_hash is not None
+        assert task.pro_object_button_url is not None
+        active = runtime_settings()
+        parent = await asyncio.to_thread(
+            service.repository.get_outbox,
+            task.parent_pro_delivery_id,
+        )
+        candidates = await asyncio.to_thread(
+            current_pro_candidates,
+            service.repository,
+            active,
+        )
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if item.delivery_id == task.parent_pro_delivery_id
+                and item.decision_id == task.decision_id
+                and item.listing_id == task.listing_id
+                and (item.decision.content_hash or snapshot_hash(item.listing))
+                == task.content_hash
+            ),
+            None,
+        )
+        expected_url = (
+            telegram_message_url(parent.recipient, parent.telegram_message_id)
+            if parent is not None and parent.telegram_message_id
+            else None
+        )
+        parent_payload = parent.payload if parent is not None else {}
+        valid_parent = (
+            candidate is not None
+            and parent is not None
+            and parent.state is OutboxState.SENT
+            and parent.template_version == "pro/v1"
+            and parent.recipient == active.telegram_pro_channel_id
+            and parent.telegram_message_id == task.parent_pro_message_id
+            and parent.decision_id == task.decision_id
+            and str(parent_payload.get("listing_id") or "") == task.listing_id
+            and str(parent_payload.get("content_hash") or "") == task.content_hash
+            and expected_url == task.pro_object_button_url
+        )
+        if not valid_parent:
+            await asyncio.to_thread(
+                service.repository.record_audit_event,
+                "free_pro_integrity_block",
+                {
+                    "delivery_id": task.delivery_id,
+                    "parent_pro_delivery_id": task.parent_pro_delivery_id,
+                    "reason": "exact_sent_pro_revision_required",
+                },
+            )
+            return {"ok": True}
     claimed = await asyncio.to_thread(
         service.repository.claim_outbox,
         task.delivery_id,
@@ -2487,6 +2578,8 @@ async def deliver_content_task(
         reply_markup = publication_cta_keyboard(
             task.pro_cta_button_label,
             task.pro_cta_button_url,
+            task.pro_object_button_label,
+            task.pro_object_button_url,
         )
         async with Bot(settings.require_bot_token()) as bot:
             if task.image_url:

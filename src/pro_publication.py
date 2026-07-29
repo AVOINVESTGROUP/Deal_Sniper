@@ -170,6 +170,9 @@ async def reconcile_pro_publications(
                     publication_event_id=candidate.publication_event_id,
                     decision_id=candidate.decision_id,
                     vehicle_id=candidate.vehicle_id,
+                    listing_id=candidate.listing_id,
+                    content_hash=candidate.decision.content_hash
+                    or snapshot_hash(candidate.listing),
                     recipient=settings.telegram_pro_channel_id,
                     event_type=PRO_EVENT_TYPE,
                     template_version=PRO_TEMPLATE_VERSION,

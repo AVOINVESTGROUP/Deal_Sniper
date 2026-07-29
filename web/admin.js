@@ -274,6 +274,8 @@ async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/$
 function renderProPublications(payload = {}) {
   proPublicationPreview = payload;
   byId("pro-publication-status").innerHTML = keyValues({publishable: payload.publishable, delivered: payload.sent, pending: payload.pending, sending: payload.sending, unknown: payload.unknown, failed: payload.failed, missing: payload.missing, batch_limit: payload.batch_limit, last_reconciliation: payload.last_reconciliation?.created_at || "Never"});
+  const integrity = payload.free_integrity || {};
+  byId("free-pro-integrity-status").innerHTML = keyValues({eligible_exact_pro: integrity.eligible, free_sent_v3: integrity.sent, blocked_no_pro: integrity.blocked_no_pro, blocked_not_sent: integrity.blocked_not_sent, blocked_revision_mismatch: integrity.blocked_revision_mismatch, legacy_sent: integrity.legacy_sent, legacy_matched: integrity.legacy_matched, legacy_unmatched: integrity.legacy_unmatched, legacy_manual_review: integrity.legacy_manual_review});
   const news = payload.news || {};
   byId("pro-news-publication-status").innerHTML = keyValues({enabled: news.enabled, feeds: news.feeds, fetched: news.fetched, unpublished: news.unpublished, pending: news.pending, sent: news.sent, failed: news.failed, interval_open: news.interval_open, ai_intro_used: news.ai_used, last_reconciliation: payload.last_news_reconciliation?.created_at || "Never"});
   byId("publish-pro").disabled = !Number(payload.pending_actions || 0);

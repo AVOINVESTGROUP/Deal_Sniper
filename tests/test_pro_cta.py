@@ -12,7 +12,6 @@ import pytest
 from src.bot import scan_and_publish, validate_free_publication
 from src.config import Settings
 from src.domain.engines import DECISION_ENGINE_VERSION
-from src.domain.ids import delivery_id, publication_revision_id
 from src.domain.models import (
     CostEstimate,
     DealDecision,
@@ -160,6 +159,21 @@ def test_publication_keyboard_contains_direct_subscription_button() -> None:
     assert publication_cta_keyboard("Upgrade", "https://example.com/pro") is None
 
 
+def test_publication_keyboard_separates_subscription_and_exact_object() -> None:
+    keyboard = publication_cta_keyboard(
+        "Join Pro",
+        "https://t.me/+paid-channel",
+        "Open exact car",
+        "https://t.me/c/4319276577/29",
+    )
+
+    assert keyboard is not None
+    assert keyboard.to_dict()["inline_keyboard"] == [
+        [{"text": "Join Pro", "url": "https://t.me/+paid-channel"}],
+        [{"text": "Open exact car", "url": "https://t.me/c/4319276577/29"}],
+    ]
+
+
 def test_free_leakage_validator_rejects_financial_values_ids_and_links() -> None:
     validate_free_publication("<b>Toyota Camry 2022</b>\nVerified opportunity.")
 
@@ -286,7 +300,7 @@ def test_firestore_publication_bundle_and_cta_assignment_share_stable_contract(
 
 
 @pytest.mark.asyncio
-async def test_process_listing_creates_safe_atomic_free_publication(
+async def test_process_listing_does_not_create_free_before_pro_is_sent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from src import web
@@ -367,37 +381,5 @@ async def test_process_listing_creates_safe_atomic_free_publication(
     await web.process_listing_task(task, x_cloudtasks_taskname="task-1")
     await web.process_listing_task(task, x_cloudtasks_taskname="task-1")
 
-    records = repository.list_outbox(limit=10)
-    assert len(records) == 1
-    assert len(sent_payloads) == 2
-    assert sent_payloads[0] == sent_payloads[1]
-    payload = records[0].payload
-    text = str(payload["text"])
-    validate_free_publication(text)
-    assert "60,000" not in text
-    assert "https://example.test" not in text
-    assert payload["pro_cta_button_url"] == "https://t.me/+paid-channel"
-    expected_event_id = publication_revision_id(
-        decision_id_value="decision-free-1",
-        vehicle_id="vehicle-free-1",
-        event_type="deal-candidate-free",
-        recipient_id="-100free",
-        template_version="free/v2",
-    )
-    expected_delivery_id = delivery_id(
-        decision_id_value=expected_event_id,
-        recipient_id="-100free",
-        template_version="free/v2",
-        format_name="telegram",
-    )
-    assert payload["publication_event_id"] == expected_event_id
-    assert records[0].delivery_id == expected_delivery_id
-    with repository._connect() as connection:
-        rows = connection.execute(
-            "SELECT payload_json FROM publication_events WHERE publication_event_id = ?",
-            (payload["publication_event_id"],),
-        ).fetchall()
-    assert len(rows) == 1
-    event = PublicationEvent.model_validate_json(rows[0]["payload_json"])
-    assert event.recipient == "-100free"
-    assert event.pro_cta_fingerprint == payload["pro_cta_fingerprint"]
+    assert repository.list_outbox(limit=10) == []
+    assert sent_payloads == []

@@ -15,6 +15,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 COPY main.py ./
 COPY src ./src
+COPY scripts ./scripts
 
 ARG GIT_COMMIT=unknown
 LABEL org.opencontainers.image.revision=$GIT_COMMIT

@@ -1,8 +1,8 @@
 # AI Context: Dubai Deal Sniper
 
-## Блокирующий дефект R8.1.1 (29 июля 2026)
+## Локальный кандидат R8.1.1 Free → Pro (29 июля 2026)
 
-После production-выпуска выявлено, что объектные Free deliveries создаются независимо от фактического `sent` точной Pro revision. Это нарушает продуктовый контракт и может обещать пользователю объект, отсутствующий в Pro. Создан план `docs/PLAN_R8_1_1_FREE_PRO_INTEGRITY.md`; до его утверждения код не меняется. Целевой инвариант: Free допустим только при `sent` Pro outbox с теми же `decision_id + listing_id + content_hash` и сохранённым `telegram_message_id`. Любые mock, synthetic или LLM-invented факты в production запрещены.
+Владелец утвердил `docs/PLAN_R8_1_1_FREE_PRO_INTEGRITY.md`. Локальный кандидат удаляет независимые Free-пути: `free/v3` создаётся только после `sent` Pro outbox с теми же `decision_id + listing_id + content_hash`, сохранённым `telegram_message_id` и parent-связью. Delivery повторно проверяет эту связь; legacy `free/v2` и объектный `market-watch/v2` блокируются. Free получает отдельные кнопки подписки и точного Pro-сообщения. Добавлены Admin-метрики и reconciliation старых публикаций. Mock, synthetic и LLM-invented факты в production запрещены. Последний полный локальный gate: 126 passed, 2 skipped, coverage 60,18%; production ещё работает на R8.1 до immutable build и контролируемого cutover.
 
 ## Текущее production-состояние R8.1 (29 июля 2026)
 

@@ -39,7 +39,7 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 - планируемые MTProto Jobs: `deal-sniper-telegram-collector` для ограниченного backfill/incremental sync и `deal-sniper-telegram-discovery` для поиска чужих публичных источников. Они не входят в production до утверждения `docs/TELEGRAM_SOURCES_PLAN.md` и прохождения TG0–TG6.
 - migration Job: immutable schema migration с dry-run/apply и ledger.
 - replay Job: catch-up напрямую в maintenance-режиме либо через очередь.
-- content Job: weekly Market Pulse и PublicationEvent.
+- content Job: агрегированный Market Pulse, Pro reconciliation и Free reconciler.
 - Telegram chat router: детерминированные intent/FAQ, персональный поиск и read-only news client.
 - `listing-processing`, `telegram-delivery`: rate-limited Cloud Tasks с OIDC.
 - Firestore: operational state, immutable evidence/decision/outbox history и current pointers.
@@ -56,6 +56,15 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 Delivery Plane. Google Sign-In и Pro publisher имеют разные release gates. Для каждого
 deployable component release manifest фиксирует commit, digest, schema и совместимые
 template versions.
+
+## Инвариант публикации Free → Pro
+
+Объектная Free-публикация не создаётся непосредственно из решения или Market Pulse.
+Сначала transactional Pro outbox той же `decision_id + listing_id + content_hash`
+доставляется в Telegram и получает состояние `sent` и `telegram_message_id`. Только после
+этого Free reconciler создаёт immutable `free/v3` с `parent_pro_delivery_id`, точной ссылкой
+на Pro-сообщение и тем же content hash. Delivery handler повторяет проверку перед отправкой.
+Legacy-шаблоны `free/v2` и объектный `market-watch/v2` заблокированы на входе delivery.
 
 ## Данные
 

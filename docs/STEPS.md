@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 29 июля 2026 — локальная реализация R8.1.1 Free → Pro
+
+- После утверждения плана удалено независимое создание объектных Free deliveries из `process-listing` и Market Watch.
+- Новый `free/v3` создаётся только после точной Pro delivery в состоянии `sent` с совпадающими `decision_id`, `listing_id`, `content_hash` и сохранённым Telegram message ID.
+- Перед фактической отправкой Free delivery повторно проверяет current revision и parent Pro; legacy `free/v2` и объектный `market-watch/v2` заблокированы до claim/send.
+- Добавлены две раздельные кнопки: подписка Pro и переход к точной карточке объекта в Pro, а также Admin-метрики и безопасный reconciliation preview/apply старых Free-публикаций.
+- Независимая генерация объектного Market Watch удалена; агрегированный Market Pulse не называет автомобили. Mock и вымышленные факты в production запрещены.
+- Локальный полный gate: 126 passed, 2 skipped, coverage 60,18%, Ruff, strict mypy, pip-audit, JavaScript ES-module syntax и Terraform validate успешны. Production остаётся на R8.1 до immutable build и cutover.
+
 ## 29 июля 2026 — обнаружен блокирующий дефект Free → Pro
 
 - Подтверждено архитектурное нарушение: `process-listing` и плановый Market Watch создают Free независимо от подтверждённой доставки точной Pro revision; Cloud Tasks не гарантирует порядок.

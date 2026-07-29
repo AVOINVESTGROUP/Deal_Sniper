@@ -409,6 +409,10 @@ class PublicationEvent(BaseModel):
     vehicle_id: str
     event_type: str
     parent_publication_event_id: str | None = None
+    parent_delivery_id: str | None = None
+    parent_message_id: str | None = None
+    listing_id: str | None = None
+    content_hash: str | None = None
     recipient: str | None = None
     pro_cta_variant_id: str | None = None
     pro_cta_text: str | None = None
