@@ -73,6 +73,8 @@ class NewsFeedConfiguration(BaseModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
     publisher: str = Field(min_length=2, max_length=120)
     url: HttpUrl
+    publisher_domains: list[str] = Field(default_factory=list)
+    image_domains: list[str] = Field(default_factory=list)
     enabled: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -364,6 +366,38 @@ class VerificationEvidence(BaseModel):
     attempt_count: int = Field(default=1, ge=1)
     latency_ms: int | None = Field(default=None, ge=0)
     schema_version: str = "verification-evidence/v2"
+
+
+class NewsEvidence(BaseModel):
+    """Проверяемая ревизия новости и связанного с ней изображения."""
+
+    evidence_id: str
+    semantic_fingerprint: str
+    feed_id: str
+    feed_revision_id: str
+    publisher_name: str
+    publisher_domains: list[str] = Field(default_factory=list)
+    source_url: HttpUrl
+    canonical_url: HttpUrl
+    title: str = Field(min_length=1, max_length=500)
+    summary: str = Field(default="", max_length=2_000)
+    published_at: datetime
+    image_source_url: HttpUrl
+    image_final_url: HttpUrl
+    image_storage_uri: str = Field(min_length=1)
+    image_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    image_content_type: str = Field(pattern=r"^image/")
+    image_size_bytes: int = Field(gt=0)
+    image_width: int | None = Field(default=None, gt=0)
+    image_height: int | None = Field(default=None, gt=0)
+    image_source_type: str = Field(pattern=r"^(rss_media|rss_enclosure|page_metadata)$")
+    source_item_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    evidence_created_at: datetime
+    fetched_at: datetime
+    last_checked_at: datetime
+    valid_until: datetime
+    freshness_status: FreshnessStatus = FreshnessStatus.ACTIVE
+    schema_version: str = "news-evidence/v1"
 
 
 class OutboxRecord(BaseModel):

@@ -141,18 +141,28 @@ function renderNewsFeeds(payload = {}) {
   }));
 }
 
+function renderNewsEvidence(payload = {}) {
+  const items = payload.items || [];
+  byId("news-evidence").innerHTML = items.map((item) => {
+    const deliveries = (item.deliveries || []).map((delivery) => `${safe(delivery.template_version)}: ${safe(delivery.state)}${delivery.telegram_message_id ? ` #${safe(delivery.telegram_message_id)}` : ""}`).join(" · ");
+    return `<article class="data-row"><img src="${safe(item.image_final_url)}" alt="" loading="lazy" style="width:96px;height:64px;object-fit:cover;border-radius:8px"><div class="data-primary"><strong>${safe(item.title)}</strong><div class="row-meta"><span>${safe(item.publisher_name)}</span><span>${safe(item.image_content_type)}</span><span>${number(item.image_size_bytes)} bytes</span><span>SHA ${safe(String(item.image_sha256 || "").slice(0, 12))}</span></div><div class="row-meta"><span>${deliveries || "Not queued"}</span><a href="${safe(item.canonical_url)}" target="_blank" rel="noopener">Open article</a></div></div></article>`;
+  }).join("") || '<div class="empty-state">No active illustrated news evidence.</div>';
+}
+
 async function addNewsFeed() {
   const name = byId("news-feed-name").value.trim().toLowerCase();
   const publisher = byId("news-feed-publisher").value.trim();
   const url = byId("news-feed-url").value.trim();
+  const publisher_domains = byId("news-feed-domains").value.split(",").map((item) => item.trim()).filter(Boolean);
+  const image_domains = byId("news-image-domains").value.split(",").map((item) => item.trim()).filter(Boolean);
   const result = byId("news-feed-result");
   if (!/^[a-z][a-z0-9_-]{2,39}$/.test(name)) { showError(new Error("Use 3–40 lowercase letters, numbers, _ or - for the feed name.")); return; }
   if (publisher.length < 2 || !url.startsWith("https://")) { showError(new Error("Enter a publisher and a public HTTPS RSS or Atom URL.")); return; }
   byId("add-news-feed").disabled = true; result.textContent = "Validating fresh automotive items…";
   try {
-    const response = await call("/admin/news-feeds", {method: "POST", body: JSON.stringify({name, publisher, url})});
+    const response = await call("/admin/news-feeds", {method: "POST", body: JSON.stringify({name, publisher, url, publisher_domains, image_domains})});
     result.className = "test-good"; result.textContent = `${number(response.feed.sample_count)} relevant items validated. Feed enabled.`;
-    byId("news-feed-name").value = ""; byId("news-feed-publisher").value = ""; byId("news-feed-url").value = "";
+    byId("news-feed-name").value = ""; byId("news-feed-publisher").value = ""; byId("news-feed-url").value = ""; byId("news-feed-domains").value = ""; byId("news-image-domains").value = "";
     await refresh();
   } catch (error) { result.className = "test-bad"; result.textContent = error instanceof Error ? error.message : String(error); }
   finally { byId("add-news-feed").disabled = false; }
@@ -298,8 +308,8 @@ async function publishProNow() {
 async function refresh() {
   byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings"), call("/admin/pro-publications"), call("/admin/news-feeds")];
-    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult] = await Promise.allSettled(requests);
+    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings"), call("/admin/pro-publications"), call("/admin/news-feeds"), call("/admin/news-evidence")];
+    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult, newsEvidenceResult] = await Promise.allSettled(requests);
     if (overviewResult.status === "rejected") throw overviewResult.reason;
     const pulse = pulseResult.status === "fulfilled" ? pulseResult.value : {};
     const preview = previewResult.status === "fulfilled" ? previewResult.value : {};
@@ -309,7 +319,8 @@ async function refresh() {
     if (runsResult.status === "fulfilled") renderRuns(runsResult.value); if (listingsResult.status === "fulfilled") renderListings(listingsResult.value); if (decisionsResult.status === "fulfilled") renderDecisions(decisionsResult.value); if (usersResult.status === "fulfilled") renderUsers(usersResult.value); if (errorsResult.status === "fulfilled") renderErrors(errorsResult.value); if (settingsResult.status === "fulfilled") renderSettings(settingsResult.value);
     if (proPublicationsResult.status === "fulfilled") renderProPublications(proPublicationsResult.value);
     if (newsFeedsResult.status === "fulfilled") renderNewsFeeds(newsFeedsResult.value);
-    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult].filter((result) => result.status === "rejected");
+    if (newsEvidenceResult.status === "fulfilled") renderNewsEvidence(newsEvidenceResult.value);
+    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult, newsEvidenceResult].filter((result) => result.status === "rejected");
     if (partialErrors.length) showError(new Error(`${partialErrors.length} section(s) are temporarily unavailable. Refresh will retry them.`));
     byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
   } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }

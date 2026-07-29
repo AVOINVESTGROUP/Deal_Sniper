@@ -11,6 +11,7 @@ from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
+    NewsEvidence,
     NewsFeedConfiguration,
     NormalizedVehicle,
     OutboxRecord,
@@ -1050,6 +1051,40 @@ class FirestoreRepository:
             return False
         reference.delete()
         return True
+
+    def save_news_evidence(self, evidence: NewsEvidence) -> None:
+        self.client.collection("news_evidence").document(evidence.evidence_id).set(
+            {
+                **evidence.model_dump(mode="json"),
+                "updated_at": datetime.now(UTC),
+            },
+            merge=True,
+        )
+
+    def get_news_evidence(self, evidence_id: str) -> NewsEvidence | None:
+        snapshot = self.client.collection("news_evidence").document(evidence_id).get()
+        if not snapshot.exists:
+            return None
+        return NewsEvidence.model_validate(snapshot.to_dict() or {})
+
+    def active_news_evidence(
+        self, limit: int = 20, now: datetime | None = None
+    ) -> list[NewsEvidence]:
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        results: list[NewsEvidence] = []
+        query = self.client.collection("news_evidence").where(
+            "freshness_status", "==", "active"
+        )
+        for document in query.stream():
+            data = document.to_dict() or {}
+            try:
+                evidence = NewsEvidence.model_validate(data)
+            except ValueError:
+                continue
+            if evidence.valid_until > current:
+                results.append(evidence)
+        results.sort(key=lambda item: item.published_at, reverse=True)
+        return results[: max(1, limit)]
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         document = self.client.collection("source_registry").document(source_name)

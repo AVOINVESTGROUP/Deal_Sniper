@@ -365,6 +365,7 @@ resource "google_cloud_run_v2_job" "content" {
             DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
+            RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
             CLOUD_RUN_API_URL            = var.api_base_url
             CLOUD_TASKS_LOCATION         = var.region
             TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
@@ -488,6 +489,12 @@ resource "google_storage_bucket_iam_member" "raw_writer" {
   bucket = google_storage_bucket.raw.name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.collector.email}"
+}
+
+resource "google_storage_bucket_iam_member" "runtime_news_assets" {
+  bucket = google_storage_bucket.raw.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.runtime.email}"
 }
 
 resource "google_storage_bucket_iam_member" "migration_export_reader" {

@@ -57,6 +57,7 @@ R8.2       отдельный выпуск Google Admin Auth
 | 17 | Isolated direct replay с delivery=false | реализовано | ожидает staging/production |
 | 18 | Terraform desired state/IAM/alerts/budget | реализовано, validate | ожидает import/apply |
 | 19 | CI/CD security gates и non-root Python 3.11 image | реализовано | ожидает GitHub Actions/registry |
+| 20 | Единый иллюстрированный news evidence для Free/Pro/бота/чата | локально реализовано, 29.07.2026 | CI и delivery-off staging |
 | 20 | Immutable RC build и manifest | готово к выполнению | ожидает digest |
 | 21 | Staging restore/migration/full rehearsal | готово к выполнению | ожидает execution |
 | 22 | Production migration, merge, cutover и pilot | запрещено до 21 | ожидает execution |

@@ -414,3 +414,41 @@
 - Фильтр заменён на проверку целых automotive-терминов; добавлен регрессионный тест. Полный gate успешен: 114 passed, 2 skipped, coverage 59%, Ruff, strict mypy, pip-audit и Terraform validate.
 - Проверен прямой RSS `https://www.dubicars.com/news/feed`: источник возвращает свежие UAE automotive материалы с прямыми ссылками и пригоден для production registry.
 - Production ещё не переключён. Требуется новый CI, immutable build и bounded cutover с сохранённым R6 rollback.
+## 29 июля 2026 — диагностика расхождения новостей R8.1.2
+
+- По production-скриншотам подтверждено: Pro опубликовал материал DubiCars с подписью
+  `Google News`, а связанный чат через несколько секунд сообщил о недоступности новостей.
+- Read-only аудит кода, Cloud Run env, журнала publisher/webhook и фактического RSS выявил два
+  независимых пути: Pro использует registry/fallback, чат напрямую читает `AUTO_NEWS_RSS_URL`.
+- Production `news_feed_registry` пуст; fallback ошибочно назначает RSS DubiCars издателя
+  `Google News`. Сохраняемого общего `news_evidence` нет.
+- Создан `docs/PLAN_R8_1_2_NEWS_CONSISTENCY.md`: единый ingestion/evidence-контур, строгая
+  publisher-domain проверка, общий ответ Pro/чата, миграция ошибочного provenance и staging gate.
+- Код, данные и production не изменялись. Реализация запрещена до явного утверждения R8.1.2.
+
+## 29 июля 2026 — диагностика отсутствия автомобильных публикаций R8.1.3
+
+- Выполнен read-only проход production от четырёх Cloud Scheduler/collector jobs через processing и Firestore decisions до Pro/Free outbox и Telegram delivery.
+- Подтверждено, что доставка работает, но новых допустимых кандидатов практически нет: из 1 643 актуальных решений 1 578 имеют `INSUFFICIENT_DATA`, 64 — `REJECT`, одно — `INSPECT`; рыночная оценка существует только у 65 решений.
+- Единственная допустимая revision уже доставлена в Pro и затем связана с exact Free teaser, поэтому идемпотентный publisher обоснованно не создаёт дубль.
+- Выявлены дополнительные дефекты: cron `0/10`, `2/10`, `4/10`, `6/10` фактически выполняется раз в час; DubiCars изменил JSON-LD и вызывает `KeyError: offers`; новые detail-page проверки получают `ReadTimeout`; плановый publisher запускается только раз в шесть часов.
+- Создан черновик `docs/PLAN_R8_1_3_LISTING_PUBLICATION_RECOVERY.md`: исправление расписаний и адаптеров, доказуемое tiered comparable coverage, event-driven Pro→Free публикация, bounded replay и наблюдаемая воронка в Admin Web.
+- Код, Firestore, Scheduler, Jobs, очереди и Telegram не изменялись. Реализация запрещена до явного утверждения R8.1.3.
+
+## 29 июля 2026 — диагностика иллюстраций Free-новостей
+
+- Сквозной read-only аудит подтвердил, что иллюстрированные новости в Free-канале не реализованы: новости создаются только как `pro-news/v1`, а Free получает независимый текстовый `content/v1` Market Pulse.
+- Production outbox содержит 31 `content/v1` Free delivery и три `pro-news/v1`; во всех этих payload отсутствует `image_url`. Единственный текущий тип Free-публикации с фотографией — автомобильный `free/v3`.
+- Модель `NewsItem` не содержит изображения, а видимое Telegram preview формируется самой платформой по ссылке и не является контролируемой иллюстрацией приложения.
+- `docs/PLAN_R8_1_2_NEWS_CONSISTENCY.md` дополнен обязательным source-backed image evidence, immutable Cloud Storage asset, отдельными `free-news/v1`/`pro-news/v2`, доставкой только через `sendPhoto` и Admin preview/status.
+- Код, outbox, Cloud Storage и Telegram не изменялись. Реализация остаётся запрещённой до утверждения обновлённого R8.1.2.
+
+## 29 июля 2026 — локальная реализация R8.1.2
+
+- Владелец явно утвердил R8.1.2; production deploy этим утверждением не разрешён.
+- Добавлены `NewsEvidence`, SQLite/Firestore repository и единый `NewsIngestionService`; чат больше не выполняет отдельный live-fetch.
+- Publisher проверяет final article domain, source-backed RSS/`og:image`, image CDN, HTTPS, MIME, размер и сигнатуру; immutable asset хранится как `news-assets/{sha256}`.
+- Одна evidence revision создаёт отдельные идемпотентные `free-news/v1` и `pro-news/v2` карточки с одинаковыми evidence ID и image SHA-256. Канальная доставка разрешает только `sendPhoto`; text fallback запрещён.
+- Admin API/Web показывает provenance, thumbnail, MIME, размер, SHA-256 и состояния обеих доставок; registry принимает publisher/image domain allowlists.
+- Реальная delivery-off проверка DubiCars приняла 5 из 5 свежих статей и сохранила 5 JPEG/WebP assets. Парная проверка двух статей создала 4 outbox-карточки без расхождений Free/Pro.
+- Локальный gate: Ruff, strict mypy, 130 passed/2 skipped, Terraform fmt/validate и `git diff --check`. Production и Telegram не изменены.

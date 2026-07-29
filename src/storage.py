@@ -13,6 +13,7 @@ from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
+    NewsEvidence,
     NewsFeedConfiguration,
     NormalizedVehicle,
     OutboxRecord,
@@ -98,6 +99,14 @@ class Repository(Protocol):
     def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None: ...
 
     def delete_news_feed_configuration(self, name: str) -> bool: ...
+
+    def save_news_evidence(self, evidence: NewsEvidence) -> None: ...
+
+    def get_news_evidence(self, evidence_id: str) -> NewsEvidence | None: ...
+
+    def active_news_evidence(
+        self, limit: int = 20, now: datetime | None = None
+    ) -> list[NewsEvidence]: ...
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None: ...
 
@@ -319,6 +328,16 @@ class LocalRepository:
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS news_evidence (
+                    evidence_id TEXT PRIMARY KEY,
+                    semantic_fingerprint TEXT NOT NULL,
+                    valid_until TEXT NOT NULL,
+                    freshness_status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_news_evidence_active
+                    ON news_evidence(freshness_status, valid_until);
                 CREATE TABLE IF NOT EXISTS telegram_updates (
                     update_id INTEGER PRIMARY KEY,
                     claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1452,6 +1471,53 @@ class LocalRepository:
                 "DELETE FROM news_feed_configurations WHERE name = ?", (name,)
             )
         return cursor.rowcount > 0
+
+    def save_news_evidence(self, evidence: NewsEvidence) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO news_evidence(
+                    evidence_id, semantic_fingerprint, valid_until,
+                    freshness_status, payload_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(evidence_id) DO UPDATE SET
+                    valid_until = excluded.valid_until,
+                    freshness_status = excluded.freshness_status,
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    evidence.evidence_id,
+                    evidence.semantic_fingerprint,
+                    evidence.valid_until.isoformat(),
+                    evidence.freshness_status.value,
+                    evidence.model_dump_json(),
+                ),
+            )
+
+    def get_news_evidence(self, evidence_id: str) -> NewsEvidence | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM news_evidence WHERE evidence_id = ?",
+                (evidence_id,),
+            ).fetchone()
+        return NewsEvidence.model_validate_json(row["payload_json"]) if row else None
+
+    def active_news_evidence(
+        self, limit: int = 20, now: datetime | None = None
+    ) -> list[NewsEvidence]:
+        current = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM news_evidence
+                WHERE freshness_status = ? AND valid_until > ?
+                ORDER BY valid_until DESC LIMIT ?
+                """,
+                ("active", current, max(1, limit)),
+            ).fetchall()
+        evidence = [NewsEvidence.model_validate_json(row["payload_json"]) for row in rows]
+        return sorted(evidence, key=lambda item: item.published_at, reverse=True)
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         with self._connect() as connection:

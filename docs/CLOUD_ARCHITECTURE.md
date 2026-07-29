@@ -40,7 +40,8 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 - migration Job: immutable schema migration с dry-run/apply и ledger.
 - replay Job: catch-up напрямую в maintenance-режиме либо через очередь.
 - content Job: агрегированный Market Pulse, Pro reconciliation и Free reconciler.
-- Telegram chat router: детерминированные intent/FAQ, персональный поиск и read-only news client.
+- Telegram chat router: детерминированные intent/FAQ, персональный поиск и чтение общего активного `news_evidence` без независимого live-fetch.
+- News ingestion: управляемый registry → publisher/domain/relevance gate → source-backed image gate → immutable `news-assets/{sha256}` в Cloud Storage → Firestore `news_evidence` → парные `free-news/v1`/`pro-news/v2` outbox-карточки.
 - `listing-processing`, `telegram-delivery`: rate-limited Cloud Tasks с OIDC.
 - Firestore: operational state, immutable evidence/decision/outbox history и current pointers.
 - Cloud Storage: raw snapshots, Firestore exports и hosting assets.

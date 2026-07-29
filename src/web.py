@@ -1,6 +1,7 @@
 """Cloud Run HTTP API и Telegram webhook."""
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -18,6 +19,7 @@ from telegram import (
     Bot,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputFile,
     KeyboardButton,
     ReplyKeyboardMarkup,
     WebAppInfo,
@@ -78,7 +80,8 @@ from src.free_publication import (
     reconcile_free_publications,
     telegram_message_url,
 )
-from src.news import DubaiAutoNewsClient, format_news
+from src.news import format_news
+from src.news_evidence import NewsIngestionService, evidence_as_news_item, load_news_asset
 from src.pro_cta import validated_subscription_url
 from src.pro_news import preview_pro_news_publication
 from src.pro_publication import (
@@ -106,12 +109,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-news_client = DubaiAutoNewsClient(
-    settings.auto_news_rss_url,
-    settings.request_timeout_seconds,
-    settings.auto_news_max_age_days,
-    settings.auto_news_limit,
-)
 app = FastAPI(title="Dubai Deal Sniper", version="1.1.0")
 
 
@@ -178,6 +175,8 @@ def publication_cta_keyboard(
     button_url: str | None,
     object_button_label: str | None = None,
     object_button_url: str | None = None,
+    article_button_label: str | None = None,
+    article_button_url: str | None = None,
 ) -> InlineKeyboardMarkup | None:
     """Создаёт отдельные кнопки подписки и точной карточки Pro."""
     rows: list[list[InlineKeyboardButton]] = []
@@ -187,6 +186,12 @@ def publication_cta_keyboard(
         rows.append([InlineKeyboardButton(button_label, url=validated_url)])
     if object_button_label and validated_object_url:
         rows.append([InlineKeyboardButton(object_button_label, url=validated_object_url)])
+    if (
+        article_button_label
+        and article_button_url
+        and article_button_url.startswith("https://")
+    ):
+        rows.append([InlineKeyboardButton(article_button_label, url=article_button_url)])
     if not rows:
         return None
     return InlineKeyboardMarkup(rows)
@@ -284,6 +289,8 @@ class NewsFeedCreateRequest(BaseModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
     publisher: str = Field(min_length=2, max_length=120)
     url: HttpUrl
+    publisher_domains: list[str] = Field(default_factory=list, max_length=20)
+    image_domains: list[str] = Field(default_factory=list, max_length=20)
 
 
 class NewsFeedStateRequest(BaseModel):
@@ -348,6 +355,12 @@ class ContentDeliveryTask(BaseModel):
     content_hash: str | None = None
     parent_pro_delivery_id: str | None = None
     parent_pro_message_id: str | None = None
+    news_evidence_id: str | None = None
+    image_storage_uri: str | None = None
+    image_sha256: str | None = None
+    image_content_type: str | None = None
+    article_button_label: str | None = None
+    article_button_url: str | None = None
 
 
 class WhatsAppDeliveryTask(BaseModel):
@@ -1421,6 +1434,37 @@ async def admin_news_feeds(
     return {"items": [item.model_dump(mode="json") for item in feeds]}
 
 
+@app.get("/admin/news-evidence")
+async def admin_news_evidence(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает оператору provenance, изображение и статусы доставки новости."""
+    firebase_principal(authorization, require_admin=True)
+    evidence = await asyncio.to_thread(
+        service.repository.active_news_evidence, 50, datetime.now(UTC)
+    )
+    outbox = await asyncio.to_thread(service.repository.list_outbox, None, 500)
+    items: list[dict[str, Any]] = []
+    for item in evidence:
+        deliveries = [record for record in outbox if record.decision_id == item.evidence_id]
+        items.append(
+            {
+                **item.model_dump(mode="json"),
+                "deliveries": [
+                    {
+                        "recipient": record.recipient,
+                        "template_version": record.template_version,
+                        "state": record.state.value,
+                        "telegram_message_id": record.telegram_message_id,
+                        "last_error": record.last_error,
+                    }
+                    for record in deliveries
+                ],
+            }
+        )
+    return {"items": items}
+
+
 @app.post("/admin/news-feeds")
 async def admin_add_news_feed(
     request: NewsFeedCreateRequest,
@@ -1430,29 +1474,28 @@ async def admin_add_news_feed(
     principal = firebase_principal(authorization, require_admin=True)
     if not str(request.url).startswith("https://"):
         raise HTTPException(status_code=422, detail="Разрешены только HTTPS-ленты")
-    client = DubaiAutoNewsClient(
-        str(request.url),
-        settings.request_timeout_seconds,
-        settings.auto_news_max_age_days,
-        5,
-        publisher_hint=request.publisher,
-    )
-    sample = await client.latest()
-    if not sample:
-        raise HTTPException(
-            status_code=422,
-            detail="Лента не вернула свежие релевантные Dubai/UAE automotive материалы",
-        )
     now = datetime.now(UTC)
     config = NewsFeedConfiguration(
         name=request.name,
         publisher=request.publisher,
         url=request.url,
+        publisher_domains=request.publisher_domains,
+        image_domains=request.image_domains,
         enabled=True,
         created_at=now,
         updated_at=now,
-        sample_count=len(sample),
+        sample_count=0,
     )
+    sample = await NewsIngestionService(service.repository, settings).ingest([config], now=now)
+    if not sample:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Лента не вернула свежий Dubai/UAE automotive материал с проверенным "
+                "изображением и допустимым publisher domain"
+            ),
+        )
+    config = config.model_copy(update={"sample_count": len(sample)})
     await asyncio.to_thread(service.repository.save_news_feed_configuration, config)
     await asyncio.to_thread(
         service.repository.record_audit_event,
@@ -2167,7 +2210,12 @@ async def telegram_webhook(
                         reply_markup=main_chat_keyboard(),
                     )
                 elif intent is ChatIntent.NEWS:
-                    news = await news_client.latest()
+                    news_evidence = await asyncio.to_thread(
+                        service.repository.active_news_evidence,
+                        settings.auto_news_limit,
+                        datetime.now(UTC),
+                    )
+                    news = [evidence_as_news_item(item) for item in news_evidence]
                     if news:
                         await bot.send_message(
                             chat_id=chat_id,
@@ -2580,9 +2628,27 @@ async def deliver_content_task(
             task.pro_cta_button_url,
             task.pro_object_button_label,
             task.pro_object_button_url,
+            task.article_button_label,
+            task.article_button_url,
         )
         async with Bot(settings.require_bot_token()) as bot:
-            if task.image_url:
+            if task.template_version in {"free-news/v1", "pro-news/v2"}:
+                if not task.news_evidence_id or not task.image_storage_uri or not task.image_sha256:
+                    raise ValueError("Новостная карточка не содержит immutable image evidence")
+                image_bytes = await load_news_asset(settings, task.image_storage_uri)
+                if hashlib.sha256(image_bytes).hexdigest() != task.image_sha256:
+                    raise ValueError("SHA-256 новостного изображения не совпадает с evidence")
+                suffix = ".webp" if task.image_content_type == "image/webp" else ".jpg"
+                sent = await bot.send_photo(
+                    chat_id=task.target_id,
+                    photo=InputFile(
+                        image_bytes, filename=f"news-{task.image_sha256}{suffix}"
+                    ),
+                    caption=task.text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
+                )
+            elif task.image_url:
                 sent = await bot.send_photo(
                     chat_id=task.target_id,
                     photo=task.image_url,

@@ -12,7 +12,7 @@ import pytest
 
 from src.auth import Principal
 from src.config import Settings
-from src.domain.models import NewsFeedConfiguration, OutboxState
+from src.domain.models import FreshnessStatus, NewsEvidence, NewsFeedConfiguration, OutboxState
 from src.news import NewsItem, parse_news_feed
 from src.pro_news import (
     PRO_NEWS_TEMPLATE_VERSION,
@@ -48,6 +48,38 @@ def news_item() -> NewsItem:
         url="https://news.example/dubai-cars",
         published_at=datetime(2026, 7, 28, 8, tzinfo=UTC),
         summary="The service is available to UAE vehicle buyers.",
+    )
+
+
+def news_evidence() -> NewsEvidence:
+    now = datetime(2026, 7, 28, 10, tzinfo=UTC)
+    return NewsEvidence.model_validate(
+        {
+            "evidence_id": "evidence-1",
+            "semantic_fingerprint": "semantic-1",
+            "feed_id": "example_news",
+            "feed_revision_id": "feed-revision-1",
+            "publisher_name": "Example Automotive",
+            "publisher_domains": ["news.example"],
+            "source_url": "https://news.example/dubai-cars",
+            "canonical_url": "https://news.example/dubai-cars",
+            "title": "Dubai used car market gains a new buyer service",
+            "summary": "The service is available to UAE vehicle buyers.",
+            "published_at": datetime(2026, 7, 28, 8, tzinfo=UTC),
+            "image_source_url": "https://news.example/image.jpg",
+            "image_final_url": "https://news.example/image.jpg",
+            "image_storage_uri": "file:///tmp/news.jpg",
+            "image_sha256": "a" * 64,
+            "image_content_type": "image/jpeg",
+            "image_size_bytes": 10_000,
+            "image_source_type": "page_metadata",
+            "source_item_sha256": "b" * 64,
+            "evidence_created_at": now,
+            "fetched_at": now,
+            "last_checked_at": now,
+            "valid_until": datetime(2026, 8, 28, 10, tzinfo=UTC),
+            "freshness_status": FreshnessStatus.ACTIVE,
+        }
     )
 
 
@@ -142,12 +174,13 @@ async def test_news_digest_is_idempotent_and_pending_is_requeued(
 
     repository = LocalRepository(tmp_path / "pro-news.db")
     settings = pro_news_settings(monkeypatch)
-    item = news_item()
+    evidence = news_evidence()
+    repository.save_news_evidence(evidence)
 
-    async def fake_collect(*_args: object, **_kwargs: object) -> list[NewsItem]:
-        return [item]
+    async def fake_ingest(*_args: object, **_kwargs: object) -> list[NewsEvidence]:
+        return [evidence]
 
-    monkeypatch.setattr(pro_news, "collect_news_items", fake_collect)
+    monkeypatch.setattr(pro_news.NewsIngestionService, "ingest", fake_ingest)
     dispatcher = FakeContentDispatcher()
 
     first = await reconcile_pro_news_publication(repository, settings, dispatcher)
@@ -161,7 +194,7 @@ async def test_news_digest_is_idempotent_and_pending_is_requeued(
     assert third.unpublished == 0 and third.sent == 1
     assert len(dispatcher.payloads) == 2
     assert record.template_version == PRO_NEWS_TEMPLATE_VERSION
-    assert dispatcher.payloads[0]["news_fingerprints"] == [item.fingerprint]
+    assert dispatcher.payloads[0]["news_fingerprints"] == [evidence.semantic_fingerprint]
 
 
 def test_digest_is_english_and_contains_only_sourced_links() -> None:
@@ -201,10 +234,10 @@ async def test_admin_validates_and_manages_news_feed(
         ),
     )
 
-    async def fake_latest(*_args: object, **_kwargs: object) -> list[NewsItem]:
-        return [news_item()]
+    async def fake_ingest(*_args: object, **_kwargs: object) -> list[NewsEvidence]:
+        return [news_evidence()]
 
-    monkeypatch.setattr(web.DubaiAutoNewsClient, "latest", fake_latest)
+    monkeypatch.setattr(web.NewsIngestionService, "ingest", fake_ingest)
     transport = httpx.ASGITransport(app=web.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         added = await client.post(

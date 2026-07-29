@@ -41,6 +41,8 @@ class NewsItem:
     url: str
     published_at: datetime
     summary: str = ""
+    image_url: str = ""
+    image_source_type: str = ""
 
     @property
     def fingerprint(self) -> str:
@@ -122,9 +124,10 @@ def parse_news_feed(
                 node.findtext("{*}published") or node.findtext("{*}updated") or ""
             ).strip()
             publisher = (
-                node.findtext("{*}source/{*}title")
+                publisher_hint
+                or node.findtext("{*}source/{*}title")
                 or node.findtext("{*}author/{*}name")
-                or publisher_hint
+                or ""
             ).strip()
             summary_raw = node.findtext("{*}summary") or node.findtext("{*}content") or ""
         else:
@@ -132,10 +135,11 @@ def parse_news_feed(
             published_raw = (node.findtext("pubDate") or "").strip()
             source = node.find("source")
             publisher = (
-                ((source.text if source is not None else "") or "").strip()
-                or publisher_hint
+                publisher_hint
+                or ((source.text if source is not None else "") or "").strip()
             )
             summary_raw = node.findtext("description") or ""
+        image_url, image_source_type = _feed_image(node, summary_raw)
         summary = _plain_text(summary_raw)
         normalized_content = f"{title} {summary}".casefold()
         has_location = "dubai" in normalized_content or "uae" in normalized_content
@@ -164,6 +168,8 @@ def parse_news_feed(
                 url=url,
                 published_at=published_at,
                 summary=summary[:2_000],
+                image_url=image_url,
+                image_source_type=image_source_type,
             )
         )
     items.sort(key=lambda item: item.published_at, reverse=True)
@@ -196,6 +202,23 @@ def _published_at(value: str) -> datetime | None:
 def _plain_text(value: str) -> str:
     text = BeautifulSoup(value, "html.parser").get_text(" ", strip=True)
     return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def _feed_image(node: ElementTree.Element, summary_raw: str) -> tuple[str, str]:
+    for child in node.iter():
+        local_name = child.tag.rsplit("}", maxsplit=1)[-1].casefold()
+        url = (child.get("url") or child.get("href") or "").strip()
+        media_type = (child.get("type") or "").casefold()
+        if local_name in {"content", "thumbnail"} and url:
+            return url, "rss_media"
+        if local_name == "enclosure" and url and media_type.startswith("image/"):
+            return url, "rss_enclosure"
+    image = BeautifulSoup(summary_raw, "html.parser").find("img")
+    if image is not None:
+        source = str(image.get("src") or "").strip()
+        if source:
+            return source, "rss_media"
+    return "", ""
 
 
 def canonical_news_url(value: str) -> str:

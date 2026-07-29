@@ -251,3 +251,29 @@ R8.1 реализован локально после явного утверж�
 Immutable R8.1 staging собран из финального commit `4e3f67e4d9f5b9a46ca224c045f0e596a5514201`: Cloud Build `63ce516a-2ba4-4af7-82bb-7df6b51f7a0e`, digest `sha256:928ddb983b793e9f77a5248dd5dec4cd2a542b55b08510523857b9bc62f18649`. Exact digest работает только в staging API revision `deal-sniper-api-staging-00041-vp6` и publisher generation `5`; база `deal-sniper-stage-rc2`, delivery off, очередь `telegram-delivery-staging` PAUSED и пуста. Два publisher execution успешно подтвердили requeue без дублей и отсутствие Cloud Tasks. Для закрытия R8.1-STAGE нужен отдельный настоящий Telegram test Pro channel; production R6 не изменён.
 
 Владелец явно потребовал отказаться от отдельного тестового канала и завершить bounded cutover в существующем production Pro-канале. Production preflight обнаружил ложную news-классификацию: подстрока `car` внутри `Pogacar` проходила automotive gate. Реализована проверка целых терминов и регрессионный тест; локальный gate — 114 passed, 2 skipped и все quality/security/IaC проверки успешны. Для production выбран проверенный прямой RSS `https://www.dubicars.com/news/feed`, возвращающий актуальные UAE automotive материалы. До нового CI и immutable build production остаётся на R6.
+## R8.1.2 — обнаруженное расхождение новостей 29 июля 2026
+
+Production evidence показал противоречие: `deal-sniper-publisher` в 13:16 GST создал одну
+news delivery, доставка в Pro прошла в 13:17, а следующий webhook чата вернул сообщение об
+отсутствии ленты. Pro-карточка имела прямой URL DubiCars, но publisher `Google News`.
+
+Причина подтверждена кодом и конфигурацией. `src/pro_news.py` читает Firestore registry и при
+его отсутствии создаёт environment fallback с `publisher="Google News"`; `src/web.py` содержит
+отдельный глобальный `DubaiAutoNewsClient`, который для каждого chat NEWS intent напрямую
+читает `AUTO_NEWS_RSS_URL`. Production registry пуст, URL равен
+`https://www.dubicars.com/news/feed`, а общий сохраняемый news evidence отсутствует.
+
+Создан план `docs/PLAN_R8_1_2_NEWS_CONSISTENCY.md`. До его утверждения нельзя менять код,
+Firestore, Telegram-публикации или production. Целевое исправление — единый registry-backed
+ingestion, immutable `news_evidence`, publisher/domain validation и чтение одного evidence
+Pro-каналом, личным ботом и связанным чатом. LLM не имеет права создавать или изменять факты.
+
+## R8.1.3 — отсутствие новых автомобильных публикаций 29 июля 2026
+
+Read-only production-аудит подтвердил, что Telegram delivery и exact Pro→Free linkage работоспособны, но конвейер почти не формирует новых кандидатов. Из 1 643 current decisions: `INSUFFICIENT_DATA=1578`, `REJECT=64`, `INSPECT=1`, `CONTACT=0`; market estimate существует у 65. Единственный допустимый candidate уже имеет terminal `sent`, поэтому повторная публикация корректно подавляется.
+
+Также обнаружены неправильная фактическая частота source schedulers (`0/10`, `2/10`, `4/10`, `6/10` дают часовой интервал), schema drift DubiCars по отсутствующему `offers`, detail verification `ReadTimeout` и шестичасовая задержка планового publisher. Создан черновик `docs/PLAN_R8_1_3_LISTING_PUBLICATION_RECOVERY.md`. Он сохраняет fail-closed и запрет вымышленных данных, исправляет сбор/verification, вводит версионируемые уровни доказуемых аналогов, event-driven exact Pro→Free delivery, bounded replay и Admin funnel. Код и production до утверждения плана не изменяются.
+
+Дополнительный read-only аудит новостных иллюстраций подтвердил отсутствующую функцию, а не Telegram-сбой. Новости направляются только в Pro как `pro-news/v1`; Free получает отдельный текстовый Market Pulse `content/v1`. Все 31 production `content/v1` и три `pro-news/v1` payload не имеют `image_url`; `NewsItem` также не хранит изображение. План R8.1.2 дополнен source-backed image evidence, проверкой publisher/CDN-домена и MIME, immutable asset в Cloud Storage, отдельными `free-news/v1`/`pro-news/v2`, запретом text fallback при ошибке изображения и Admin preview. Код и production не изменены.
+
+R8.1.2 явно утверждён владельцем и реализован локально. `NewsIngestionService` является единственным live-fetch путём и сохраняет проверенный `news_evidence` вместе с immutable Cloud Storage asset; Pro, Free, личный бот и чат читают это evidence. Publisher создаёт парные `pro-news/v2`/`free-news/v1` photo outbox с одинаковыми factual fields и image SHA-256. Реальный DubiCars smoke принял 5 из 5 материалов; парный delivery-off smoke создал четыре карточки для двух статей. Ruff, strict mypy, 130 passed/2 skipped и Terraform validate успешны. Production остаётся без изменений до CI, immutable staging и отдельного разрешения deploy.
