@@ -1,8 +1,12 @@
 # План реализации Dubai Deal Sniper
 
-> Дополнение R7 утверждено владельцем 28 июля 2026 года. Контракт полноценного Control Center и управляемой монетизации находится в `docs/ADMIN_CONTROL_CENTER_PLAN_R7.md`. R7 реализуется поверх production baseline R6 и не разрешает production deploy без отдельного подтверждения после staging.
+> Актуальный корректирующий выпуск описан в `docs/PLAN_R8_RECOVERY.md`. Он разделяет
+> восстановление Pro-публикаций R8.1 и Google-вход Admin Web R8.2. R7.1–R7.3 остаются
+> историей реализации и staging evidence, но не разрешают production deploy.
 
-Статус: кодовая часть RC подготовлена; production остаётся остановлен до прохождения immutable release, staging rehearsal, migration и cutover.
+Статус: production работает на baseline R6. План R8 утверждён владельцем 29 июля
+2026 года; R8.1 реализован и проверен локально, immutable build и staging ещё не
+выполнялись.
 
 ## Правила выполнения
 
@@ -11,6 +15,22 @@
 3. Ни один этап не разрешает delivery до финального cutover.
 4. Любое изменение после фиксации RC digest аннулирует rehearsal.
 5. WhatsApp не блокирует основной релиз, если единственная причина — отсутствующие внешние Meta credentials.
+6. Авторизация Admin Web не является зависимостью collectors, processing или Telegram publisher.
+7. Контентный и авторизационный релизы имеют отдельные staging evidence и production-разрешения.
+8. Фиктивный Telegram recipient не заменяет настоящий сквозной staging delivery smoke.
+
+## Актуальный порядок R8
+
+```text
+R8.1-DOC   согласование архитектуры и критериев
+R8.1-CODE  минимальный Pro Recovery без изменения Admin Auth
+R8.1-STAGE изолированный реальный Telegram smoke
+R8.1-PROD  отдельное разрешение и bounded cutover
+R8.1-PILOT подтверждение результата
+R8.2       отдельный выпуск Google Admin Auth
+```
+
+До завершения R8.1-PILOT настройка Google OAuth не блокирует восстановление Pro-канала.
 
 ## Матрица реализации
 
@@ -120,7 +140,10 @@ R6.7  deploy exact digest, Hosting release и live smoke
 
 До завершения R6.1–R6.5 запрещены Cloud Run, Jobs, API Gateway и Firebase Hosting deploy. До R6.6 запрещено включать новые Free-публикации шаблонов v2.
 
-## Рабочая браузерная Admin Panel
+## Целевой контракт R8.2: браузерная Admin Panel
+
+Этот раздел не является prerequisite выпуска R8.1. До отдельного утверждения и smoke
+R8.2 production сохраняет последний проверенный способ административного входа.
 
 1. `/admin.html` открывается в обычном desktop-браузере без Telegram-контекста.
 2. Firebase Google Sign-In использует отдельный OAuth client типа Web application; IAP OAuth client для этого запрещён.

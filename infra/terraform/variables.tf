@@ -3,6 +3,14 @@ variable "region" {
   type    = string
   default = "me-central1"
 }
+variable "deployment_environment" {
+  type    = string
+  default = "production"
+  validation {
+    condition     = contains(["staging", "production"], var.deployment_environment)
+    error_message = "deployment_environment должен быть staging или production"
+  }
+}
 variable "image" { type = string }
 variable "api_base_url" { type = string }
 variable "firestore_database" {

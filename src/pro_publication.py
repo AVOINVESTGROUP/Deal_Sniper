@@ -97,6 +97,7 @@ def current_pro_candidates(
         if item[1].financial_config_version == settings.financial_config_version
         and item[1].verification_version
         and item[1].market_fingerprint
+        and bool(item[0].image_urls)
         and is_publishable(item[1], settings)
     ]
     selected = select_publishable_decisions(eligible, settings, limit=len(eligible) or 1)

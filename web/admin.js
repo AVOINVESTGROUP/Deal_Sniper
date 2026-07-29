@@ -1,11 +1,12 @@
 import {initializeApp} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
-import {getAuth, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+import {getAuth, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, signOut} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
 
 const config = await (await fetch("/__/firebase/init.json")).json();
 const runtime = await (await fetch("/runtime-config.json", {cache: "no-store"})).json();
 const auth = getAuth(initializeApp(config));
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({prompt: "select_account"});
+const googleAuthEnabled = runtime.adminGoogleAuthEnabled === true;
 const api = window.DEAL_SNIPER_API ?? runtime.adminApiBase ?? runtime.apiBase ?? "";
 let token = "";
 let testedSourceKey = "";
@@ -329,11 +330,20 @@ byId("login").addEventListener("click", async () => {
   byId("error").hidden = true;
   byId("login").disabled = true;
   try {
+    await signInWithEmailAndPassword(auth, byId("login-email").value.trim(), byId("login-password").value);
+  } catch (error) { showError(error); }
+  finally { byId("login").disabled = false; }
+});
+byId("login-google").hidden = !googleAuthEnabled;
+byId("login-google").addEventListener("click", async () => {
+  byId("error").hidden = true;
+  byId("login-google").disabled = true;
+  try {
     await signInWithPopup(auth, googleProvider);
   } catch (error) {
     if (error?.code === "auth/popup-blocked") byId("login-redirect").hidden = false;
     showError(new Error(googleAuthMessage(error)));
-  } finally { byId("login").disabled = false; }
+  } finally { byId("login-google").disabled = false; }
 });
 byId("login-redirect").addEventListener("click", async () => {
   byId("error").hidden = true;
@@ -347,14 +357,14 @@ byId("add-news-feed").addEventListener("click", addNewsFeed);
 byId("preview-settings").addEventListener("click", previewSettings); byId("apply-settings").addEventListener("click", applySettings);
 byId("publish-pro").addEventListener("click", publishProNow);
 [byId("source-name"), byId("source-url")].forEach((input) => input.addEventListener("input", () => { testedSourceKey = ""; byId("add-source").disabled = true; }));
-getRedirectResult(auth).catch((error) => showError(new Error(googleAuthMessage(error))));
+if (googleAuthEnabled) getRedirectResult(auth).catch((error) => showError(new Error(googleAuthMessage(error))));
 onAuthStateChanged(auth, async (user) => {
   if (!user) {
-    token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
+    token = ""; byId("identity").textContent = "Not signed in"; byId("login").hidden = false; byId("login-email").hidden = false; byId("login-password").hidden = false; byId("login-google").hidden = !googleAuthEnabled; byId("logout").hidden = true; byId("refresh").disabled = true; byId("auth-notice").hidden = false;
     return;
   }
   try {
-    token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-redirect").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
+    token = await user.getIdToken(); byId("identity").textContent = user.email || "Administrator"; byId("login").hidden = true; byId("login-email").hidden = true; byId("login-password").hidden = true; byId("login-google").hidden = true; byId("login-redirect").hidden = true; byId("logout").hidden = false; byId("auth-notice").hidden = true; byId("refresh").disabled = false; await refresh();
   } catch (error) {
     token = ""; byId("refresh").disabled = true;
     showError(new Error("Firebase session could not be established. Reload the page and sign in again."));

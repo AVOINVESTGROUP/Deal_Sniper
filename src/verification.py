@@ -63,6 +63,12 @@ async def verify_listing_price(
             None,
             "Цена ниже минимального порога проверки",
         )
+    if not listing.make or not listing.model or listing.year is None:
+        return PriceVerification(
+            VerificationStatus.PERMANENT_INVALID,
+            None,
+            "Для проверки обязательны make, model и year",
+        )
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"

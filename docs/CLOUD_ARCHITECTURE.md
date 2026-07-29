@@ -26,7 +26,7 @@ Telegram webhook -> API Gateway -> Cloud Run API -> Firestore
                                       -> external automotive news RSS (read-only)
                                       -> Telegram Stars subscription / Pro channel membership
 Firebase Hosting TMA -> Telegram initData -> Firebase custom token -> Cloud Run API
-Firebase Hosting Admin -> Firebase Google Sign-In -> Firebase ID token
+Firebase Hosting Admin -> Firebase Auth provider -> Firebase ID token
                        -> API Gateway -> private Cloud Run API -> ADMIN_EMAILS
 Secret Manager -> runtime service accounts
 Cloud Logging/Monitoring/Billing -> alerts and budget
@@ -46,6 +46,17 @@ Cloud Logging/Monitoring/Billing -> alerts and budget
 - Cloud Storage: raw snapshots, Firestore exports и hosting assets.
 - Firebase Hosting/Auth: TMA и Admin Web.
 
+## Независимые контуры выпуска
+
+- Data Plane: collectors, verification, market и decision engines.
+- Product Delivery Plane: content publisher, transactional outbox, Cloud Tasks и Telegram.
+- Control Plane: Admin Web, Firebase Authentication, API Gateway и Admin API.
+
+Недоступность Control Plane не останавливает Data Plane или уже настроенный Product
+Delivery Plane. Google Sign-In и Pro publisher имеют разные release gates. Для каждого
+deployable component release manifest фиксирует commit, digest, schema и совместимые
+template versions.
+
 ## Данные
 
 Ключевые коллекции: `listings`, вложенные `snapshots`, `listing_current`, `verification_evidence`, `vehicle_identities`, `normalized_vehicles`, `decisions`, `current_decisions`, `delivery_outbox`, `telegram_updates`, `user_settings`, `saved_searches`, `user_actions`, `outcomes`, `publication_events`, `migration_ledger`, `migration_replay_requests`. R7 добавляет `runtime_configuration/active`, неизменяемые `runtime_configuration_revisions`, идемпотентные `admin_operations` и административный audit trail. Telegram Sources добавляет `telegram_sources`, `telegram_source_candidates`, `telegram_messages`, `telegram_source_reports` и отдельные cursor/lease records.
@@ -60,7 +71,12 @@ Pro entitlement определяется нативным членством п�
 
 ## Безопасный релиз
 
-Production scheduler/queues/delivery остаются остановленными во время сборки, staging и миграции. Staging восстанавливается из production export в отдельную named Firestore database. Runtime и migration образы фиксируются digest, а не tag. Любое изменение build context после rehearsal создаёт новый RC и требует повторного rehearsal.
+Production scheduler/queues/delivery остаются неизменными во время сборки и staging. При production migration останавливаются только затрагиваемые компоненты. Staging восстанавливается из production export в отдельную named Firestore database и использует отдельные publisher Job, Telegram recipient и delivery queue. Runtime и migration образы фиксируются digest, а не tag. Любое изменение build context после rehearsal создаёт новый RC и требует повторного rehearsal.
+
+`DELIVERY_ENABLED=false` запрещает создание Cloud Task, но не запрещает идемпотентно
+сохранить `pending` outbox. Включённый publisher может переочередить этот record только в
+очередь своего окружения. Совпадение staging recipient/queue/database с production
+считается ошибкой конфигурации и блокирует запуск.
 
 Production migration использует тот же migration digest. Catch-up выполняется с `DELIVERY_ENABLED=false` через direct replay, поэтому production delivery queue не включается. Только после merge RC в `main`, deploy того же runtime digest и проверки `/version` разрешён staged resume.
 

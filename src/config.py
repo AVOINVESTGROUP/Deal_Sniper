@@ -74,6 +74,8 @@ class Settings:
     telegram_pro_channel_id: str | None
     telegram_pro_subscription_url: str
     telegram_webhook_secret: str
+    production_telegram_channel_ids: frozenset[str]
+    deployment_environment: str
     google_cloud_project: str
     google_cloud_region: str
     firestore_database: str
@@ -143,6 +145,33 @@ class Settings:
     financial_config_version: str
     aed_to_usd_rate: Decimal
 
+    def __post_init__(self) -> None:
+        """Блокирует смешение staging и production при включённой доставке."""
+        allowed = {"local", "staging", "production"}
+        if self.deployment_environment not in allowed:
+            raise ValueError("DEPLOYMENT_ENVIRONMENT должен быть local, staging или production")
+        if not self.delivery_enabled or self.deployment_environment == "local":
+            return
+        if self.deployment_environment == "staging":
+            if self.firestore_database == "(default)":
+                raise ValueError("Staging delivery запрещена для production Firestore database")
+            if not self.telegram_delivery_queue.endswith("-staging"):
+                raise ValueError("Staging delivery требует отдельную очередь с суффиксом -staging")
+            if not self.publisher_job_name.endswith("-staging"):
+                raise ValueError("Staging delivery требует отдельный publisher Job")
+            if not self.production_telegram_channel_ids:
+                raise ValueError("Staging delivery требует список production Telegram recipients")
+            staging_recipients = {
+                item
+                for item in (self.telegram_channel_id, self.telegram_pro_channel_id)
+                if item
+            }
+            collisions = staging_recipients & self.production_telegram_channel_ids
+            if collisions:
+                raise ValueError("Staging delivery не может использовать production recipient")
+        elif self.telegram_delivery_queue.endswith("-staging"):
+            raise ValueError("Production delivery не может использовать staging queue")
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Создаёт конфигурацию без неявных секретов и mock-режима."""
@@ -154,6 +183,10 @@ class Settings:
             telegram_pro_channel_id=os.getenv("TELEGRAM_PRO_CHANNEL_ID") or None,
             telegram_pro_subscription_url=os.getenv("TELEGRAM_PRO_SUBSCRIPTION_URL", "").strip(),
             telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip(),
+            production_telegram_channel_ids=_string_set(
+                os.getenv("PRODUCTION_TELEGRAM_CHANNEL_IDS", "")
+            ),
+            deployment_environment=os.getenv("DEPLOYMENT_ENVIRONMENT", "local").strip().lower(),
             google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
             google_cloud_region=os.getenv("GOOGLE_CLOUD_REGION", "me-central1").strip(),
             firestore_database=os.getenv("FIRESTORE_DATABASE", "(default)").strip(),
@@ -182,7 +215,7 @@ class Settings:
             pro_price_stars=max(1, int(os.getenv("PRO_PRICE_STARS", "1500"))),
             auto_news_rss_url=os.getenv(
                 "AUTO_NEWS_RSS_URL",
-                "https://news.google.com/rss/search?q=%28Dubai%20OR%20UAE%29%20%28used%20cars%20OR%20automotive%20market%29&hl=en-AE&gl=AE&ceid=AE%3Aen",
+                "",
             ).strip(),
             auto_news_max_age_days=max(1, int(os.getenv("AUTO_NEWS_MAX_AGE_DAYS", "45"))),
             auto_news_limit=max(1, min(5, int(os.getenv("AUTO_NEWS_LIMIT", "3")))),

@@ -52,6 +52,7 @@ def seed_candidate(
     *,
     source_listing_id: str,
     action: DecisionAction = DecisionAction.INSPECT,
+    with_image: bool = True,
 ) -> None:
     now = datetime.now(UTC)
     listing = ListingSnapshot(
@@ -66,7 +67,7 @@ def seed_candidate(
         price_aed=Decimal("70000"),
         observed_at=now,
         fetched_at=now,
-        image_urls=[f"https://example.test/{source_listing_id}.jpg"],
+        image_urls=[f"https://example.test/{source_listing_id}.jpg"] if with_image else [],
     )
     _new, _changed, content_hash = repository.save_snapshot(listing)
     repository.save_decision(
@@ -126,6 +127,23 @@ async def test_reconciliation_creates_once_requeues_pending_and_skips_sent(
     assert len(repository.list_outbox(limit=10)) == 1
     assert len(dispatcher.payloads) == 2
     assert dispatcher.payloads[0]["image_url"].endswith("one.jpg")
+
+
+@pytest.mark.asyncio
+async def test_candidate_without_photo_is_not_published(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = LocalRepository(tmp_path / "no-photo.db")
+    settings = runtime_settings(monkeypatch)
+    seed_candidate(repository, source_listing_id="no-photo", with_image=False)
+    dispatcher = FakeDispatcher()
+
+    summary = await reconcile_pro_publications(repository, settings, dispatcher)
+
+    assert summary.publishable == 0
+    assert summary.created == 0
+    assert dispatcher.payloads == []
 
 
 @pytest.mark.asyncio

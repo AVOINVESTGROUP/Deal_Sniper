@@ -127,6 +127,20 @@ resource "google_cloud_tasks_queue" "delivery" {
   }
 }
 
+resource "google_cloud_tasks_queue" "delivery_staging" {
+  name     = "telegram-delivery-staging"
+  location = var.region
+  rate_limits {
+    max_concurrent_dispatches = 1
+    max_dispatches_per_second = 1
+  }
+  retry_config {
+    max_attempts = 3
+    min_backoff  = "10s"
+    max_backoff  = "300s"
+  }
+}
+
 resource "google_cloud_run_v2_service" "api" {
   name     = "deal-sniper-api"
   location = var.region
@@ -143,6 +157,7 @@ resource "google_cloud_run_v2_service" "api" {
         for_each = {
           GOOGLE_CLOUD_PROJECT         = var.project_id
           GOOGLE_CLOUD_REGION          = var.region
+          DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
           FIRESTORE_DATABASE           = var.firestore_database
           STORAGE_BACKEND              = "firestore"
           RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
@@ -224,6 +239,7 @@ resource "google_cloud_run_v2_job" "collector" {
           for_each = merge({
             GOOGLE_CLOUD_PROJECT         = var.project_id
             GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
             RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
@@ -301,6 +317,7 @@ resource "google_cloud_run_v2_job" "replay" {
         dynamic "env" {
           for_each = {
             GOOGLE_CLOUD_PROJECT         = var.project_id
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
             DELIVERY_ENABLED             = "false"
@@ -345,6 +362,7 @@ resource "google_cloud_run_v2_job" "content" {
           for_each = {
             GOOGLE_CLOUD_PROJECT         = var.project_id
             GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
             CLOUD_RUN_API_URL            = var.api_base_url

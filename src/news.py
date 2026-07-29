@@ -18,6 +18,14 @@ from src.domain.ids import canonical_hash
 
 logger = logging.getLogger(__name__)
 
+NEWS_AGGREGATOR_HOSTS = frozenset(
+    {
+        "news.google.com",
+        "www.google.com",
+        "news.yahoo.com",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class NewsItem:
@@ -53,7 +61,7 @@ class DubaiAutoNewsClient:
         limit: int,
         publisher_hint: str = "",
     ) -> None:
-        if urlparse(feed_url).scheme != "https":
+        if feed_url and urlparse(feed_url).scheme != "https":
             raise ValueError("AUTO_NEWS_RSS_URL должен использовать HTTPS")
         self.feed_url = feed_url
         self.timeout_seconds = timeout_seconds
@@ -63,6 +71,8 @@ class DubaiAutoNewsClient:
 
     async def latest(self, now: datetime | None = None) -> list[NewsItem]:
         """Возвращает свежие уникальные материалы либо пустой список при ошибке."""
+        if not self.feed_url:
+            return []
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout_seconds,
@@ -142,7 +152,7 @@ def parse_news_feed(
             or not publisher
             or not has_location
             or not has_automotive_topic
-            or urlparse(url).scheme != "https"
+            or not is_direct_publisher_url(url)
         ):
             continue
         published_at = _published_at(published_raw)
@@ -165,6 +175,16 @@ def parse_news_feed(
         )
     items.sort(key=lambda item: item.published_at, reverse=True)
     return items[: max(1, min(limit, 5))]
+
+
+def is_direct_publisher_url(url: str) -> bool:
+    """Разрешает HTTPS-ссылку издателя и отбрасывает известные агрегаторы."""
+    parsed = urlparse(url)
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and parsed.hostname.casefold() not in NEWS_AGGREGATOR_HOSTS
+    )
 
 
 def _published_at(value: str) -> datetime | None:

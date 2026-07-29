@@ -66,6 +66,8 @@ class CloudTaskDispatcher:
         await asyncio.gather(*(enqueue(item) for item in pending))
 
     async def enqueue_delivery(self, payload: dict[str, Any]) -> None:
+        if not self.settings.delivery_enabled:
+            return
         identity = str(
             payload.get("_task_identity")
             or delivery_id(
@@ -83,6 +85,8 @@ class CloudTaskDispatcher:
         )
 
     async def enqueue_content_delivery(self, payload: dict[str, Any]) -> None:
+        if not self.settings.delivery_enabled:
+            return
         identity = str(
             payload.get("_task_identity")
             or delivery_id(
@@ -100,6 +104,8 @@ class CloudTaskDispatcher:
         )
 
     async def enqueue_whatsapp_delivery(self, payload: dict[str, Any]) -> None:
+        if not self.settings.delivery_enabled or not self.settings.whatsapp_enabled:
+            return
         identity = str(
             payload.get("_task_identity")
             or delivery_id(

@@ -1,5 +1,27 @@
 # AI Context: Dubai Deal Sniper
 
+29 июля 2026 владелец явно утвердил R8. Реализован локальный R8.1-CODE без изменения
+production: Admin Web снова сохраняет проверенный email/password-вход, а Google UI
+выключен runtime-флагом до R8.2; `DELIVERY_ENABLED=false` теперь запрещает создание
+Telegram/WhatsApp Cloud Tasks; staging delivery требует отдельные database, queue,
+publisher Job и список production recipients для проверки коллизий. Terraform описывает
+`telegram-delivery-staging`. Pro-кандидат без фотографии не публикуется, verification
+требует make/model/year, а новостные ссылки известных агрегаторов отклоняются; пустая
+прямая RSS-лента безопасно отключает новости. Gate: Ruff, strict mypy, 114 pytest
+(112 passed, 2 skipped), coverage 59%, pip-audit без известных уязвимостей, JavaScript
+module syntax и Terraform validate успешны. Production/Firebase не изменялись; следующий
+этап — commit, immutable build и настоящий Telegram staging smoke.
+
+29 июля 2026 после сквозного аудита документов, кода и release evidence подготовлен
+корректирующий `docs/PLAN_R8_RECOVERY.md`. Обнаружено, что production остаётся на R6,
+тогда как Pro reconciliation/news находятся только в R7.3 staging; их выпуск ошибочно
+заблокирован незавершённым Google Sign-In. SPEC одновременно требовал password-вход, а
+README и Admin Web — Google-only. Дополнительно staging проверял фиктивный recipient при
+delivery off, а `DELIVERY_ENABLED=false` не предотвращал создание Cloud Task. R8 разделяет
+R8.1 Pro Recovery и R8.2 Admin Google Auth, требует отдельных очередей окружений и
+настоящего Telegram staging smoke. Этот абзац фиксирует состояние до последующего
+утверждения и локальной реализации R8.1.
+
 28 июля 2026 финальный staging RC R7 — `80872e0e70f292189864e829824f07dcf3e6591f`, GitHub Actions `30342104177`, Cloud Build `6d7de8fd-8088-4b87-a74e-26afe9a1e7fd`, immutable digest `sha256:c45e544ce9cc128353a9c8f1f96443809aded61f31c06ebde42d0b77ca2f6e2a`, Cloud Run staging revision `deal-sniper-api-staging-00033-v7k`, Gateway config `r7-02fcb6f`. Firestore integration, authenticated API/Chrome и настоящий Hosting Preview UI прошли при `DELIVERY_ENABLED=false`; все десять Admin-разделов загрузились, preview CORS возвращает 200, временные Firebase users удалены и allowlist восстановлен. Остались мутационный Stars/rollback smoke, подтверждение единой active revision в bot/TMA/Admin/CTA и устранение найденного пробела Pro reconciliation. Production не менялся и остаётся на R6 `851ddaf` / `sha256:c2e55a…a9112`; отдельного разрешения на production deploy R7 нет.
 
 28 июля 2026 владелец отменил требование отдельного тестового Pro-канала: платных пользователей пока нет, цена должна управляться в Admin, а Telegram Stars link автоматически перевыпускается backend. Read-only аудит production подтвердил критический пробел: 3 current `INSPECT`, только 5 исторических `pro/v1`, а периодический content publisher не выполняет reconciliation Pro — публикация создаётся лишь при первичной обработке новой версии. Подготовлен неутверждённый `docs/PLAN_R7_1_PRO_PUBLICATION.md`: идемпотентный Pro reconciler, Admin preview/Publish now и controlled smoke текущего Pro-канала. До утверждения R7.1 код и production не менять.

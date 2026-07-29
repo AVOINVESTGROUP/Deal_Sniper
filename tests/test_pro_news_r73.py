@@ -73,6 +73,26 @@ def test_atom_feed_is_parsed_with_publisher_hint() -> None:
     assert items[0].url == "https://news.example/atom-item"
 
 
+def test_aggregator_article_url_is_rejected() -> None:
+    payload = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <rss><channel><item>
+      <title>Dubai automotive market launches buyer service</title>
+      <link>https://news.google.com/articles/example</link>
+      <pubDate>Tue, 28 Jul 2026 08:00:00 +0000</pubDate>
+      <source>Example Publisher</source>
+      <description>New UAE car buyers can use the service.</description>
+    </item></channel></rss>"""
+
+    items = parse_news_feed(
+        payload,
+        now=datetime(2026, 7, 28, 10, tzinfo=UTC),
+        max_age_days=7,
+        limit=3,
+    )
+
+    assert items == []
+
+
 def test_news_feed_registry_can_be_managed(tmp_path: Path) -> None:
     repository = LocalRepository(tmp_path / "news-registry.db")
     feed = NewsFeedConfiguration.model_validate(

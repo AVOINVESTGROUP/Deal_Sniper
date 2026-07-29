@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from src.domain.models import (
     ListingSnapshot,
     OutboxRecord,
@@ -12,7 +14,12 @@ from src.domain.models import (
     VerificationStatus,
 )
 from src.storage import LocalRepository, snapshot_hash
-from src.verification import PriceVerification, build_evidence, extract_detail_prices
+from src.verification import (
+    PriceVerification,
+    build_evidence,
+    extract_detail_prices,
+    verify_listing_price,
+)
 
 
 def listing() -> ListingSnapshot:
@@ -66,6 +73,16 @@ def test_source_bound_extractor_rejects_unrelated_offer() -> None:
     """
 
     assert extract_detail_prices(html, listing()) == [Decimal("85000")]
+
+
+@pytest.mark.asyncio
+async def test_verification_requires_vehicle_identity() -> None:
+    incomplete = listing().model_copy(update={"model": None})
+
+    result = await verify_listing_price(incomplete)
+
+    assert result.status is VerificationStatus.PERMANENT_INVALID
+    assert "make, model и year" in result.reason
 
 
 def test_outbox_sent_is_not_claimed_twice(tmp_path: Path) -> None:

@@ -30,9 +30,9 @@
     <main class="admin-main">
       <header class="admin-header">
         <div><p class="eyebrow">OPERATIONS</p><h1 id="page-title">Dashboard</h1></div>
-        <div class="toolbar"><span id="updated" class="muted"></span><button id="refresh" class="secondary" disabled>Refresh</button><button id="login">Continue with Google</button><button id="login-redirect" class="secondary" hidden>Continue in this window</button></div>
+        <div class="toolbar"><span id="updated" class="muted"></span><button id="refresh" class="secondary" disabled>Refresh</button><input id="login-email" type="email" autocomplete="username" placeholder="Administrator email"><input id="login-password" type="password" autocomplete="current-password" placeholder="Password"><button id="login">Sign in</button><button id="login-google" hidden>Continue with Google</button><button id="login-redirect" class="secondary" hidden>Continue in this window</button></div>
       </header>
-      <div id="auth-notice" class="notice"><strong>Administrator access required</strong><span>Continue with an approved Google account. No separate password is required.</span></div>
+      <div id="auth-notice" class="notice"><strong>Administrator access required</strong><span>Use the existing approved Firebase account. Google Sign-In will be enabled separately after R8.2 verification.</span></div>
       <p id="error" class="notice notice-error" hidden></p>
       <section class="admin-view active" data-panel="dashboard">
         <div id="overview" class="metric-grid"></div>

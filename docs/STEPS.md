@@ -334,3 +334,24 @@
 - Firebase re-auth выполнен. Hosting Preview version `ec7232df3745213e` опубликована по `https://avo-deal-sniper--r73-c6c2836-j51jtx2p.web.app` и направлена только на staging Gateway; static assets, CSP, runtime config и exact-origin CORS успешны.
 - Staging API revision `deal-sniper-api-staging-00040-xf9` работает на прежнем immutable digest. Промежуточная `00039-fdm` была отклонена fail-fast проверкой неверного CORS-формата и не получила трафик.
 - Authenticated UI smoke обнаружил незакрытый облачный шаг R7.2: Firebase Google provider всё ещё связан с IAP-only OAuth client, поэтому Identity Platform возвращает `INVALID_IDP_RESPONSE` по audience. Требуется отдельный Web OAuth client и переключение provider; production R6 не изменён.
+
+## 29 июля 2026 — корректирующий план R8
+
+- По запросу владельца выполнен повторный read-only аудит SPEC, архитектуры, R7.1–R7.3 plans/evidence и связанных участков Admin Auth, content publisher, outbox, Cloud Tasks и Terraform.
+- Подтверждено: production остаётся на R6, Pro reconciliation/news находятся только в staging, а их выпуск ошибочно зависит от незавершённого Google Sign-In.
+- Обнаружено противоречие canonical документов по способу входа и отсутствие настоящего Telegram staging send; `DELIVERY_ENABLED=false` также не гарантирует отсутствие созданной Cloud Task.
+- Создан `docs/PLAN_R8_RECOVERY.md`: R8.1 независимо восстанавливает Pro-контент, R8.2 отдельно выпускает Google Admin Auth. Добавлены environment-isolated queues/recipients, detail-page quality gate, настоящий Telegram smoke, component manifest и bounded production cutover.
+- `SPEC.md`, `IMPLEMENTATION_PLAN.md`, `CLOUD_ARCHITECTURE.md`, `README.md` и `AI_CONTEXT.md` синхронизированы с планом.
+- Код, Firebase и production не изменялись. Следующий шаг — проверка и явное утверждение владельцем плана R8.
+
+## 29 июля 2026 — локальная реализация R8.1
+
+- Владелец явно утвердил `docs/PLAN_R8_RECOVERY.md`; разрешены R8.1 code/staging, но production deploy требует отдельной команды.
+- В Admin Web восстановлен проверенный Firebase email/password-вход. Google popup/redirect остаются в коде, но выключены `adminGoogleAuthEnabled=false` до отдельного R8.2 и не блокируют Pro publisher.
+- `CloudTaskDispatcher` при `DELIVERY_ENABLED=false` больше не создаёт Telegram/content/WhatsApp Cloud Tasks; pending outbox остаётся доступным для последующей идемпотентной постановки.
+- Добавлен `DEPLOYMENT_ENVIRONMENT` и fail-fast защита: staging delivery требует отдельные Firestore database, queue с суффиксом `-staging`, publisher Job и явный список production Telegram recipients; совпадение recipient запрещает запуск.
+- Terraform добавляет отдельную `telegram-delivery-staging`; component compatibility зафиксирована в `docs/R8_1_RELEASE_MANIFEST.json`.
+- Pro reconciliation исключает кандидатов без фотографии. Source-bound verification до HTTP-запроса отклоняет запись без make/model/year; действующий minimum price, detail-page price gap и `valid_until` сохранены.
+- Новостной контур принимает только прямые HTTPS-ссылки издателей и отклоняет известные агрегаторы. Environment fallback RSS теперь пуст и fail-closed: без настроенной прямой ленты API работает, но новости не выдумываются.
+- Gate успешен: Ruff, strict mypy, 114 pytest (112 passed, 2 skipped), coverage 59%, pip-audit без известных уязвимостей, JavaScript ES module syntax, Terraform fmt/validate и `git diff --check`.
+- Production R6, Firebase provider, Cloud Run, Jobs, Scheduler, queues, Hosting и Telegram-каналы не изменялись. Следующий этап — commit/CI, immutable build и отдельный настоящий staging Telegram-канал.

@@ -1,0 +1,17 @@
+{
+  "release": "R8.1",
+  "status": "local-tested-candidate",
+  "source_commit": "resolved-from-GIT_COMMIT-at-build",
+  "components": {
+    "api": {"digest": "pending"},
+    "publisher": {"digest": "pending"},
+    "admin_web": {"version": "pending", "google_auth_enabled": false}
+  },
+  "compatibility": {
+    "schema_version": "2",
+    "delivery_templates": ["pro/v1", "pro-news/v1", "market-watch/v2"],
+    "admin_auth": "firebase-email-password-preserved",
+    "staging_delivery_queue": "telegram-delivery-staging",
+    "production_delivery_queue": "telegram-delivery"
+  }
+}
