@@ -1,5 +1,9 @@
 # AI Context: Dubai Deal Sniper
 
+## Блокирующий дефект R8.1.1 (29 июля 2026)
+
+После production-выпуска выявлено, что объектные Free deliveries создаются независимо от фактического `sent` точной Pro revision. Это нарушает продуктовый контракт и может обещать пользователю объект, отсутствующий в Pro. Создан план `docs/PLAN_R8_1_1_FREE_PRO_INTEGRITY.md`; до его утверждения код не меняется. Целевой инвариант: Free допустим только при `sent` Pro outbox с теми же `decision_id + listing_id + content_hash` и сохранённым `telegram_message_id`. Любые mock, synthetic или LLM-invented факты в production запрещены.
+
 ## Текущее production-состояние R8.1 (29 июля 2026)
 
 R8.1 активен в production. Канонический runtime source commit — `aa261129415065b63d4be85f098cd0e255966ab1`, immutable digest API/publisher — `sha256:0efbc0699d8a79f9c8e4802a15f274debb1b25843d5c19cdc3b47d910c73fd0b`. API работает на revision `deal-sniper-api-00061-tlq`, publisher — generation `41`.

@@ -1,5 +1,12 @@
 # Журнал реализации
 
+## 29 июля 2026 — обнаружен блокирующий дефект Free → Pro
+
+- Подтверждено архитектурное нарушение: `process-listing` и плановый Market Watch создают Free независимо от подтверждённой доставки точной Pro revision; Cloud Tasks не гарантирует порядок.
+- Полное чтение production Firestore остановлено по таймауту без мутаций. Причина доказана статическим сквозным анализом обоих production-путей.
+- Создан `docs/PLAN_R8_1_1_FREE_PRO_INTEGRITY.md`: Free разрешается только после Pro `sent` с теми же `decision_id`, `listing_id` и `content_hash`; любые вымышленные факты и mock-данные в production запрещены.
+- Код и production до утверждения плана R8.1.1 не изменялись.
+
 ## 29 июля 2026 — R8.1 активирован в production
 
 - Финальный source commit `aa261129415065b63d4be85f098cd0e255966ab1` прошёл GitHub Actions push `30431337917` и PR `30431341429`.
