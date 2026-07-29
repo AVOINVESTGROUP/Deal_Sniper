@@ -364,3 +364,11 @@
 - Production R6 не изменён. Исправление должно пройти повторный GitHub Actions gate на Python 3.11 до immutable staging build.
 - Коммит исправления `8eeb13326233a1b3ff6006914922385ecc3b1a05` прошёл оба GitHub Actions gate: push `30429176591` и PR `30429177595`; quality на Python 3.11, container/Trivy и Terraform успешны.
 - R8.1 готов к immutable staging build. До отдельного Telegram staging smoke и явной команды владельца production deploy запрещён.
+
+## 29 июля 2026 — immutable staging R8.1
+
+- Финальный source commit `4e3f67e4d9f5b9a46ca224c045f0e596a5514201` прошёл CI push `30429306501` и PR `30429308524`.
+- Cloud Build `63ce516a-2ba4-4af7-82bb-7df6b51f7a0e` из точного git archive собрал digest `sha256:928ddb983b793e9f77a5248dd5dec4cd2a542b55b08510523857b9bc62f18649`.
+- Digest развёрнут только в staging API revision `deal-sniper-api-staging-00041-vp6` и publisher generation `5`; `/health` и `/version` успешны.
+- Два delivery-off запуска publisher (`…k85vj`, `…fcxbg`) завершились успешно, переочередили один и тот же pending news outbox без дубля и создали ноль Cloud Tasks. Staging-очередь остаётся `PAUSED` и пустой.
+- Реальный Telegram smoke ещё не выполнен: требуется отдельный тестовый канал с ботом-администратором. Production R6 не изменён.

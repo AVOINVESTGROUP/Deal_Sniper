@@ -1,10 +1,16 @@
 {
   "release": "R8.1",
   "status": "ci-passed-awaiting-immutable-staging",
-  "source_commit": "resolved-from-GIT_COMMIT-at-build",
+  "source_commit": "4e3f67e4d9f5b9a46ca224c045f0e596a5514201",
   "components": {
-    "api": {"digest": "pending"},
-    "publisher": {"digest": "pending"},
+    "api": {
+      "digest": "sha256:928ddb983b793e9f77a5248dd5dec4cd2a542b55b08510523857b9bc62f18649",
+      "staging_revision": "deal-sniper-api-staging-00041-vp6"
+    },
+    "publisher": {
+      "digest": "sha256:928ddb983b793e9f77a5248dd5dec4cd2a542b55b08510523857b9bc62f18649",
+      "staging_generation": "5"
+    },
     "admin_web": {"version": "pending", "google_auth_enabled": false}
   },
   "compatibility": {
@@ -20,5 +26,16 @@
     "pull_request_workflow_run": "30429177595",
     "python": "3.11",
     "result": "passed"
+  },
+  "staging": {
+    "build_id": "63ce516a-2ba4-4af7-82bb-7df6b51f7a0e",
+    "database": "deal-sniper-stage-rc2",
+    "delivery_queue": "telegram-delivery-staging",
+    "delivery_state": "disabled-paused-empty",
+    "publisher_executions": [
+      "deal-sniper-publisher-staging-k85vj",
+      "deal-sniper-publisher-staging-fcxbg"
+    ],
+    "real_telegram_smoke": "pending-separate-test-channel"
   }
 }
