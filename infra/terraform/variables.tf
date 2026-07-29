@@ -79,6 +79,7 @@ variable "monthly_budget_aed" {
 
 locals {
   runtime_sa   = "deal-sniper-runtime"
+  publisher_sa = "deal-sniper-publisher"
   collector_sa = "deal-sniper-collector"
   migration_sa = "deal-sniper-migration"
   scheduler_sa = "deal-sniper-scheduler"

@@ -497,6 +497,12 @@ resource "google_storage_bucket_iam_member" "runtime_news_assets" {
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
 
+resource "google_storage_bucket_iam_member" "publisher_news_assets" {
+  bucket = google_storage_bucket.raw.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${local.publisher_sa}@${var.project_id}.iam.gserviceaccount.com"
+}
+
 resource "google_storage_bucket_iam_member" "migration_export_reader" {
   bucket = google_storage_bucket.firestore_exports.name
   role   = "roles/storage.objectViewer"
