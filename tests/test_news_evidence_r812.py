@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from src.config import Settings
@@ -112,6 +113,16 @@ async def test_ingestion_persists_immutable_asset_and_evidence(
     health = repository.source_health()
     assert health["news:example_news"]["accepted"] == 1
     assert health["news:second_news"]["accepted"] == 1
+
+    async def transient_failure(*_args: object, **_kwargs: object) -> list[NewsItem]:
+        raise httpx.ReadTimeout("temporary feed failure")
+
+    monkeypatch.setattr(
+        news_evidence.DubaiAutoNewsClient, "latest", transient_failure
+    )
+    assert await service.ingest([feed], now=datetime(2026, 7, 29, 12, tzinfo=UTC)) == []
+    assert repository.active_news_evidence()[0].evidence_id == first[0].evidence_id
+    assert "ReadTimeout" in repository.source_health()["news:example_news"]["error"]
 
 
 @pytest.mark.asyncio
