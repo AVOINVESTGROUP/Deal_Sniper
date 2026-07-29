@@ -97,8 +97,11 @@ async def test_ingestion_persists_immutable_asset_and_evidence(
         publisher_domains=["news.example"],
         image_domains=["cdn.news.example"],
     )
+    second_feed = feed.model_copy(update={"name": "second_news"})
     service = NewsIngestionService(repository, settings)
-    first = await service.ingest([feed], now=datetime(2026, 7, 29, 10, tzinfo=UTC))
+    first = await service.ingest(
+        [feed, second_feed], now=datetime(2026, 7, 29, 10, tzinfo=UTC)
+    )
     second = await service.ingest([feed], now=datetime(2026, 7, 29, 11, tzinfo=UTC))
 
     assert first[0].evidence_id == second[0].evidence_id
@@ -106,6 +109,9 @@ async def test_ingestion_persists_immutable_asset_and_evidence(
     assert first[0].image_sha256 == second[0].image_sha256
     assert await load_news_asset(settings, first[0].image_storage_uri) == image
     assert repository.active_news_evidence()[0].publisher_name == "Example Automotive"
+    health = repository.source_health()
+    assert health["news:example_news"]["accepted"] == 1
+    assert health["news:second_news"]["accepted"] == 1
 
 
 @pytest.mark.asyncio

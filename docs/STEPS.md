@@ -447,6 +447,7 @@
 
 - Владелец явно утвердил R8.1.2; production deploy этим утверждением не разрешён.
 - Предварительный cloud preflight выявил несовпадение IAM: фактический `deal-sniper-publisher` сохраняет news assets, а Terraform выдавал `storage.objectUser` только runtime SA. Контракт исправлен отдельным bucket-level binding для publisher; первый digest `sha256:0e27a52f…f977` аннулирован до повторного CI/build/staging.
+- Первый delivery-off staging rehearsal сохранил 5 реальных DubiCars evidence и выявил, что per-feed `accepted` в source health накапливался между лентами. Метрика исправлена и покрыта двухлентовым regression test; digest `sha256:f51b0a16…4435` аннулирован до нового commit/build/rehearsal.
 - Добавлены `NewsEvidence`, SQLite/Firestore repository и единый `NewsIngestionService`; чат больше не выполняет отдельный live-fetch.
 - Publisher проверяет final article domain, source-backed RSS/`og:image`, image CDN, HTTPS, MIME, размер и сигнатуру; immutable asset хранится как `news-assets/{sha256}`.
 - Одна evidence revision создаёт отдельные идемпотентные `free-news/v1` и `pro-news/v2` карточки с одинаковыми evidence ID и image SHA-256. Канальная доставка разрешает только `sendPhoto`; text fallback запрещён.

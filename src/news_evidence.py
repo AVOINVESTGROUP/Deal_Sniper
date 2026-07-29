@@ -41,6 +41,7 @@ class NewsIngestionService:
         current = (now or datetime.now(UTC)).astimezone(UTC)
         accepted: list[NewsEvidence] = []
         for feed in feeds:
+            feed_accepted = 0
             try:
                 items = await DubaiAutoNewsClient(
                     str(feed.url),
@@ -61,10 +62,11 @@ class NewsIngestionService:
                         continue
                     await asyncio.to_thread(self.repository.save_news_evidence, evidence)
                     accepted.append(evidence)
+                    feed_accepted += 1
                 await asyncio.to_thread(
                     self.repository.record_source_run,
                     f"news:{feed.name}",
-                    {"accepted": len(accepted), "fetched": len(items), "error": ""},
+                    {"accepted": feed_accepted, "fetched": len(items), "error": ""},
                 )
             except (httpx.HTTPError, ValueError) as error:
                 await asyncio.to_thread(
