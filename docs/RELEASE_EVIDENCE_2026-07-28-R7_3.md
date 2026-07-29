@@ -1,6 +1,6 @@
 # Release evidence R7.3 — staging-кандидат
 
-Статус: **локальный gate, GitHub CI, immutable build, Gateway и publisher staging smoke пройдены. UI smoke ожидает повторной авторизации Firebase CLI. Production не изменён**.
+Статус: **локальный gate, GitHub CI, immutable build, Gateway, publisher и статический Hosting Preview smoke пройдены. Authenticated UI smoke заблокирован некорректным OAuth client из R7.2. Production не изменён**.
 
 ## Зафиксированные версии
 
@@ -27,7 +27,7 @@
 - Cloud Build: `46d3f002-8073-4ebb-8cf7-3faefa507831` — success;
 - image: `me-central1-docker.pkg.dev/avo-deal-sniper/deal-sniper/app:r73-c6c2836`;
 - immutable digest: `sha256:d52c10aae8b19afad46ef380d47887e5ecdcf8d30136a245fdbf05b16cda50f5`;
-- Cloud Run staging revision: `deal-sniper-api-staging-00038-f2j`;
+- Cloud Run staging revision: `deal-sniper-api-staging-00040-xf9`;
 - staging publisher generation: `4`;
 - staging использует `deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false`, `WHATSAPP_ENABLED=false` и фиктивного Pro recipient;
 - `/health`, `/ready` и `/version` подтверждают commit `c6c2836`, exact digest и schema `2`;
@@ -38,12 +38,15 @@
 - два последовательных выполнения publisher — `deal-sniper-publisher-staging-gj6jk` и `deal-sniper-publisher-staging-twgxd` — завершились успешно;
 - первый прогон создал один `pending` outbox `pro-news/v1` для фиктивного получателя `staging-pro-preview` с двумя source-backed материалами; второй прогон сохранил тот же delivery ID `1d47608f…573b2` и ту же task ID `1d47608f…573b`, то есть дубль не возник;
 - после проверки единственная тестовая задача удалена по точному ID; staging-очередь остаётся PAUSED и содержит 0 задач. Production queue не изменялась.
+- Hosting Preview version `ec7232df3745213e` опубликована по `https://avo-deal-sniper--r73-c6c2836-j51jtx2p.web.app` и направлена только на staging Gateway;
+- `/admin.html`, `runtime-config.json`, CSP, exact Preview-origin CORS, Gateway `/version` и immutable image digest проверены успешно;
+- неудачная промежуточная revision `deal-sniper-api-staging-00039-fdm` не прошла fail-fast CORS validation и не получила трафик; исправная `00040-xf9` обслуживает 100% staging traffic с тем же immutable digest.
 
 ## Оставшиеся staging-проверки
 
-- Новый Hosting Preview R7.3 не опубликован: Firebase CLI потребовал `firebase login --reauth`. Production Hosting не изменялся.
-- До восстановления Google-сессий запрещено считать staging полностью закрытым и запрещён production deploy R7.3.
+- Firebase Google provider по-прежнему использует IAP-only client `1054850076890-k92q…apps.googleusercontent.com`. Автоматический sign-in smoke возвращает `INVALID_IDP_RESPONSE: access_token audience is not for this project`; это подтверждает незакрытый облачный шаг R7.2.
+- До создания отдельного Web OAuth client, переключения provider и authenticated UI smoke запрещено считать staging полностью закрытым и запрещён production deploy R7.3.
 
 ## Следующая граница
 
-Повторно авторизовать Firebase CLI, опубликовать Hosting Preview, выполнить authenticated UI smoke и дополнить этот evidence Preview URL. Production deploy, production publisher и Telegram-доставка не разрешены этим документом.
+Создать отдельный Web OAuth client с Firebase callback URI, переключить Google provider по R7.2 и выполнить authenticated Preview UI smoke. Production deploy, production publisher и Telegram-доставка не разрешены этим документом.

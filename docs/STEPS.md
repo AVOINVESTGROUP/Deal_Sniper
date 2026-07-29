@@ -331,4 +331,6 @@
 - Для безопасного publisher smoke создана отдельная PAUSED-очередь `telegram-delivery-staging`; production queue не использовалась.
 - Два последовательных execution `deal-sniper-publisher-staging-gj6jk` и `deal-sniper-publisher-staging-twgxd` успешны. Сформирован один `pending` `pro-news/v1` outbox с двумя source-backed материалами; повторный запуск сохранил те же delivery/task IDs и не создал дубль.
 - Единственная тестовая staging-задача удалена по точному ID; изолированная очередь остаётся PAUSED и пуста.
-- Для полного R7.3 staging evidence остаётся Firebase re-auth, Hosting Preview и authenticated UI smoke. Production R6 не изменён.
+- Firebase re-auth выполнен. Hosting Preview version `ec7232df3745213e` опубликована по `https://avo-deal-sniper--r73-c6c2836-j51jtx2p.web.app` и направлена только на staging Gateway; static assets, CSP, runtime config и exact-origin CORS успешны.
+- Staging API revision `deal-sniper-api-staging-00040-xf9` работает на прежнем immutable digest. Промежуточная `00039-fdm` была отклонена fail-fast проверкой неверного CORS-формата и не получила трафик.
+- Authenticated UI smoke обнаружил незакрытый облачный шаг R7.2: Firebase Google provider всё ещё связан с IAP-only OAuth client, поэтому Identity Platform возвращает `INVALID_IDP_RESPONSE` по audience. Требуется отдельный Web OAuth client и переключение provider; production R6 не изменён.
