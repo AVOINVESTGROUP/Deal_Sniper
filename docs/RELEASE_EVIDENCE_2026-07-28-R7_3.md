@@ -1,6 +1,6 @@
 # Release evidence R7.3 — staging-кандидат
 
-Статус: **локальный gate, GitHub CI, immutable build и базовый staging smoke пройдены. Полный publisher/UI smoke ожидает повторной интерактивной авторизации Google. Production не изменён**.
+Статус: **локальный gate, GitHub CI, immutable build, Gateway и publisher staging smoke пройдены. UI smoke ожидает повторной авторизации Firebase CLI. Production не изменён**.
 
 ## Зафиксированные версии
 
@@ -28,19 +28,22 @@
 - image: `me-central1-docker.pkg.dev/avo-deal-sniper/deal-sniper/app:r73-c6c2836`;
 - immutable digest: `sha256:d52c10aae8b19afad46ef380d47887e5ecdcf8d30136a245fdbf05b16cda50f5`;
 - Cloud Run staging revision: `deal-sniper-api-staging-00038-f2j`;
-- staging publisher generation: `3`;
+- staging publisher generation: `4`;
 - staging использует `deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false`, `WHATSAPP_ENABLED=false` и фиктивного Pro recipient;
 - `/health`, `/ready` и `/version` подтверждают commit `c6c2836`, exact digest и schema `2`;
 - активирована immutable runtime revision `r73-stage-c6c2836`, сохранившая прежние цены и финансовые пороги и включившая `pro_deals_enabled=true`, `pro_news_enabled=true`, лимит 2 материала и интервал 6 часов;
 - staging API Gateway config `r73-c6c2836` находится в состоянии ACTIVE и назначен gateway `deal-sniper-r6-staging`;
 - системные endpoints через Gateway возвращают HTTP 200; CORS preflight нового `/admin/news-feeds` возвращает HTTP 200 и явный разрешённый origin.
+- создана изолированная очередь `telegram-delivery-staging`; во время теста она оставалась в состоянии PAUSED и не могла вызвать Telegram delivery;
+- два последовательных выполнения publisher — `deal-sniper-publisher-staging-gj6jk` и `deal-sniper-publisher-staging-twgxd` — завершились успешно;
+- первый прогон создал один `pending` outbox `pro-news/v1` для фиктивного получателя `staging-pro-preview` с двумя source-backed материалами; второй прогон сохранил тот же delivery ID `1d47608f…573b2` и ту же task ID `1d47608f…573b`, то есть дубль не возник;
+- после проверки единственная тестовая задача удалена по точному ID; staging-очередь остаётся PAUSED и содержит 0 задач. Production queue не изменялась.
 
 ## Оставшиеся staging-проверки
 
-- Запуск `deal-sniper-publisher-staging`, повторный идемпотентный прогон и проверка news outbox не выполнены после истечения интерактивной `gcloud`-сессии.
 - Новый Hosting Preview R7.3 не опубликован: Firebase CLI потребовал `firebase login --reauth`. Production Hosting не изменялся.
 - До восстановления Google-сессий запрещено считать staging полностью закрытым и запрещён production deploy R7.3.
 
 ## Следующая граница
 
-Повторно авторизовать `gcloud` и Firebase CLI, выполнить publisher/UI smoke и дополнить этот evidence точными execution ID и Preview URL. Production deploy, production publisher и Telegram-доставка не разрешены этим документом.
+Повторно авторизовать Firebase CLI, опубликовать Hosting Preview, выполнить authenticated UI smoke и дополнить этот evidence Preview URL. Production deploy, production publisher и Telegram-доставка не разрешены этим документом.

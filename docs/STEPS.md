@@ -325,7 +325,10 @@
 
 - Evidence commit `c6c283667a889f030581fe3adcc6814d52d8f9cd` прошёл GitHub Actions `30387653569` и `30387651492`.
 - Cloud Build `46d3f002-8073-4ebb-8cf7-3faefa507831` собрал exact digest `sha256:d52c10aae8b19afad46ef380d47887e5ecdcf8d30136a245fdbf05b16cda50f5` из точного git archive.
-- Digest развёрнут только в staging API revision `deal-sniper-api-staging-00038-f2j` и publisher staging generation `3`; delivery и WhatsApp выключены, база `deal-sniper-stage-rc2` сохранена.
+- Digest развёрнут только в staging API revision `deal-sniper-api-staging-00038-f2j` и publisher staging generation `4`; delivery и WhatsApp выключены, база `deal-sniper-stage-rc2` сохранена.
 - Активна runtime revision `r73-stage-c6c2836`: Pro deals и Pro news включены, прежние цены/финансовые пороги сохранены.
 - Staging Gateway переключён на config `r73-c6c2836`; health/version и CORS нового news-feed route успешны.
-- Полный publisher/UI smoke остановлен после истечения интерактивных сессий `gcloud` и Firebase CLI. Требуется повторный вход; production R6 не изменён.
+- Для безопасного publisher smoke создана отдельная PAUSED-очередь `telegram-delivery-staging`; production queue не использовалась.
+- Два последовательных execution `deal-sniper-publisher-staging-gj6jk` и `deal-sniper-publisher-staging-twgxd` успешны. Сформирован один `pending` `pro-news/v1` outbox с двумя source-backed материалами; повторный запуск сохранил те же delivery/task IDs и не создал дубль.
+- Единственная тестовая staging-задача удалена по точному ID; изолированная очередь остаётся PAUSED и пуста.
+- Для полного R7.3 staging evidence остаётся Firebase re-auth, Hosting Preview и authenticated UI smoke. Production R6 не изменён.
