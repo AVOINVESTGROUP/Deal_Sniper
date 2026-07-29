@@ -362,3 +362,5 @@
 - Клиент переведён на ленивую инициализацию: delivery-off контур не обращается к Google ADC и не создаёт Cloud Tasks; добавлен отдельный регрессионный тест.
 - Повторный локальный gate успешен: Ruff, strict mypy, 115 pytest (113 passed, 2 skipped), coverage 59%, pip-audit без известных уязвимостей и Terraform fmt/validate.
 - Production R6 не изменён. Исправление должно пройти повторный GitHub Actions gate на Python 3.11 до immutable staging build.
+- Коммит исправления `8eeb13326233a1b3ff6006914922385ecc3b1a05` прошёл оба GitHub Actions gate: push `30429176591` и PR `30429177595`; quality на Python 3.11, container/Trivy и Terraform успешны.
+- R8.1 готов к immutable staging build. До отдельного Telegram staging smoke и явной команды владельца production deploy запрещён.

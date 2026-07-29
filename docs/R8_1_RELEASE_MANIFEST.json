@@ -1,6 +1,6 @@
 {
   "release": "R8.1",
-  "status": "local-tested-candidate",
+  "status": "ci-passed-awaiting-immutable-staging",
   "source_commit": "resolved-from-GIT_COMMIT-at-build",
   "components": {
     "api": {"digest": "pending"},
@@ -13,5 +13,12 @@
     "admin_auth": "firebase-email-password-preserved",
     "staging_delivery_queue": "telegram-delivery-staging",
     "production_delivery_queue": "telegram-delivery"
+  },
+  "verification": {
+    "implementation_commit": "8eeb13326233a1b3ff6006914922385ecc3b1a05",
+    "push_workflow_run": "30429176591",
+    "pull_request_workflow_run": "30429177595",
+    "python": "3.11",
+    "result": "passed"
   }
 }
