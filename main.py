@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dubai Deal Sniper")
     parser.add_argument(
         "command",
-        choices=("bot", "scan", "collect", "content", "replay"),
+        choices=("bot", "scan", "collect", "content", "news", "replay"),
         help="Режим запуска",
     )
     parser.add_argument(
@@ -93,6 +93,15 @@ def main() -> None:
             f"requeued={pro.requeued}, skipped={pro.skipped}, failed={pro.failures}; "
             f"News: selected={news.selected}, created={news.created}, "
             f"requeued={news.requeued}, skipped={news.skipped}, failed={news.failures}"
+        )
+    elif args.command == "news":
+        from src.content_job import run_news_publication
+
+        news = asyncio.run(run_news_publication(settings))
+        print(
+            f"News: selected={news.selected}, created={news.created}, "
+            f"requeued={news.requeued}, paired={news.paired_enqueued}, "
+            f"blocked={news.blocked_pair}, failed={news.failures}"
         )
     elif args.command == "collect":
         asyncio.run(collect_once(settings, args.source))

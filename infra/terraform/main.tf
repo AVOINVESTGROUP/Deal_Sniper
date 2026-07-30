@@ -391,6 +391,51 @@ resource "google_cloud_run_v2_job" "content" {
   }
 }
 
+resource "google_cloud_run_v2_job" "news" {
+  name     = "deal-sniper-news-publisher"
+  location = var.region
+  template {
+    template {
+      service_account = google_service_account.runtime.email
+      timeout         = "300s"
+      max_retries     = 1
+      containers {
+        image   = var.image
+        command = ["python"]
+        args    = ["main.py", "news"]
+        dynamic "env" {
+          for_each = {
+            GOOGLE_CLOUD_PROJECT         = var.project_id
+            GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
+            FIRESTORE_DATABASE           = var.firestore_database
+            STORAGE_BACKEND              = "firestore"
+            RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
+            CLOUD_RUN_API_URL            = var.api_base_url
+            CLOUD_TASKS_LOCATION         = var.region
+            TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
+            TASK_INVOKER_SERVICE_ACCOUNT = google_service_account.runtime.email
+            TELEGRAM_CHANNEL_ID          = var.telegram_channel_id
+          }
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        env {
+          name = "INTERNAL_TASK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.task_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 resource "google_cloud_scheduler_job" "collector" {
   for_each         = local.sources
   name             = "deal-sniper-${each.key}-every-10m"
@@ -421,6 +466,20 @@ resource "google_cloud_scheduler_job" "content" {
   http_target {
     http_method = "POST"
     uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.content.name}:run"
+    oauth_token { service_account_email = google_service_account.scheduler.email }
+  }
+}
+
+resource "google_cloud_scheduler_job" "news" {
+  name             = "deal-sniper-news-every-6h"
+  region           = var.region
+  schedule         = "0 */6 * * *"
+  time_zone        = "Asia/Dubai"
+  paused           = !var.production_enabled
+  attempt_deadline = "180s"
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.news.name}:run"
     oauth_token { service_account_email = google_service_account.scheduler.email }
   }
 }

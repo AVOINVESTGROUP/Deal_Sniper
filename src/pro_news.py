@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 PRO_NEWS_TEMPLATE_VERSION = "pro-news/v2"
 FREE_NEWS_TEMPLATE_VERSION = "free-news/v1"
 PRO_NEWS_EVENT_TYPE = "dubai-auto-news-pro"
+NEWS_PAIR_READY_EVENT = "news_pair_ready"
+NEWS_PAIR_BLOCKED_EVENT = "news_pair_blocked"
 
 
 class ContentDispatcher(Protocol):
@@ -58,6 +60,9 @@ class ProNewsPublicationSummary:
     sent: int = 0
     failed: int = 0
     unknown: int = 0
+    paired_pending: int = 0
+    paired_enqueued: int = 0
+    blocked_pair: int = 0
     ai_used: bool = False
     preview: str = ""
 
@@ -142,6 +147,130 @@ def _published_news_fingerprints(records: list[OutboxRecord]) -> set[str]:
 
 def _state_counts(records: list[OutboxRecord]) -> dict[OutboxState, int]:
     return {state: sum(record.state is state for record in records) for state in OutboxState}
+
+
+def _news_evidence_id(record: OutboxRecord) -> str:
+    return str(record.payload.get("news_evidence_id") or record.decision_id)
+
+
+def _news_groups(records: list[OutboxRecord]) -> dict[str, list[OutboxRecord]]:
+    groups: dict[str, list[OutboxRecord]] = {}
+    for record in records:
+        groups.setdefault(_news_evidence_id(record), []).append(record)
+    return groups
+
+
+def _single_payload_value(record: OutboxRecord, key: str) -> str:
+    value = record.payload.get(key)
+    if isinstance(value, list):
+        return str(value[0]) if len(value) == 1 else ""
+    return str(value or "")
+
+
+def _validate_news_pair(
+    records: list[OutboxRecord],
+    settings: Settings,
+) -> tuple[OutboxRecord | None, OutboxRecord | None, str | None]:
+    """Проверяет, что Free и Pro являются двумя представлениями одного evidence."""
+    if len(records) != 2:
+        return None, None, "pair_requires_exactly_two_records"
+    by_template = {record.template_version: record for record in records}
+    if set(by_template) != {FREE_NEWS_TEMPLATE_VERSION, PRO_NEWS_TEMPLATE_VERSION}:
+        return None, None, "pair_requires_free_and_pro_templates"
+    free = by_template[FREE_NEWS_TEMPLATE_VERSION]
+    pro = by_template[PRO_NEWS_TEMPLATE_VERSION]
+    if free.delivery_id == pro.delivery_id:
+        return free, pro, "pair_delivery_ids_must_differ"
+    if not settings.telegram_channel_id or free.recipient != settings.telegram_channel_id:
+        return free, pro, "free_recipient_mismatch"
+    if not settings.telegram_pro_channel_id or pro.recipient != settings.telegram_pro_channel_id:
+        return free, pro, "pro_recipient_mismatch"
+    required_values = {
+        "news_evidence_id": {_news_evidence_id(free), _news_evidence_id(pro)},
+        "publisher": {
+            _single_payload_value(free, "publisher"),
+            _single_payload_value(pro, "publisher"),
+        },
+        "news_url": {
+            _single_payload_value(free, "news_urls"),
+            _single_payload_value(pro, "news_urls"),
+        },
+        "fingerprint": {
+            _single_payload_value(free, "news_fingerprints"),
+            _single_payload_value(pro, "news_fingerprints"),
+        },
+        "image_sha256": {
+            _single_payload_value(free, "image_sha256"),
+            _single_payload_value(pro, "image_sha256"),
+        },
+    }
+    for field, values in required_values.items():
+        if len(values) != 1 or not next(iter(values), ""):
+            return free, pro, f"pair_{field}_mismatch"
+    return free, pro, None
+
+
+def _ready_news_pairs(repository: Repository) -> dict[str, set[str]]:
+    ready: dict[str, set[str]] = {}
+    for event in repository.list_audit_events(1_000):
+        if event.get("event_type") != NEWS_PAIR_READY_EVENT:
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        evidence_id = str(payload.get("news_evidence_id") or "")
+        delivery_ids = payload.get("delivery_ids")
+        if evidence_id and isinstance(delivery_ids, list):
+            ready[evidence_id] = {str(value) for value in delivery_ids}
+    return ready
+
+
+def news_pair_delivery_gate(
+    repository: Repository,
+    settings: Settings,
+    delivery_id_value: str,
+    evidence_id: str,
+) -> tuple[bool, bool, str]:
+    """Не допускает отправку новости до готовности пары и Pro-предшественника."""
+    records = _news_groups(_news_outbox_records(repository)).get(evidence_id, [])
+    free, pro, error = _validate_news_pair(records, settings)
+    if error or free is None or pro is None:
+        return False, True, error or "invalid_pair"
+    if delivery_id_value not in {free.delivery_id, pro.delivery_id}:
+        return False, True, "delivery_not_in_pair"
+    expected_ids = {free.delivery_id, pro.delivery_id}
+    if _ready_news_pairs(repository).get(evidence_id) != expected_ids:
+        return False, False, "pair_not_enqueued"
+    if delivery_id_value == free.delivery_id:
+        if pro.state is OutboxState.SENT and pro.telegram_message_id:
+            return True, False, "ready"
+        if pro.state in {OutboxState.FAILED, OutboxState.UNKNOWN}:
+            return False, True, f"pro_terminal_{pro.state.value}"
+        return False, False, "pro_not_sent"
+    return True, False, "ready"
+
+
+def _pair_metrics(
+    repository: Repository,
+    settings: Settings,
+    records: list[OutboxRecord],
+) -> tuple[int, int, int]:
+    ready = _ready_news_pairs(repository)
+    paired_pending = paired_enqueued = blocked = 0
+    for evidence_id, group in _news_groups(records).items():
+        if not any(record.state is OutboxState.PENDING for record in group):
+            continue
+        free, pro, error = _validate_news_pair(group, settings)
+        terminal = any(
+            record.state in {OutboxState.FAILED, OutboxState.UNKNOWN} for record in group
+        )
+        if error or free is None or pro is None or terminal:
+            blocked += 1
+        elif ready.get(evidence_id) == {free.delivery_id, pro.delivery_id}:
+            paired_enqueued += 1
+        else:
+            paired_pending += 1
+    return paired_pending, paired_enqueued, blocked
 
 
 def _last_news_publication(repository: Repository) -> datetime | None:
@@ -259,7 +388,11 @@ async def preview_pro_news_publication(
     """Читает ленты и строит preview без записи или постановки задач."""
     current_time = (now or datetime.now(UTC)).astimezone(UTC)
     feeds = configured_news_feeds(repository, settings)
-    if not settings.pro_news_enabled or not settings.telegram_pro_channel_id:
+    if (
+        not settings.pro_news_enabled
+        or not settings.telegram_pro_channel_id
+        or not settings.telegram_channel_id
+    ):
         return ProNewsPublicationSummary(enabled=False, feeds=len(feeds)), []
     await NewsIngestionService(repository, settings).ingest(feeds, now=current_time)
     evidence = await asyncio.to_thread(
@@ -270,6 +403,9 @@ async def preview_pro_news_publication(
     records = await asyncio.to_thread(_news_outbox_records, repository)
     published = _published_news_fingerprints(records)
     counts = _state_counts(records)
+    paired_pending, paired_enqueued, blocked_pair = await asyncio.to_thread(
+        _pair_metrics, repository, settings, records
+    )
     unpublished_evidence = [
         item for item in evidence if item.semantic_fingerprint not in published
     ]
@@ -291,6 +427,9 @@ async def preview_pro_news_publication(
             sent=counts[OutboxState.SENT],
             failed=counts[OutboxState.FAILED],
             unknown=counts[OutboxState.UNKNOWN],
+            paired_pending=paired_pending,
+            paired_enqueued=paired_enqueued,
+            blocked_pair=blocked_pair,
             preview=preview,
         ),
         selected,
@@ -306,18 +445,66 @@ async def reconcile_pro_news_publication(
 ) -> ProNewsPublicationSummary:
     """Создаёт максимум один новый digest и не повторяет использованные статьи."""
     existing_records = await asyncio.to_thread(_news_outbox_records, repository)
-    pending_records = [
-        record for record in existing_records if record.state is OutboxState.PENDING
+    pending_groups = [
+        (evidence_id, group)
+        for evidence_id, group in _news_groups(existing_records).items()
+        if any(record.state is OutboxState.PENDING for record in group)
     ]
-    if settings.pro_news_enabled and settings.telegram_pro_channel_id and pending_records:
-        record = pending_records[0]
-        failures = 0
-        requeued = 0
-        try:
-            await dispatcher.enqueue_content_delivery(dict(record.payload))
-            requeued = 1
-        except Exception:
-            failures = 1
+    if settings.pro_news_enabled and pending_groups:
+        evidence_id, group = sorted(pending_groups, key=lambda item: item[0])[0]
+        free, pro, validation_error = _validate_news_pair(group, settings)
+        failures = requeued = paired_pending = paired_enqueued = blocked_pair = 0
+        terminal = any(
+            record.state in {OutboxState.FAILED, OutboxState.UNKNOWN} for record in group
+        )
+        if validation_error or free is None or pro is None or terminal:
+            failures = blocked_pair = 1
+            await asyncio.to_thread(
+                repository.record_audit_event,
+                NEWS_PAIR_BLOCKED_EVENT,
+                {
+                    "news_evidence_id": evidence_id,
+                    "delivery_ids": [record.delivery_id for record in group],
+                    "reason": validation_error or "terminal_pair_state",
+                },
+            )
+        elif not settings.delivery_enabled:
+            paired_pending = 1
+        elif (await asyncio.to_thread(_ready_news_pairs, repository)).get(evidence_id) == {
+            free.delivery_id,
+            pro.delivery_id,
+        }:
+            paired_enqueued = 1
+        else:
+            try:
+                # Pro ставится первым; Free delivery дополнительно ждёт sent-состояние Pro.
+                await dispatcher.enqueue_content_delivery(dict(pro.payload))
+                await dispatcher.enqueue_content_delivery(dict(free.payload))
+                await asyncio.to_thread(
+                    repository.record_audit_event,
+                    NEWS_PAIR_READY_EVENT,
+                    {
+                        "news_evidence_id": evidence_id,
+                        "delivery_ids": [pro.delivery_id, free.delivery_id],
+                        "publisher": _single_payload_value(pro, "publisher"),
+                        "url": _single_payload_value(pro, "news_urls"),
+                        "fingerprint": _single_payload_value(pro, "news_fingerprints"),
+                        "image_sha256": _single_payload_value(pro, "image_sha256"),
+                    },
+                )
+                requeued = 2
+                paired_enqueued = 1
+            except Exception as error:
+                failures = blocked_pair = 1
+                await asyncio.to_thread(
+                    repository.record_audit_event,
+                    NEWS_PAIR_BLOCKED_EVENT,
+                    {
+                        "news_evidence_id": evidence_id,
+                        "delivery_ids": [pro.delivery_id, free.delivery_id],
+                        "reason": f"enqueue_failure:{type(error).__name__}",
+                    },
+                )
         counts = _state_counts(existing_records)
         result = ProNewsPublicationSummary(
             enabled=True,
@@ -330,6 +517,9 @@ async def reconcile_pro_news_publication(
             sent=counts[OutboxState.SENT],
             failed=counts[OutboxState.FAILED],
             unknown=counts[OutboxState.UNKNOWN],
+            paired_pending=paired_pending,
+            paired_enqueued=paired_enqueued,
+            blocked_pair=blocked_pair,
         )
         await asyncio.to_thread(
             repository.record_audit_event,
@@ -362,17 +552,20 @@ async def reconcile_pro_news_publication(
         if item.url in evidence_by_url
     ]
     created = requeued = selected_count = skipped = failures = 0
+    paired_pending = paired_enqueued = blocked_pair = 0
     ai_used = False
-    for evidence in selected_evidence:
-        evidence_enqueued = False
+    # Один bounded news cycle всегда работает только с одной factual revision.
+    for evidence in selected_evidence[:1]:
         introduction = await _vertex_introduction([evidence_as_news_item(evidence)], settings)
         ai_used = ai_used or bool(introduction)
         targets = [
             (settings.telegram_pro_channel_id, PRO_NEWS_TEMPLATE_VERSION, introduction),
             (settings.telegram_channel_id, FREE_NEWS_TEMPLATE_VERSION, ""),
         ]
+        committed: list[OutboxRecord] = []
         for recipient, template_version, context in targets:
             if not recipient:
+                failures += 1
                 continue
             try:
                 record, was_created = await asyncio.to_thread(
@@ -383,16 +576,58 @@ async def reconcile_pro_news_publication(
                     template_version,
                     context,
                 )
-                if record.state is OutboxState.PENDING:
-                    await dispatcher.enqueue_content_delivery(dict(record.payload))
-                    evidence_enqueued = True
-                    created += int(was_created)
-                    requeued += int(not was_created)
-                else:
-                    skipped += 1
+                committed.append(record)
+                created += int(was_created)
+                skipped += int(record.state is not OutboxState.PENDING)
             except Exception:
                 failures += 1
-        selected_count += int(evidence_enqueued)
+        free, pro, validation_error = _validate_news_pair(committed, settings)
+        if validation_error or free is None or pro is None:
+            blocked_pair += 1
+            await asyncio.to_thread(
+                repository.record_audit_event,
+                NEWS_PAIR_BLOCKED_EVENT,
+                {
+                    "news_evidence_id": evidence.evidence_id,
+                    "delivery_ids": [record.delivery_id for record in committed],
+                    "reason": validation_error or "pair_commit_failure",
+                },
+            )
+            continue
+        if not settings.delivery_enabled:
+            selected_count = 1
+            paired_pending = 1
+            continue
+        try:
+            await dispatcher.enqueue_content_delivery(dict(pro.payload))
+            await dispatcher.enqueue_content_delivery(dict(free.payload))
+            await asyncio.to_thread(
+                repository.record_audit_event,
+                NEWS_PAIR_READY_EVENT,
+                {
+                    "news_evidence_id": evidence.evidence_id,
+                    "delivery_ids": [pro.delivery_id, free.delivery_id],
+                    "publisher": evidence.publisher_name,
+                    "url": str(evidence.canonical_url),
+                    "fingerprint": evidence.semantic_fingerprint,
+                    "image_sha256": evidence.image_sha256,
+                },
+            )
+            requeued += 2 - created
+            selected_count = 1
+            paired_enqueued = 1
+        except Exception as error:
+            failures += 1
+            blocked_pair = 1
+            await asyncio.to_thread(
+                repository.record_audit_event,
+                NEWS_PAIR_BLOCKED_EVENT,
+                {
+                    "news_evidence_id": evidence.evidence_id,
+                    "delivery_ids": [pro.delivery_id, free.delivery_id],
+                    "reason": f"enqueue_failure:{type(error).__name__}",
+                },
+            )
     result = ProNewsPublicationSummary(
         enabled=preview.enabled,
         interval_open=preview.interval_open,
@@ -410,6 +645,9 @@ async def reconcile_pro_news_publication(
         sent=preview.sent,
         failed=preview.failed,
         unknown=preview.unknown,
+        paired_pending=paired_pending,
+        paired_enqueued=paired_enqueued,
+        blocked_pair=blocked_pair,
         preview=preview.preview,
     )
     await asyncio.to_thread(

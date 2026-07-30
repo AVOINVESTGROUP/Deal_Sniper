@@ -286,4 +286,15 @@ Cloud preflight R8.1.2 обнаружил IAM-разрыв до staging: фак�
 
 Immutable staging R8.1.2 завершён. Финальный source commit `946db4e175fbe3c46f4ce155660bafb2656b9f7f`, Cloud Build `91fa7335-18b4-4bf9-a0fe-bfa7154521c3`, digest `sha256:6d6d44e29a9512819460c46b648bc037716614d78af9148a76fbcde07e7745aa`, API revision `deal-sniper-api-staging-00047-k42`. Live ingestion сохранил пять DubiCars evidence/assets; две статьи имеют четыре точные Free/Pro preview-записи с одинаковыми evidence/image SHA. Повтор не создал дублей, staging queue PAUSED и пуста. Production не изменён; следующий шаг — только отдельное разрешение владельца на bounded production cutover. Evidence: `docs/RELEASE_EVIDENCE_2026-07-29-R8_1_2.md`.
 
-30 июля владелец разрешил production deploy R8.1.2. Backup `r812-production-20260730-100157`, delivery-off exact-digest deploy и production ingestion прошли, но paused-queue gate остановил отправку: publisher поставил Free news и legacy `content/v1`, оставив парную Pro news pending. Обе задачи удалены при dispatch=0; Telegram не затронут. Выполнен полный rollback на R8.1.1 (`deal-sniper-api-00064-9sk`, digest `sha256:7a8ed302…af897`, publisher generation 55, прежний Gateway, queue RUNNING/пуста, scheduler ENABLED). Immutable evidence, registry entry и pending Free/Pro пара сохранены без Cloud Tasks для следующего идемпотентного rehearsal. Digest R8.1.2 аннулирован как production candidate. Новый план `docs/PLAN_R8_1_2_1_PAIRED_NEWS_DELIVERY.md` требует отдельного утверждения до кода.
+30 июля владелец разрешил production deploy R8.1.2. Backup `r812-production-20260730-100157`, delivery-off exact-digest deploy и production ingestion прошли, но paused-queue gate остановил отправку: publisher поставил Free news и legacy `content/v1`, оставив парную Pro news pending. Обе задачи удалены при dispatch=0; Telegram не затронут. Выполнен полный rollback на R8.1.1 (`deal-sniper-api-00064-9sk`, digest `sha256:7a8ed302…af897`, publisher generation 55, прежний Gateway, queue RUNNING/пуста, scheduler ENABLED). Immutable evidence, registry entry и pending Free/Pro пара сохранены без Cloud Tasks для следующего идемпотентного rehearsal. Digest R8.1.2 аннулирован как production candidate.
+
+План R8.1.2.1 утверждён и реализован в ветке `production/deal-sniper-complete`, но ещё не
+развёрнут. Новый контракт: ровно одна `free-news/v1` + одна `pro-news/v2` на evidence;
+одинаковые factual fields/image SHA; Pro-задача ставится первой; общий `news_pair_ready`
+создаётся только после обеих постановок; delivery endpoint fail-closed без ready-маркера;
+Free отправляется только после `sent` соответствующей Pro-карточки. `python main.py news`
+не запускает сделки, Free object reconciliation или `content/v1`; Terraform добавляет
+`deal-sniper-news-publisher` и `deal-sniper-news-every-6h`. Admin показывает
+`paired_pending`, `paired_enqueued`, `blocked_pair`. Локальный gate: 136 passed / 2 skipped,
+61,5% coverage, Ruff, strict mypy, dependency audit и Terraform validate. Production
+по-прежнему R8.1.1; старые pending evidence/outbox и backup сохранены.

@@ -125,5 +125,24 @@ Free/Pro outbox-пара намеренно сохранены как доказ
 идемпотентного rehearsal. R8.1.1 их не публикует; связанных Cloud Tasks нет.
 
 Digest R8.1.2 больше не допускается к production. Исправление описано в
-`docs/PLAN_R8_1_2_1_PAIRED_NEWS_DELIVERY.md` и требует отдельного утверждения до изменения
-кода.
+`docs/PLAN_R8_1_2_1_PAIRED_NEWS_DELIVERY.md`; план отдельно утверждён владельцем до
+изменения кода.
+
+## Реализация R8.1.2.1
+
+Владелец утвердил план 30 июля 2026 года. Локально реализованы:
+
+- группировка pending news по `news_evidence_id`;
+- точная валидация двух сторон по recipient/template/publisher/URL/fingerprint/image SHA;
+- стабильная постановка Pro и Free с маркером `news_pair_ready` только после обеих задач;
+- delivery pair-gate и обязательная последовательность Pro `sent` → Free;
+- `news_pair_blocked` при неполной паре, terminal state или ошибке постановки;
+- отдельный news-only entrypoint, Cloud Run Job и Scheduler без `content/v1` и сделок;
+- Admin-счётчики `paired_pending`, `paired_enqueued`, `blocked_pair`;
+- закрепление container base на `python:3.11.15-slim-bookworm`.
+
+Локальные проверки: Ruff, strict mypy, 136 passed / 2 skipped, покрытие 61,5%, dependency
+audit без известных уязвимостей, Terraform fmt/init/validate. Отдельные тесты подтверждают,
+что отказ второй постановки не открывает delivery gate, повтор не добавляет задач, а Free
+не отправляется до точного Telegram message ID Pro. GitHub Python 3.11, container/Trivy и
+Terraform gates должны пройти до нового immutable build. Production не изменён.

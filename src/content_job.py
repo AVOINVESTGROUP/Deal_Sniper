@@ -125,3 +125,15 @@ async def run_content_publication(
     )
     event_id = await enqueue_market_pulse(settings)
     return event_id, pro_summary, news_summary
+
+
+async def run_news_publication(settings: Settings) -> ProNewsPublicationSummary:
+    """Выполняет только парную Free/Pro news-публикацию без сделок и Market Pulse."""
+    service = DealService.from_settings(settings)
+    current = effective_settings(service.repository, settings)
+    dispatcher = CloudTaskDispatcher(current)
+    return await reconcile_pro_news_publication(
+        service.repository,
+        current,
+        dispatcher,
+    )

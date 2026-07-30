@@ -287,7 +287,7 @@ function renderProPublications(payload = {}) {
   const integrity = payload.free_integrity || {};
   byId("free-pro-integrity-status").innerHTML = keyValues({eligible_exact_pro: integrity.eligible, free_sent_v3: integrity.sent, blocked_no_pro: integrity.blocked_no_pro, blocked_not_sent: integrity.blocked_not_sent, blocked_revision_mismatch: integrity.blocked_revision_mismatch, legacy_sent: integrity.legacy_sent, legacy_matched: integrity.legacy_matched, legacy_unmatched: integrity.legacy_unmatched, legacy_manual_review: integrity.legacy_manual_review});
   const news = payload.news || {};
-  byId("pro-news-publication-status").innerHTML = keyValues({enabled: news.enabled, feeds: news.feeds, fetched: news.fetched, unpublished: news.unpublished, pending: news.pending, sent: news.sent, failed: news.failed, interval_open: news.interval_open, ai_intro_used: news.ai_used, last_reconciliation: payload.last_news_reconciliation?.created_at || "Never"});
+  byId("pro-news-publication-status").innerHTML = keyValues({enabled: news.enabled, feeds: news.feeds, fetched: news.fetched, unpublished: news.unpublished, pending: news.pending, paired_pending: news.paired_pending, paired_enqueued: news.paired_enqueued, blocked_pair: news.blocked_pair, sent: news.sent, failed: news.failed, interval_open: news.interval_open, ai_intro_used: news.ai_used, last_reconciliation: payload.last_news_reconciliation?.created_at || "Never"});
   byId("publish-pro").disabled = !Number(payload.pending_actions || 0);
 }
 

@@ -191,6 +191,8 @@ async def test_news_delivery_uses_saved_asset_and_never_falls_back_to_text(
         delivery_enabled=True,
         telegram_bot_token="test-token",
         internal_task_secret="",
+        telegram_channel_id="-1001",
+        telegram_pro_channel_id="-1002",
     )
     image = b"\xff\xd8\xff" + (b"x" * 5_000)
     import hashlib
@@ -208,6 +210,9 @@ async def test_news_delivery_uses_saved_asset_and_never_falls_back_to_text(
         "image_content_type": "image/jpeg",
         "article_button_label": "Read article",
         "article_button_url": "https://news.example/story",
+        "news_fingerprints": ["fingerprint-1"],
+        "news_urls": ["https://news.example/story"],
+        "publisher": "Example News",
     }
     repository.put_outbox(
         OutboxRecord(
@@ -218,6 +223,32 @@ async def test_news_delivery_uses_saved_asset_and_never_falls_back_to_text(
             format="telegram-photo",
             payload=payload,
         )
+    )
+    pro_payload = {
+        **payload,
+        "delivery_id": "news-delivery-pro-1",
+        "publication_event_id": "news-event-pro-1",
+        "target_id": "-1002",
+        "template_version": "pro-news/v2",
+    }
+    repository.put_outbox(
+        OutboxRecord(
+            delivery_id="news-delivery-pro-1",
+            decision_id="evidence-1",
+            recipient="-1002",
+            template_version="pro-news/v2",
+            format="telegram-photo",
+            payload=pro_payload,
+            state=OutboxState.SENT,
+            telegram_message_id="90",
+        )
+    )
+    repository.record_audit_event(
+        "news_pair_ready",
+        {
+            "news_evidence_id": "evidence-1",
+            "delivery_ids": ["news-delivery-pro-1", "news-delivery-1"],
+        },
     )
     calls: list[tuple[str, dict[str, Any]]] = []
 

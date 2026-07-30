@@ -32,7 +32,9 @@ class FakeContentDispatcher:
 
 
 def pro_news_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    monkeypatch.setenv("TELEGRAM_CHANNEL_ID", "-100666")
     monkeypatch.setenv("TELEGRAM_PRO_CHANNEL_ID", "-100777")
+    monkeypatch.setenv("DELIVERY_ENABLED", "true")
     monkeypatch.setenv("PRO_NEWS_ENABLED", "true")
     monkeypatch.setenv("PRO_NEWS_MAX_ITEMS", "2")
     monkeypatch.setenv("PRO_NEWS_MIN_INTERVAL_HOURS", "6")
@@ -189,11 +191,12 @@ async def test_news_digest_is_idempotent_and_pending_is_requeued(
     repository.update_outbox(record.delivery_id, OutboxState.SENT, telegram_message_id="42")
     third, _items = await preview_pro_news_publication(repository, settings)
 
-    assert first.created == 1 and first.selected == 1
-    assert second.requeued == 1 and second.selected == 1
+    assert first.created == 2 and first.selected == 1
+    assert first.paired_enqueued == 1
+    assert second.requeued == 0 and second.selected == 1
     assert third.unpublished == 0 and third.sent == 1
     assert len(dispatcher.payloads) == 2
-    assert record.template_version == PRO_NEWS_TEMPLATE_VERSION
+    assert record.template_version in {PRO_NEWS_TEMPLATE_VERSION, "free-news/v1"}
     assert dispatcher.payloads[0]["news_fingerprints"] == [evidence.semantic_fingerprint]
 
 

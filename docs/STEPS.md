@@ -473,4 +473,14 @@
 - Выполнен полный rollback на R8.1.1: API `deal-sniper-api-00064-9sk`, publisher generation 55, прежний Gateway config, queue RUNNING/пуста, content scheduler ENABLED, health/version корректны.
 - Immutable evidence, проверенная registry entry и pending Free/Pro пара сохранены без задач как вход для идемпотентного исправления; R8.1.1 их не публикует.
 - Создан `docs/PLAN_R8_1_2_1_PAIRED_NEWS_DELIVERY.md`; код запрещено менять до явного утверждения владельца.
+
+## 30 июля 2026 — локальная реализация R8.1.2.1
+
+- План R8.1.2.1 явно утверждён владельцем; production deploy этим утверждением не разрешён.
+- News outbox группируется по `news_evidence_id`; допустима только точная Free/Pro-пара с одинаковыми publisher, URL, fingerprint и image SHA-256.
+- `news_pair_ready` создаётся только после постановки обеих стабильных задач; без него endpoint доставки отвечает fail-closed.
+- Pro-задача ставится первой, Free отправляется только после фактического `sent` точной Pro-карточки с Telegram message ID.
+- Добавлены изолированная команда `news`, отдельные Cloud Run Job/Scheduler и Admin-метрики `paired_pending`, `paired_enqueued`, `blocked_pair`.
+- Негативные тесты покрывают отсутствующую сторону, несовпадающее изображение, отказ второй задачи, повторный запуск, Pro→Free gate и отсутствие Market Pulse/deal tasks в news-only.
+- Локально успешны Ruff, mypy, 136 passed / 2 skipped, coverage 61,5%, pip-audit и Terraform validate. Production остаётся на R8.1.1.
 - Локальный gate: Ruff, strict mypy, 130 passed/2 skipped, Terraform fmt/validate и `git diff --check`. Production и Telegram не изменены.

@@ -83,7 +83,7 @@ from src.free_publication import (
 from src.news import format_news
 from src.news_evidence import NewsIngestionService, evidence_as_news_item, load_news_asset
 from src.pro_cta import validated_subscription_url
-from src.pro_news import preview_pro_news_publication
+from src.pro_news import news_pair_delivery_gate, preview_pro_news_publication
 from src.pro_publication import (
     PRO_EVENT_TYPE,
     PRO_TEMPLATE_VERSION,
@@ -2547,6 +2547,30 @@ async def deliver_content_task(
             },
         )
         return {"ok": True}
+    if task.template_version in {"free-news/v1", "pro-news/v2"}:
+        if not task.news_evidence_id:
+            raise HTTPException(status_code=422, detail="News evidence ID обязателен")
+        allowed, terminal, reason = await asyncio.to_thread(
+            news_pair_delivery_gate,
+            service.repository,
+            runtime_settings(),
+            task.delivery_id,
+            task.news_evidence_id,
+        )
+        if not allowed:
+            await asyncio.to_thread(
+                service.repository.record_audit_event,
+                "news_pair_delivery_block",
+                {
+                    "delivery_id": task.delivery_id,
+                    "news_evidence_id": task.news_evidence_id,
+                    "reason": reason,
+                    "terminal": terminal,
+                },
+            )
+            if terminal:
+                return {"ok": True}
+            raise HTTPException(status_code=503, detail=f"News pair ожидает готовности: {reason}")
     if task.template_version == FREE_TEMPLATE_VERSION:
         required = (
             task.decision_id,
