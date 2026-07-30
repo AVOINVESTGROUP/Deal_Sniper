@@ -214,3 +214,75 @@ production queue `telegram-delivery` остаётся `RUNNING`.
 
 R8.1.2.1 готов к отдельному разрешению production deploy. Текущее разрешение на production для
 аннулированного R8.1.2 не переносится на новый commit/digest автоматически.
+
+## Production cutover R8.1.2.1 — 30 июля 2026
+
+Владелец отдельно разрешил deploy фразой `Разрешаю production deploy R8.1.2.1`.
+
+Перед изменением остановлены только content scheduler и `telegram-delivery`. Collectors и
+processing не отключались. Создан новый Firestore export:
+
+`gs://avo-deal-sniper-firestore-exports/r8121-production-20260730-144413`
+
+Export завершился успешно (`completedWork=106534`). Затем exact immutable image развёрнут в
+delivery-off режиме:
+
+- API revision `deal-sniper-api-00065-5s5`, после включения delivery — `deal-sniper-api-00066-lcf`;
+- `deal-sniper-publisher`, args `main.py content`;
+- `deal-sniper-news-publisher`, args `main.py news`;
+- implementation commit `6dd9af358772f9c37ed006632c0202b19d91fd5a`;
+- digest `sha256:b6a2e5cb9ae7de2c14e2e26bc141c077292d78e16c1e23ffee1f1f6573de75f4`;
+- `/health=ok`, `/version` вернул тот же commit/digest и schema `2`.
+
+Первый execution нового job был остановлен самим Cloud Run до данных и delivery из-за ошибочно
+переданного единого аргумента `main.py news`. Args исправлены на два значения `main.py`, `news`;
+задач и Telegram-сообщений ошибочный execution не создал. Delivery-off execution
+`deal-sniper-news-publisher-nnhhk` завершился успешно с пустой очередью.
+
+### Контролируемая production-пара
+
+При PAUSED queue один delivery-enabled execution поставил ровно две задачи:
+
+1. Pro task `eaee8feb6d31664d4c79538d25c7c18942348548681c51f24b65400e865a14b`,
+   delivery `fd8ea4cd0e9528acb6bf3874fd529833c8e3a6fa30ac01b1df9897312d24db6b`;
+2. Free task `a4d712ce828322cd59f000541ce0f0ed56aef82076595fb1ea6313b3e5e42a4`,
+   delivery `6d7a8475b57c7e6c86ef073aa138194121698877db16590e876b72d03d736369`.
+
+Pro была запланирована раньше Free. Обе задачи имели `dispatchCount=0`, `responseCount=0`, один
+evidence `de880e49311f1d76fa67fdd581e689beb22ea4f8c00b72dec0e8e7090eb09742`, publisher
+`DubiCars`, URL `https://www.dubicars.com/news/uae-car-market-recovery-2026.html`, fingerprint
+`9738230f4f0c295087a0395353a3a94dca39abfb919733521b834c7dc076c374` и image SHA-256
+`07344abd6acccfcc6cc02746f21a2122bd66d057495e4daec5852e8d25f4859d`. `content/v1`
+отсутствовал.
+
+После включения API delivery и resume queue получены два terminal результата `sent`:
+
+- существующий Pro-канал `-1004319276577`: Telegram message ID `37`;
+- существующий Free-канал `@Dubai_Auto_Invest`: Telegram message ID `171`.
+
+Публичная Free-страница `https://t.me/Dubai_Auto_Invest/171` возвращает HTTP 200 и содержит
+исходную DubiCars статью с source-backed изображением.
+
+### Повторный bounded run и штатный режим
+
+Повторный ручной execution `deal-sniper-news-publisher-ts4jg` не повторил уже отправленную
+evidence: он выбрал следующую ещё не опубликованную фактическую DubiCars статью
+`https://www.dubicars.com/news/top-5-readily-available-evs-uae.html`. Получена новая точная
+пара Pro message `38` → Free message `172` с общим fingerprint
+`bf91e748ad63286193194ad1177f5d21d41562e86906b91bb8f5f871047abe3b`; первая статья не
+дублировалась. `https://t.me/Dubai_Auto_Invest/172` возвращает HTTP 200.
+
+Финальное состояние:
+
+- API `deal-sniper-api-00066-lcf`, exact commit/digest/schema подтверждены через Gateway;
+- оба Cloud Run Job используют тот же digest, корректные args и `DELIVERY_ENABLED=true`;
+- `deal-sniper-news-every-6h` — `ENABLED`, `0 */6 * * *`, `Asia/Dubai`;
+- `deal-sniper-weekly-market-pulse` — `ENABLED`, `0 10 * * 6`, `Asia/Dubai`;
+- legacy `deal-sniper-content-every-6h` — `PAUSED`, чтобы не конкурировать с разделёнными
+  расписаниями;
+- `telegram-delivery` — `RUNNING`, лимиты 5 concurrent/10 per second, очередь пуста;
+- `listing-processing` — пуста.
+
+R8.1.2.1 активен в production. Для rollback сохранены свежий export, предыдущий API revision
+`deal-sniper-api-00064-9sk` и предыдущий digest
+`sha256:7a8ed30227434bfe6411e3d457a76b550c5ba39d9dd877560c4fed05223af897`.

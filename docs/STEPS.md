@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 30 июля 2026 — R8.1.2.1 активирован в production
+
+- Владелец отдельно разрешил production deploy R8.1.2.1. Перед cutover создан свежий Firestore export `gs://avo-deal-sniper-firestore-exports/r8121-production-20260730-144413`; операция завершилась успешно.
+- Exact image `sha256:b6a2e5cb9ae7de2c14e2e26bc141c077292d78e16c1e23ffee1f1f6573de75f4` развёрнут в API revision `deal-sniper-api-00066-lcf`, `deal-sniper-publisher` (`main.py content`) и `deal-sniper-news-publisher` (`main.py news`). `/health=ok`, `/version` подтверждает commit `6dd9af358772f9c37ed006632c0202b19d91fd5a`, digest и schema 2.
+- При остановленной очереди создана точная пара задач `pro-news/v2` → `free-news/v1` для DubiCars evidence `de880e49…09742`; Pro была поставлена раньше Free, legacy `content/v1` отсутствовал. После resume обе карточки получили состояния `sent`: Pro message ID `37`, Free message ID `171`.
+- Дополнительный bounded run доставил следующую отдельную DubiCars evidence без повторения первой статьи: Pro message ID `38`, Free message ID `172`. Внутри каждой пары совпадают publisher, URL, fingerprint и image SHA; очередь после доставки пуста.
+- Активированы `deal-sniper-news-every-6h` и `deal-sniper-weekly-market-pulse`; старое совмещённое `deal-sniper-content-every-6h` оставлено `PAUSED`, чтобы расписания не конкурировали. `telegram-delivery` работает со штатными лимитами 5/10 и пуста.
+- Публичные Free-карточки доступны по адресам `https://t.me/Dubai_Auto_Invest/171` и `https://t.me/Dubai_Auto_Invest/172`; обе страницы возвращают HTTP 200 и содержат исходную статью с иллюстрацией.
+
 ## 30 июля 2026 — R8.1.2.1 прошёл Security Gate и staging rehearsal
 
 - Commit `6dd9af358772f9c37ed006632c0202b19d91fd5a` прошёл GitHub Actions push `30542429343` и PR `30542431711`; container gate сохранил SARIF artifact и не обнаружил HIGH/CRITICAL.
