@@ -484,3 +484,10 @@
 - Негативные тесты покрывают отсутствующую сторону, несовпадающее изображение, отказ второй задачи, повторный запуск, Pro→Free gate и отсутствие Market Pulse/deal tasks в news-only.
 - Локально успешны Ruff, mypy, 136 passed / 2 skipped, coverage 61,5%, pip-audit и Terraform validate. Production остаётся на R8.1.1.
 - Локальный gate: Ruff, strict mypy, 130 passed/2 skipped, Terraform fmt/validate и `git diff --check`. Production и Telegram не изменены.
+
+## 30 июля 2026 — диагностика container gate R8.1.2.1
+
+- Коммит `6596ae85730ee948b1036799ee8e91378201e43a` прошёл Python 3.11 quality и Terraform, но оба container job остановлены Trivy.
+- Независимая проверка официального `python:3.11.15-slim-bookworm` подтвердила ноль системных HIGH/CRITICAL и два HIGH CVE во встроенных пакетах `setuptools`: `CVE-2026-23949` (`jaraco.context 5.3.0`) и `CVE-2026-24049` (`wheel 0.45.1`).
+- Создан черновик `docs/PLAN_R8_1_2_1_SECURITY_GATE_ADDENDUM.md`: multi-stage runtime без сборочных инструментов и читаемый Trivy/SARIF без ослабления gate.
+- Код, staging и production не изменялись. До явного утверждения дополнения исправление CI запрещено.

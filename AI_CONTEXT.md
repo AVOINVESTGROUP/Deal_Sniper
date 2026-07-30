@@ -298,3 +298,7 @@ Free отправляется только после `sent` соответст�
 `paired_pending`, `paired_enqueued`, `blocked_pair`. Локальный gate: 136 passed / 2 skipped,
 61,5% coverage, Ruff, strict mypy, dependency audit и Terraform validate. Production
 по-прежнему R8.1.1; старые pending evidence/outbox и backup сохранены.
+
+## R8.1.2.1 — блокирующий container gate 30 июля 2026
+
+Commit `6596ae85730ee948b1036799ee8e91378201e43a` имеет зелёные Python 3.11 quality и Terraform jobs, но красный container/Trivy. Read-only диагностика официального `python:3.11.15-slim-bookworm` нашла `CVE-2026-23949` в vendored `setuptools/_vendor/jaraco.context 5.3.0` и `CVE-2026-24049` в vendored `setuptools/_vendor/wheel 0.45.1`; исправленные версии — `6.1.0` и `0.46.2`. Debian HIGH/CRITICAL отсутствуют. Текущий workflow скрывает детали в неэкспортируемом SARIF. Создан черновик `docs/PLAN_R8_1_2_1_SECURITY_GATE_ADDENDUM.md`: двухэтапный runtime без build tooling и наблюдаемый, но неизменно блокирующий Trivy. Код и облако не изменены; требуется явное утверждение владельца.
