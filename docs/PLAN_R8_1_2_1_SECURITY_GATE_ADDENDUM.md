@@ -1,6 +1,6 @@
 # Дополнение к плану R8.1.2.1 — закрытие контейнерного security gate
 
-Статус: **черновик, код не изменяется до утверждения владельцем**.
+Статус: **утверждён владельцем 30 июля 2026 года; реализован локально, production не изменён**.
 
 ## Диагноз
 
@@ -45,3 +45,14 @@
 
 Дополнение завершено только при зелёном блокирующем container/Trivy gate без исключений и без сборочных
 инструментов в runtime image. До этого immutable release candidate не существует.
+
+## Результат локальной реализации
+
+- Dockerfile переведён на отдельные `builder` и `runtime` stages;
+- runtime запускает Uvicorn через `python -m uvicorn` и не содержит импортируемых `pip`, `setuptools` или `wheel`;
+- импорт `src.web:app` из собранного контейнера успешен;
+- локальный Trivy 0.70.0 подтвердил ноль исправляемых HIGH/CRITICAL для Debian 12.15 и Python-пакетов;
+- CI сохраняет блокирующий table scan, а отдельный SARIF создаётся даже при отказе и хранится как artifact 14 дней;
+- полный локальный gate: Ruff, strict mypy, 136 passed / 2 skipped, покрытие 61,5%, dependency audit без известных уязвимостей, Terraform fmt/init/validate и JavaScript syntax успешны.
+
+GitHub Actions и immutable staging ещё не выполнены. Production остаётся на R8.1.1.

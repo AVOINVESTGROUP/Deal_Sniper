@@ -491,3 +491,12 @@
 - Независимая проверка официального `python:3.11.15-slim-bookworm` подтвердила ноль системных HIGH/CRITICAL и два HIGH CVE во встроенных пакетах `setuptools`: `CVE-2026-23949` (`jaraco.context 5.3.0`) и `CVE-2026-24049` (`wheel 0.45.1`).
 - Создан черновик `docs/PLAN_R8_1_2_1_SECURITY_GATE_ADDENDUM.md`: multi-stage runtime без сборочных инструментов и читаемый Trivy/SARIF без ослабления gate.
 - Код, staging и production не изменялись. До явного утверждения дополнения исправление CI запрещено.
+
+## 30 июля 2026 — локальная реализация security gate R8.1.2.1
+
+- Владелец утвердил `docs/PLAN_R8_1_2_1_SECURITY_GATE_ADDENDUM.md`.
+- Docker переведён на multi-stage: зависимости собираются отдельно, а runtime не содержит импортируемых `pip`, `setuptools` и `wheel`.
+- Runtime smoke успешно импортирует `src.web:app`; локальный Trivy показывает ноль исправляемых HIGH/CRITICAL для Debian и Python-пакетов.
+- CI теперь выводит блокирующий table-отчёт и всегда сохраняет отдельный SARIF artifact, не меняя severity, `ignore-unfixed` или exit code.
+- Полный локальный gate успешен: Ruff, strict mypy, 136 passed / 2 skipped, coverage 61,5%, pip-audit, Terraform и JavaScript syntax.
+- Production и staging не изменялись. Следующий gate — GitHub Actions на точном commit.

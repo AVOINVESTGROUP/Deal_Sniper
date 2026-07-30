@@ -146,3 +146,21 @@ audit без известных уязвимостей, Terraform fmt/init/valid
 что отказ второй постановки не открывает delivery gate, повтор не добавляет задач, а Free
 не отправляется до точного Telegram message ID Pro. GitHub Python 3.11, container/Trivy и
 Terraform gates должны пройти до нового immutable build. Production не изменён.
+
+## Security gate R8.1.2.1
+
+После публикации commit `6596ae85730ee948b1036799ee8e91378201e43a` Trivy заблокировал container job из-за
+`CVE-2026-23949` и `CVE-2026-24049` во встроенных vendored-пакетах базового `setuptools`.
+Владелец утвердил отдельное дополнение к плану. Runtime переведён на multi-stage и очищен от
+`pip`, `setuptools`, `wheel` и `ensurepip`; зависимости приложения переносятся из builder stage.
+
+Локальная сборка `deal-sniper:r8121-security` подтвердила:
+
+- успешный импорт `src.web:app`;
+- отсутствие импортируемых `pip`, `setuptools` и `wheel`;
+- ноль исправляемых HIGH/CRITICAL в Trivy для Debian 12.15 и Python-пакетов;
+- успешные 136 тестов, Ruff, strict mypy, pip-audit, Terraform и JavaScript syntax.
+
+CI дополнен читаемым блокирующим table scan и отдельным SARIF artifact без ослабления security gate.
+До зелёного GitHub Actions и нового immutable staging digest release candidate отсутствует.
+Production остаётся на R8.1.1.
