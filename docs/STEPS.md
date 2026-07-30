@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 30 июля 2026 — повторно подтверждена причина отсутствия автомобильных предложений
+
+- Read-only production-аудит после R8.1.2.1 насчитал 1 690 current decisions: `INSUFFICIENT_DATA=1608`, `REJECT=81`, `INSPECT=1`, `CONTACT=0`; рынок рассчитан только для 82 решений.
+- Единственный текущий publishable candidate `opensooq:284587230` уже имеет terminal Pro delivery `sent`, Telegram message ID `35`; поэтому идемпотентный publisher обоснованно не создаёт новую карточку.
+- Все четыре scheduler с выражениями `0/10`, `2/10`, `4/10`, `6/10` фактически запускаются раз в час. Последние циклы получили 143/120/125/141 объявление, то есть источники не пусты.
+- Последний DubiCars cycle содержит `KeyError: offers`; production processing за два часа зарегистрировал 136 HTTP 429 detail-verification отказов.
+- Обнаружен runtime drift: collectors используют старый digest `sha256:c2e55afd…da9112`, API и publishers — R8.1.2.1 `sha256:b6a2e5cb…de75f4`.
+- `docs/PLAN_R8_1_3_LISTING_PUBLICATION_RECOVERY.md` обновлён текущими доказательствами. Код, данные и production не изменялись; реализация требует явного утверждения R8.1.3.
+
 ## 30 июля 2026 — R8.1.2.1 активирован в production
 
 - Владелец отдельно разрешил production deploy R8.1.2.1. Перед cutover создан свежий Firestore export `gs://avo-deal-sniper-firestore-exports/r8121-production-20260730-144413`; операция завершилась успешно.
