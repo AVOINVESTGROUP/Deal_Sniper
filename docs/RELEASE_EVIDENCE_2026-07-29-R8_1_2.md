@@ -97,3 +97,33 @@ Telegram сообщения не изменялись.
 4. сверка Telegram message ID, publisher, URL, image SHA и ответа чата;
 5. возврат штатного content schedule либо rollback.
 
+## Неуспешный production cutover 30 июля 2026
+
+Владелец отдельно разрешил production deploy. До мутаций создан защищённый Firestore export
+`gs://avo-deal-sniper-firestore-exports/r812-production-20260730-100157`. Delivery-off
+revision `deal-sniper-api-00063-cq4`, publisher execution `deal-sniper-publisher-z9pxk` и
+Gateway config `r812-946db4e` подтвердили пять production evidence/assets и одну точную
+pending Free/Pro пару.
+
+Контролируемая постановка задач выявила новый блокер: publisher поставил только Free news
+задачу, оставил Pro news `pending` и отдельно поставил legacy `content/v1`. Queue оставалась
+PAUSED; обе задачи удалены при `dispatchCount=0`, Telegram сообщений не создано.
+
+Выполнен полный rollback:
+
+- API revision `deal-sniper-api-00064-9sk` снова использует R8.1.1 digest
+  `sha256:7a8ed302…af897`;
+- publisher generation `55` использует тот же R8.1.1 digest;
+- Gateway возвращён на `deal-sniper-config-source-12bdee5`;
+- `telegram-delivery` — `RUNNING` и пуста;
+- `deal-sniper-content-every-6h` — `ENABLED`;
+- `/health=ok`, `/version` снова показывает commit `308545a…f87a`;
+- отправок в Free/Pro во время cutover не было.
+
+Пять immutable `news_evidence`, проверенная registry entry `environment-default` и pending
+Free/Pro outbox-пара намеренно сохранены как доказательство и вход для следующего
+идемпотентного rehearsal. R8.1.1 их не публикует; связанных Cloud Tasks нет.
+
+Digest R8.1.2 больше не допускается к production. Исправление описано в
+`docs/PLAN_R8_1_2_1_PAIRED_NEWS_DELIVERY.md` и требует отдельного утверждения до изменения
+кода.

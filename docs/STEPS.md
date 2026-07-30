@@ -463,4 +463,14 @@
 - Одна evidence revision создаёт отдельные идемпотентные `free-news/v1` и `pro-news/v2` карточки с одинаковыми evidence ID и image SHA-256. Канальная доставка разрешает только `sendPhoto`; text fallback запрещён.
 - Admin API/Web показывает provenance, thumbnail, MIME, размер, SHA-256 и состояния обеих доставок; registry принимает publisher/image domain allowlists.
 - Реальная delivery-off проверка DubiCars приняла 5 из 5 свежих статей и сохранила 5 JPEG/WebP assets. Парная проверка двух статей создала 4 outbox-карточки без расхождений Free/Pro.
+
+## 30 июля 2026 — остановленный production cutover R8.1.2
+
+- Перед cutover создан защищённый export `r812-production-20260730-100157`; content scheduler и delivery queue были поставлены на паузу.
+- Exact digest R8.1.2 временно работал с delivery-off и создал пять реальных DubiCars evidence/assets и одну точную pending Free/Pro пару.
+- При контролируемой постановке задач обнаружено, что pending-ветка publisher ставит только первую Free news, оставляет Pro news pending и отдельно переочередяет `content/v1`.
+- Queue не возобновлялась: обе задачи удалены при нулевом dispatch, Telegram сообщений не создано.
+- Выполнен полный rollback на R8.1.1: API `deal-sniper-api-00064-9sk`, publisher generation 55, прежний Gateway config, queue RUNNING/пуста, content scheduler ENABLED, health/version корректны.
+- Immutable evidence, проверенная registry entry и pending Free/Pro пара сохранены без задач как вход для идемпотентного исправления; R8.1.1 их не публикует.
+- Создан `docs/PLAN_R8_1_2_1_PAIRED_NEWS_DELIVERY.md`; код запрещено менять до явного утверждения владельца.
 - Локальный gate: Ruff, strict mypy, 130 passed/2 skipped, Terraform fmt/validate и `git diff --check`. Production и Telegram не изменены.
