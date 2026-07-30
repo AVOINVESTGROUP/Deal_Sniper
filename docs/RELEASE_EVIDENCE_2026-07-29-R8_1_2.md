@@ -162,5 +162,55 @@ Terraform gates должны пройти до нового immutable build. Pro
 - успешные 136 тестов, Ruff, strict mypy, pip-audit, Terraform и JavaScript syntax.
 
 CI дополнен читаемым блокирующим table scan и отдельным SARIF artifact без ослабления security gate.
-До зелёного GitHub Actions и нового immutable staging digest release candidate отсутствует.
-Production остаётся на R8.1.1.
+
+## Финальный release candidate R8.1.2.1
+
+- source/implementation commit: `6dd9af358772f9c37ed006632c0202b19d91fd5a`;
+- GitHub Actions: push `30542429343`, PR `30542431711`, все jobs успешны;
+- Cloud Build: `623817ea-787f-45ec-af4d-9765ed44dbcd`;
+- immutable image:
+  `me-central1-docker.pkg.dev/avo-deal-sniper/deal-sniper/app@sha256:b6a2e5cb9ae7de2c14e2e26bc141c077292d78e16c1e23ffee1f1f6573de75f4`;
+- staging API revision: `deal-sniper-api-staging-00048-bxv`;
+- staging Firestore database: `deal-sniper-stage-rc2`;
+- staging queue: `telegram-delivery-staging`, состояние во время проверки — `PAUSED`.
+
+Exact-digest runtime smoke и registry-mode Trivy подтвердили импорт приложения, отсутствие
+импортируемых `pip`, `setuptools`, `wheel` и ноль исправляемых HIGH/CRITICAL.
+
+### Парный staging rehearsal
+
+Первый delivery-off execution `deal-sniper-publisher-staging-9g44c` завершился успешно и не
+создал Cloud Tasks. Для контролируемой проверки постановки очередь оставалась `PAUSED`, а
+получатели были фиктивными: `staging-pro-preview` и `staging-free-preview`.
+
+Fail-closed execution `deal-sniper-publisher-staging-4vxj6` ожидаемо остановился до доступа к
+данным: отсутствовали обязательные staging `PUBLISHER_JOB_NAME` и allowlist production recipients.
+После добавления только этих staging-параметров, без ослабления guard и без изменения production,
+execution `deal-sniper-publisher-staging-qx9nb` дал:
+
+```text
+News: selected=1, created=0, requeued=2, paired=1, blocked=0, failed=0
+```
+
+В очереди появились ровно две задачи на `/tasks/deliver-content`:
+
+1. `pro-news/v2`, task `25d7dd1b053f2f328935ed79be829841b4e270c2711cfbe866b0071a5a1fd96`;
+2. `free-news/v1`, task `5e9217c6bac15cb361e761be04cda4b0299c87dc69e76196504bcef7c82dde5`.
+
+Pro была поставлена на 656 мс раньше Free. У обеих задач совпали:
+
+- `news_evidence_id=de880e49311f1d76fa67fdd581e689beb22ea4f8c00b72dec0e8e7090eb09742`;
+- source URL `https://www.dubicars.com/news/uae-car-market-recovery-2026.html`;
+- fingerprint `9738230f4f0c295087a0395353a3a94dca39abfb919733521b834c7dc076c374`;
+- image SHA-256 `07344abd6acccfcc6cc02746f21a2122bd66d057495e4daec5852e8d25f4859d`.
+
+Обе задачи имели `dispatchCount=0` и `responseCount=0`; legacy `content/v1` отсутствовал. После
+проверки удалены только эти две staging-задачи. Delivery возвращён в `false`, повторный execution
+`deal-sniper-publisher-staging-kf8lh` завершился с `requeued=0`, staging queue осталась `PAUSED` и пуста.
+
+Production не изменялся: API `deal-sniper-api-00064-9sk`, publisher generation `55` и digest
+`sha256:7a8ed30227434bfe6411e3d457a76b550c5ba39d9dd877560c4fed05223af897` сохранены;
+production queue `telegram-delivery` остаётся `RUNNING`.
+
+R8.1.2.1 готов к отдельному разрешению production deploy. Текущее разрешение на production для
+аннулированного R8.1.2 не переносится на новый commit/digest автоматически.

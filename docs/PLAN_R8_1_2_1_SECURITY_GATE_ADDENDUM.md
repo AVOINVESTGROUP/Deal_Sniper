@@ -55,4 +55,24 @@
 - CI сохраняет блокирующий table scan, а отдельный SARIF создаётся даже при отказе и хранится как artifact 14 дней;
 - полный локальный gate: Ruff, strict mypy, 136 passed / 2 skipped, покрытие 61,5%, dependency audit без известных уязвимостей, Terraform fmt/init/validate и JavaScript syntax успешны.
 
-GitHub Actions и immutable staging ещё не выполнены. Production остаётся на R8.1.1.
+## Итог CI, immutable build и staging
+
+- implementation commit: `6dd9af358772f9c37ed006632c0202b19d91fd5a`;
+- GitHub Actions push `30542429343` и PR `30542431711`: quality, container/Trivy и Terraform успешны;
+- оба CI-запуска сохранили отдельный `trivy-results` SARIF artifact;
+- Cloud Build `623817ea-787f-45ec-af4d-9765ed44dbcd` собрал точный digest
+  `sha256:b6a2e5cb9ae7de2c14e2e26bc141c077292d78e16c1e23ffee1f1f6573de75f4` из `git archive`
+  указанного commit;
+- импорт `src.web:app`, отсутствие импортируемых build tools и удалённый registry scan этого digest успешны;
+- staging API revision `deal-sniper-api-staging-00048-bxv` вернула `/health=ok`, а `/version` — точные
+  commit, digest и schema 2;
+- staging publisher execution `deal-sniper-publisher-staging-qx9nb` поставил ровно две задачи:
+  сначала `pro-news/v2`, затем `free-news/v1`; у них совпали evidence ID, URL, fingerprint и image SHA;
+- очередь `telegram-delivery-staging` всё время оставалась `PAUSED`, обе задачи имели `dispatchCount=0`,
+  после проверки они удалены;
+- delivery-off повтор `deal-sniper-publisher-staging-kf8lh` не создал повторов, очередь пуста;
+- fail-closed preflight отдельно отклонил запуск без явных `PUBLISHER_JOB_NAME=...-staging` и allowlist
+  production recipients; защита не ослаблялась.
+
+Security Gate и staging rehearsal завершены. Production остаётся на R8.1.1 и требует отдельного
+разрешения владельца для deploy R8.1.2.1.

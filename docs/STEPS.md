@@ -1,5 +1,14 @@
 # Журнал реализации
 
+## 30 июля 2026 — R8.1.2.1 прошёл Security Gate и staging rehearsal
+
+- Commit `6dd9af358772f9c37ed006632c0202b19d91fd5a` прошёл GitHub Actions push `30542429343` и PR `30542431711`; container gate сохранил SARIF artifact и не обнаружил HIGH/CRITICAL.
+- Cloud Build `623817ea-787f-45ec-af4d-9765ed44dbcd` создал immutable digest `sha256:b6a2e5cb9ae7de2c14e2e26bc141c077292d78e16c1e23ffee1f1f6573de75f4` из точного `git archive`.
+- Staging API `deal-sniper-api-staging-00048-bxv` подтвердил commit/digest/schema 2. Exact image импортирует `src.web:app` и не содержит импортируемых `pip`, `setuptools`, `wheel`.
+- В PAUSED staging-очереди publisher execution `deal-sniper-publisher-staging-qx9nb` поставил ровно Pro→Free пару с одной evidence/image SHA; dispatch не выполнялся, legacy `content/v1` отсутствовал.
+- Две проверенные staging-задачи удалены; delivery возвращён в `false`. Повтор `deal-sniper-publisher-staging-kf8lh` не создал дублей, очередь пуста.
+- Production не изменён и остаётся на R8.1.1 (`deal-sniper-api-00064-9sk`, publisher generation 55, digest `sha256:7a8ed302…af897`). Для R8.1.2.1 требуется новое отдельное разрешение production deploy.
+
 ## 29 июля 2026 — R8.1.1 активирован в production
 
 - Commit `308545a43a3b06d32f984e5d8d5d18294750f87a` прошёл оба GitHub Actions запуска; Cloud Build `ec0856ca-59c3-4b37-b804-382f6e17150c` создал digest `sha256:7a8ed30227434bfe6411e3d457a76b550c5ba39d9dd877560c4fed05223af897`.
