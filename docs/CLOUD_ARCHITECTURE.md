@@ -1,5 +1,11 @@
 # Архитектура Google Cloud
 
+> Эта схема описывает целевое направление, но не доказанное live-состояние.
+> Аудит 1 августа 2026 года обнаружил смешанные runtime versions, неполный production
+> Gateway, несогласованный Hosting config, неизолированный Terraform staging и
+> отсутствующий production MTProto collector. Каноническая целевая архитектура и
+> порядок сведения находятся в `PLAN_R9_FULL_PROJECT_RECOVERY.md`.
+
 ## Контур
 
 ```text
@@ -23,7 +29,7 @@ Cloud Scheduler -> Telegram MTProto collector/discovery Jobs
                     -> existing identity/processing pipeline
 
 Telegram webhook -> API Gateway -> Cloud Run API -> Firestore
-                                      -> external automotive news RSS (read-only)
+                                      -> сохранённое immutable news evidence
                                       -> Telegram Stars subscription / Pro channel membership
 Firebase Hosting TMA -> Telegram initData -> Firebase custom token -> Cloud Run API
 Firebase Hosting Admin -> Firebase Auth provider -> Firebase ID token

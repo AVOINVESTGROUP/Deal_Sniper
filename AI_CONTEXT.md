@@ -1,5 +1,24 @@
 # AI Context: Dubai Deal Sniper
 
+## Текущий статус R9 — 1 августа 2026
+
+Полный повторный аудит документов, ветки `production/deal-sniper-complete`, кода,
+тестов, Terraform и read-only production evidence показал, что систему нельзя выпускать
+продолжением R8.1.3G. API/publisher, collectors/migration/replay, staging, Git HEAD,
+Gateway и Hosting относятся к разным версиям. Admin routes live Gateway неполны;
+checked-in Admin config направлен в private `run.app`; scheduled publication reconciliation
+не развёрнут; source cron фактически срабатывает раз в час. Из 1 768 current decisions
+1 678 имеют `INSUFFICIENT_DATA`, 89 — `REJECT`, 1 — `INSPECT`; единственный eligible
+объект уже честно отправлен в Pro, Free и personal.
+
+Обнаружены P0 в migration re-entry/schema inventory, immutable Firestore semantics,
+current/freshness invalidation, outbox payload/CAS, internal auth, source binding/SSRF,
+Pro entitlement, staging IaC, Gateway/Admin и Firestore protection. Полный реестр и
+единый порядок исправлений зафиксированы в `docs/PLAN_R9_FULL_PROJECT_RECOVERY.md`.
+R6–R8 документы ниже — только история. R9 ожидает одной команды владельца
+`План R9 утверждаю`; production deploy потребует отдельного разрешения только после
+полного immutable staging evidence.
+
 R8.1.3F утверждён владельцем, реализован и прошёл immutable delivery-off staging.
 CarSwitch архивирует каждый HTTP 200
 до semantic validation и в едином bounded budget проверяет строгий HTML MIME, непустое

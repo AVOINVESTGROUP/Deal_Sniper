@@ -653,3 +653,32 @@
   регулярных jobs не считается изменением spec.
 - Полный протокол: `docs/RELEASE_EVIDENCE_2026-07-31-R8_1_3.md`. Следующий шаг возможен только
   после отдельной команды владельца `Разрешаю production deploy R8.1.3`.
+
+## 1 августа 2026 — полный аудит проекта и единый план R9
+
+- По прямому требованию владельца заново проверены SPEC, все текущие и исторические
+  планы, архитектура, operations, release evidence, рабочая ветка, исходный код, тесты,
+  Terraform, GitHub checks и read-only production/staging evidence.
+- Подтверждено, что проект частично работает, но не имеет единого baseline: API/publisher,
+  collectors/migration/replay, staging, Git HEAD, Gateway и Hosting относятся к разным
+  commit/digest/config revisions.
+- Live Admin закономерно выдаёт `Failed to fetch`: production Gateway не содержит
+  большинство новых Admin routes, а checked-in Hosting config пытается использовать
+  недоступный private Cloud Run напрямую.
+- Четыре source jobs существуют, однако имена `every-10m` не соответствуют фактическим
+  часовым executions; source health скрывает parser/429 errors. Отдельный production
+  publisher каждые 15 минут отсутствует.
+- Firestore содержит 1 768 current decisions: 1 678 `INSUFFICIENT_DATA`, 89 `REJECT`,
+  1 `INSPECT`. Единственный eligible объект уже отправлен в Pro, Free и personal;
+  искусственно повторять или выдумывать его запрещено.
+- Выявлены P0 в migration re-entry/schema inventory, immutable Firestore writes,
+  current/freshness invalidation, outbox payload/CAS, internal auth, source binding/SSRF,
+  Pro entitlement, staging IaC, publication scheduling и data protection.
+- Создан единый черновик `docs/PLAN_R9_FULL_PROJECT_RECOVERY.md`: полный реестр
+  P0/P1/P2, целевая архитектура, этапы R9.0–R9.12, migration/test/staging/cutover gates
+  и измеримый Definition of Done.
+- `IMPLEMENTATION_PLAN`, README, `AI_CONTEXT`, architecture и operations теперь явно
+  указывают на R9; R6–R8 сохранены только как история.
+- Код и production не изменялись. Реализация ожидает одной команды владельца
+  `План R9 утверждаю`; production deploy после полного staging evidence потребует
+  отдельной команды `Разрешаю production deploy R9`.

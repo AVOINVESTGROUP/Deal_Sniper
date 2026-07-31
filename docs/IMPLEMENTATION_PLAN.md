@@ -1,12 +1,13 @@
 # План реализации Dubai Deal Sniper
 
-> Актуальный корректирующий выпуск описан в `docs/PLAN_R8_RECOVERY.md`. Он разделяет
-> восстановление Pro-публикаций R8.1 и Google-вход Admin Web R8.2. R7.1–R7.3 остаются
-> историей реализации и staging evidence, но не разрешают production deploy.
+> **Текущий рабочий план — `docs/PLAN_R9_FULL_PROJECT_RECOVERY.md`.** Полный аудит
+> 1 августа 2026 года обнаружил release drift, дефекты миграции, evidence/current,
+> delivery, entitlement, Admin, поиска и data coverage. Разделы R6–R8 ниже сохранены
+> только как исторический журнал и не должны исполняться как текущий runbook.
 
-Статус: production работает на baseline R6. План R8 утверждён владельцем 29 июля
-2026 года; R8.1 реализован и проверен локально, immutable build и staging ещё не
-выполнялись.
+Статус: R9 ожидает единого утверждения владельцем. До этого код, immutable build,
+staging и production по R9 не изменяются. Старые approvals не разрешают продолжать
+частичную последовательность R8.1.3G.
 
 ## Правила выполнения
 

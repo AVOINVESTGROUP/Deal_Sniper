@@ -1,5 +1,10 @@
 # Операционный регламент
 
+> **Исполнение этого исторического регламента остановлено.** До утверждения и
+> реализации R9 нельзя запускать migration, replay, resume или production cutover по
+> старой последовательности. Актуальные gates и запрет partial rollback определены в
+> `PLAN_R9_FULL_PROJECT_RECOVERY.md`.
+
 Все команды выполняются с явным `--project=avo-deal-sniper`. Production delivery запрещена до финального cutover.
 
 ## 1. Локальный gate
