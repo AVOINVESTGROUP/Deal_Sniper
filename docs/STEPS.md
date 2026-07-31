@@ -1,6 +1,6 @@
 # Журнал реализации
 
-## 31 июля 2026 — R8.1.3F реализован и прошёл локальный gate
+## 31 июля 2026 — R8.1.3F прошёл immutable delivery-off staging
 
 - Владелец явно утвердил дополнение R8.1.3F.
 - CarSwitch выполняет строгую semantic validation внутри трёхпопыточного retry:
@@ -15,8 +15,14 @@
   дефект закрыт regression-тестом: один физический пустой payload и три audit-события.
 - Полный повторный локальный gate успешен: Ruff, strict mypy, `153 passed / 2 skipped`,
   coverage `62,44%`, dependency audit, Terraform, JavaScript и Docker Python 3.11.
-- Production не изменён. Далее: commit/CI, новый immutable digest и повтор трёх
-  delivery-off staging-циклов каждого из четырёх источников с отдельным staging raw bucket.
+- Commit `925597043f3596c1296723a668337dc474e8495a` прошёл GitHub Actions
+  `30619171198` и `30619176067`; Cloud Build `44381975-eca8-4165-b692-a3452fcfab7a`
+  создал digest `sha256:48ddd19e…22323`.
+- Отдельный staging raw bucket, Firestore database и PAUSED пустая Telegram queue прошли
+  read-back. Три последовательных цикла четырёх источников завершились `12/12` успешно;
+  два delivery-off publisher execution не создали задач или вымышленных предложений.
+- Production не изменён. Следующий шаг — только отдельное разрешение владельца на
+  production deploy R8.1.3.
 
 ## 31 июля 2026 — R8.1.3 staging gate остановлен на CarSwitch transient
 
@@ -579,3 +585,26 @@
 - Gate успешен: Ruff, strict mypy, 143 passed / 2 skipped, Terraform fmt/validate,
   локальный Docker image `deal-sniper:r8.1.3-local`.
 - Production, production Firestore, очереди, scheduler и Telegram-каналы не изменялись.
+
+## 31 июля 2026 — R8.1.3F и повторный delivery-off staging
+
+- Владелец явно утвердил дополнение R8.1.3F; production deploy этим утверждением не разрешён.
+- Commit `925597043f3596c1296723a668337dc474e8495a` и GitHub Actions `30619171198` /
+  `30619176067` зелёные. Cloud Build `44381975-eca8-4165-b692-a3452fcfab7a` собрал exact
+  digest `sha256:48ddd19e9f0abe8a93240045f0d51e9dbfb283a32d7265ddaf06df026be22323`.
+- CarSwitch выполняет semantic retry пустого HTTP 200, неправильного MIME и отсутствующего
+  ItemList в общем трёхпопыточном budget. Каждый HTTP capture создаёт отдельное append-only
+  `raw_snapshot_attempt`, даже если payload физически дедуплицирован по checksum.
+- Создан отдельный защищённый bucket `avo-deal-sniper-raw-snapshots-staging`; staging больше
+  не пишет raw evidence в production bucket. Publisher args исправлены на `main.py`, `publish`.
+- API revision `deal-sniper-api-staging-00052-82s` и пять staging jobs используют exact digest,
+  базу `deal-sniper-stage-rc2`, staging bucket и `DELIVERY_ENABLED=false`; Telegram secrets
+  отсутствуют, очередь `telegram-delivery-staging` всё время PAUSED и пуста.
+- Три последовательных цикла четырёх реальных источников завершились `12/12` успешно. Два
+  publisher rehearsal не создали карточек или задач, поскольку новой допустимой revision не
+  было; вымышленные предложения не создавались.
+- Нормализованная сверка production до/после подтвердила неизменность API revision/digest,
+  specs/generations девяти jobs, Scheduler и обеих очередей. Служебный resourceVersion
+  регулярных jobs не считается изменением spec.
+- Полный протокол: `docs/RELEASE_EVIDENCE_2026-07-31-R8_1_3.md`. Следующий шаг возможен только
+  после отдельной команды владельца `Разрешаю production deploy R8.1.3`.

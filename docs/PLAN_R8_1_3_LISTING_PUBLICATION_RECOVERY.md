@@ -1,12 +1,12 @@
 # План R8.1.3 — восстановление публикации автомобильных объявлений
 
-Статус: **R8.1.3F утверждён владельцем, включая отдельные append-only capture-события;
-полный повторный локальный gate успешен; требуется новый immutable build и delivery-off
-staging; production не изменён**.
+Статус: **R8.1.3F реализован; локальный gate, GitHub Actions, immutable build и три
+delivery-off staging-цикла 4/4 источников успешны; production не изменён и требует
+отдельного разрешения владельца**.
 
-## 0. Статус реализации 30 июля 2026 года
+## 0. Статус реализации 31 июля 2026 года
 
-Реализованы этапы R8.1.3A–R8.1.3E: исправлены десятиминутные расписания,
+Реализованы этапы R8.1.3A–R8.1.3F: исправлены десятиминутные расписания,
 устойчивый разбор DubiCars, ограничение нагрузки и `Retry-After`, tiered comparable
 selector, двухволновая обработка «верификация → перерасчёт рынка», отдельный
 идемпотентный publisher каждые 15 минут и наблюдаемая воронка Admin Web.
@@ -15,10 +15,12 @@ Admin Web обращается непосредственно к Cloud Run API �
 разделы с ограниченной параллельностью, чтобы один временно недоступный endpoint не
 обрушал всю панель. Google-вход включён в hosting runtime configuration.
 
-Локальный gate: Ruff, strict mypy, 143 passed / 2 skipped, Terraform fmt/validate и
-Docker build успешны. Следующие разрешённые действия — commit/CI и изолированная
-delivery-off staging-проверка. Production deploy, replay и Telegram-доставка требуют
-отдельного разрешения владельца после предъявления staging evidence.
+Финальный локальный gate: Ruff, strict mypy, 153 passed / 2 skipped, coverage 62,44%,
+dependency audit, Terraform, JavaScript и Docker успешны. Commit `925597043f35` прошёл
+оба GitHub Actions запуска; Cloud Build создал immutable digest `sha256:48ddd19e…22323`.
+Три delivery-off staging-цикла каждого из четырёх источников завершились `12/12`
+успешно в отдельной database/bucket/PAUSED queue. Production deploy, replay и
+Telegram-доставка требуют отдельного разрешения владельца.
 
 ## 1. Подтверждённая проблема
 
@@ -256,3 +258,21 @@ Regression-тест подтверждает один физический пу�
 Terraform fmt/init/validate, JavaScript ES-module syntax и Docker Python 3.11 runtime/import
 без `pip`, `setuptools` и `wheel`. Далее разрешены commit, GitHub Actions, новый
 commit-labelled immutable digest и повтор трёх delivery-off staging-циклов 4/4 источников.
+
+### Статус staging R8.1.3F — 31 июля 2026
+
+Commit `925597043f3596c1296723a668337dc474e8495a` прошёл оба GitHub Actions запуска.
+Cloud Build `44381975-eca8-4165-b692-a3452fcfab7a` создал immutable digest
+`sha256:48ddd19e9f0abe8a93240045f0d51e9dbfb283a32d7265ddaf06df026be22323`.
+
+Staging использует отдельный защищённый raw bucket, отдельную Firestore database и PAUSED
+пустую Telegram queue. API и пять jobs прошли read-back commit/digest/environment; delivery и
+WhatsApp выключены, Telegram secrets отсутствуют. Три последовательных цикла четырёх реальных
+источников завершились `12/12` успешно. Два publisher rehearsal не создали задач или
+публикаций при отсутствии новой допустимой revision. Это корректный fail-closed результат,
+а не основание создавать демонстрационный объект.
+
+Production revision/digest, job specs/generations, Scheduler и очереди по нормализованному
+снимку до/после не изменились. Полное evidence зафиксировано в
+`docs/RELEASE_EVIDENCE_2026-07-31-R8_1_3.md`. Реализация и staging завершены; production deploy,
+bounded replay и Telegram smoke всё ещё требуют отдельной явной команды владельца.

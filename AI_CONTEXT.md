@@ -1,6 +1,7 @@
 # AI Context: Dubai Deal Sniper
 
-R8.1.3F утверждён владельцем и реализован локально. CarSwitch архивирует каждый HTTP 200
+R8.1.3F утверждён владельцем, реализован и прошёл immutable delivery-off staging.
+CarSwitch архивирует каждый HTTP 200
 до semantic validation и в едином bounded budget проверяет строгий HTML MIME, непустое
 тело и `ItemList`. После трёх semantic transient записываются
 `error_category=semantic_empty_response` и `attempts=3`; snapshots/decisions не создаются.
@@ -9,8 +10,11 @@ Admin показывает категорию и число попыток. Cont
 `raw_snapshot_attempt` с номером, временем и URI. Regression-тест подтверждает один payload
 и три capture-события. Полный повторный gate успешен: Ruff, strict mypy по 42 source-файлам,
 `153 passed / 2 skipped`, coverage `62,44%`, audit, Terraform, JS и Docker Python 3.11.
-Production не изменён. Нужны commit, CI, новый immutable digest, отдельный staging raw bucket
-и повторный delivery-off staging; старый digest
+Commit `925597043f3596c1296723a668337dc474e8495a` прошёл оба GitHub Actions запуска;
+Cloud Build `44381975-eca8-4165-b692-a3452fcfab7a` создал digest
+`sha256:48ddd19e…22323`. Exact digest прошёл три цикла 4/4 источников в отдельной staging
+database/bucket при PAUSED пустой queue и выключенной доставке. Production не изменён;
+нужно только отдельное разрешение владельца на production deploy R8.1.3. Старый digest
 `sha256:4ecc211f…8d22` остаётся запрещён к продвижению.
 
 31 июля 2026 delivery-off staging R8.1.3 использовал commit
@@ -361,3 +365,30 @@ Firebase ID token. Локальный gate успешен: Ruff, strict mypy, 14
 Terraform fmt/validate и Docker build. Production остаётся на прежнем релизе: deploy,
 replay и Telegram-доставка допускаются только после immutable commit/build,
 delivery-off staging evidence и отдельного разрешения владельца.
+
+## R8.1.3F — immutable delivery-off staging (31 июля 2026)
+
+После отдельного утверждения дополнения CarSwitch получил bounded semantic retry для пустого
+HTTP 200, неверного MIME и отсутствующего ItemList. Каждый HTTP capture создаёт append-only
+`raw_snapshot_attempt`; одинаковые тела сохраняют один content-addressed payload, но имеют
+раздельные события с номером попытки и временем. Полный локальный gate: Ruff, strict mypy по
+42 source-файлам, 153 passed / 2 skipped, coverage 62,44%, pip-audit, Terraform,
+JavaScript syntax и Docker Python 3.11 runtime без build tooling.
+
+Source commit `925597043f3596c1296723a668337dc474e8495a` прошёл GitHub Actions push
+`30619171198` и Draft PR `30619176067`. Cloud Build
+`44381975-eca8-4165-b692-a3452fcfab7a` создал immutable digest
+`sha256:48ddd19e9f0abe8a93240045f0d51e9dbfb283a32d7265ddaf06df026be22323`.
+Exact digest развёрнут только в staging API `deal-sniper-api-staging-00052-82s` и пяти
+staging jobs. Используются `deal-sniper-stage-rc2`, отдельный bucket
+`avo-deal-sniper-raw-snapshots-staging`, `DELIVERY_ENABLED=false` и PAUSED пустая очередь;
+Telegram secrets отсутствуют.
+
+Три последовательных live-цикла DubiCars, CarSwitch, Cars24 и OpenSooq завершились 12/12
+успешно. Три CarSwitch capture имеют отдельные audit-события; live-сайт отвечал валидно с
+первой попытки, а recovery/exhaustion ветки доказаны regression tests. Два publisher rehearsal
+корректно дали ноль новых карточек и ноль задач, поскольку новой publishable revision не было.
+Нормализованный production diff подтвердил неизменность revision/digest API, specs/generations
+всех девяти jobs, Scheduler и очередей. Полное evidence находится в
+`docs/RELEASE_EVIDENCE_2026-07-31-R8_1_3.md`. Production deploy, replay и Telegram-доставка
+по-прежнему запрещены без отдельной команды владельца `Разрешаю production deploy R8.1.3`.
