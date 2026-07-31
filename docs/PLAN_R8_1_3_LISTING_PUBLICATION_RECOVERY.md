@@ -1,8 +1,8 @@
 # План R8.1.3 — восстановление публикации автомобильных объявлений
 
-Статус: **R8.1.3G реализован локально и прошёл полный local gate; новый GitHub Actions,
-immutable build и полный migration/replay staging rehearsal ещё не выполнены; production
-не изменён и после нового evidence потребует отдельного разрешения владельца**.
+Статус: **R8.1.3G source candidate и GitHub Actions успешны, но immutable build остановлен
+до утверждения дополнения R8.1.3G.1 об идемпотентности completed migration epoch;
+production не изменён**.
 
 ## 0. Статус реализации 31 июля 2026 года
 
@@ -383,3 +383,52 @@ Terraform fmt/init/validate, JavaScript ES-module syntax, Docker Python 3.11 imp
 и полный migration/replay rehearsal только на disposable staging clone при выключенной
 delivery. Старый digest `sha256:48ddd19e…22323` не продвигается. Production не изменён;
 предыдущее разрешение deploy не распространяется на новый digest.
+
+## 10. Дополнение R8.1.3G.1 — completed migration epoch нельзя открывать повторно
+
+### Подтверждённый диагноз
+
+Финальный review перед immutable build обнаружил отдельный safety-дефект в
+`FirestoreMigrator.run`. Existing ledger со статусом `completed` возвращается без действий
+только для повторного apply. Повторный `--dry-run` с теми же `cutover_at` и watermark
+создаёт тот же migration ID, но продолжает выполнение и в `_finish` перезаписывает ledger
+статусом `dry_run_complete`. Следующий apply больше не видит completed epoch, повторно
+инвалидирует derived state и `merge=false` возвращает replay requests этого epoch в
+`pending`.
+
+Это противоречит контракту класса «повторный запуск безопасен», требованию SPEC об
+идемпотентных Jobs и неизменяемости завершённого migration ledger. Ошибка обнаружена
+локально при read-only review. После commit `d881224` GitHub Actions полностью зелёные,
+но immutable build намеренно не запускался; staging и production не изменены.
+
+### Граница исправления
+
+1. Для existing ledger со статусом `completed` немедленно возвращать сохранённый
+   `MigrationReport` независимо от запрошенного режима dry-run/apply.
+2. Не выполнять inventory, validation, writes, invalidation, replay preparation или
+   `_finish` для завершённого epoch.
+3. Новый `cutover_at` или watermark по-прежнему создаёт новый migration ID и проходит
+   полный dry-run/apply; общий schema gate не ослабляется.
+4. `MIGRATION_TOOL_VERSION` остаётся `1.2.1`: версия ещё не была собрана в immutable image
+   и не проходила staging; исправление войдёт в единственный новый source candidate.
+5. Не менять финансовые engines, publication contracts, replay semantics, delivery или
+   production configuration.
+
+### Тесты, риски и релизный порядок
+
+1. Regression-тест выполняет оба повторных режима после completed ledger и доказывает
+   возврат сохранённого отчёта без batch commit, ledger write и открытия epoch.
+2. Снова выполнить полный local gate и GitHub Actions. Commit `d881224` не собирать и не
+   продвигать; создать новый commit-labelled digest только из исправленного source commit.
+3. Staging runbook сохраняется, но после apply дополнительно выполняется safe repeat-read
+   того же completed epoch и проверяется, что ledger, request states и attempts не изменены.
+4. Далее выполнить только disposable-clone delivery-off migration/replay rehearsal,
+   описанный в R8.1.3G. Production по-прежнему требует нового отдельного разрешения после
+   полного evidence.
+
+Риск возврата сохранённого отчёта приемлем: completed epoch является неизменяемым фактом.
+Для проверки нового среза оператор обязан использовать новый watermark/cutover, который
+даёт новый migration ID. Мутаций и миграции данных это дополнение не требует.
+
+Код дополнения запрещён до отдельного явного утверждения владельцем:
+`Дополнение R8.1.3G.1 утверждаю`.

@@ -233,3 +233,16 @@ staging clone при ошибке создаётся заново, а production
 Локальный Trivy в среде не установлен, поэтому GitHub Actions container scan остаётся
 обязательным блокирующим gate. Новый commit, digest, migration ID и staging ledger будут
 добавлены только после CI/build/rehearsal. Production на этом этапе не изменён.
+
+## STOP перед immutable build: completed epoch safety
+
+Source commit `d881224` прошёл оба GitHub Actions запуска: `quality`, `terraform` и
+блокирующий `container`/Trivy зелёные. Immutable image из него не собирался.
+
+Финальный read-only review обнаружил, что повторный dry-run после completed apply способен
+перезаписать неизменяемый ledger статусом `dry_run_complete`; последующий apply может
+повторно выполнить invalidation и вернуть requests того же epoch в pending. Облачные
+ресурсы, staging database и production не изменялись.
+
+Исправление и regression gate описаны в R8.1.3G.1. До явного утверждения дополнения source
+commit `d881224` не является build candidate.

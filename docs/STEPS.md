@@ -1,5 +1,17 @@
 # Журнал реализации
 
+## 31 июля 2026 — immutable build R8.1.3G остановлен до дополнения G.1
+
+- Source commit `d881224` отправлен в PR #3; оба набора GitHub Actions `quality`,
+  `terraform` и `container` успешны.
+- Финальный review обнаружил, что повторный dry-run после completed apply по тому же
+  migration ID понижает ledger до `dry_run_complete`; следующий apply может повторно
+  инвалидировать derived state и сбросить replay requests в `pending`.
+- Immutable build, staging migration/replay и любые production-мутации не запускались.
+- В утверждённый план добавлено R8.1.3G.1: completed epoch возвращает сохранённый report
+  без действий для dry-run и apply, с отдельным regression-тестом и полным повторным gate.
+  Код дополнения запрещён до явного утверждения владельца.
+
 ## 31 июля 2026 — R8.1.3G реализован локально
 
 - Владелец явно утвердил план R8.1.3G.

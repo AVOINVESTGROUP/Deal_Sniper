@@ -428,3 +428,11 @@ skipped, coverage 63%, pip-audit, Terraform, JavaScript ES-module syntax и Dock
 3.11 runtime; внутри образа подтверждён tool 1.2.1. Старый digest не продвигается.
 Production не изменён. Следующий этап — новый immutable build и полный delivery-off
 rehearsal на disposable staging clone; затем требуется новое отдельное разрешение владельца.
+
+После source commit `d881224` все GitHub checks прошли, однако immutable build остановлен
+финальным review. Повторный dry-run после completed apply создаёт тот же migration ID, но
+текущий код перезаписывает completed ledger как `dry_run_complete`; следующий apply может
+повторно инвалидировать state и сбросить requests в pending. Дополнение R8.1.3G.1 ограничено
+ранним возвратом сохранённого completed report для обоих режимов и regression-тестом
+отсутствия любых writes. Staging/production не изменены. Код запрещён до фразы владельца
+`Дополнение R8.1.3G.1 утверждаю`.
