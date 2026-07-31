@@ -16,10 +16,18 @@ from src.domain.models import (
 from src.storage import LocalRepository, snapshot_hash
 from src.verification import (
     PriceVerification,
+    _parse_retry_after,
     build_evidence,
     extract_detail_prices,
     verify_listing_price,
 )
+
+
+def test_retry_after_supports_seconds_and_http_date() -> None:
+    now = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
+    assert _parse_retry_after("7", now) == 7
+    assert _parse_retry_after("Thu, 30 Jul 2026 12:00:09 GMT", now) == 9
+    assert _parse_retry_after("invalid", now) is None
 
 
 def listing() -> ListingSnapshot:

@@ -184,6 +184,8 @@ class Repository(Protocol):
 
     def admin_summary(self) -> dict[str, Any]: ...
 
+    def listing_pipeline_summary(self) -> dict[str, Any]: ...
+
     def schema_version(self) -> str: ...
 
     def get_active_runtime_configuration(self) -> dict[str, Any] | None: ...
@@ -1019,6 +1021,46 @@ class LocalRepository:
             }
         return {"counts": counts, "outbox_states": outbox_states}
 
+    def listing_pipeline_summary(self) -> dict[str, Any]:
+        """Возвращает объяснимую воронку локального автомобильного контура."""
+        decisions = self.current_decisions(limit=100_000)
+        outbox = self.list_outbox(limit=100_000)
+        action_counts = {action.value: 0 for action in DecisionAction}
+        for _listing, decision in decisions:
+            action_counts[decision.action.value] += 1
+        with self._connect() as connection:
+            verified = int(
+                connection.execute(
+                    "SELECT COUNT(*) AS amount FROM verification_evidence WHERE status = ?",
+                    ("verified",),
+                ).fetchone()["amount"]
+            )
+            normalized = int(
+                connection.execute(
+                    "SELECT COUNT(*) AS amount FROM normalized_vehicles"
+                ).fetchone()["amount"]
+            )
+        return {
+            "fetched": self.count_snapshots(),
+            "verified": verified,
+            "normalized": normalized,
+            "decision": len(decisions),
+            "market": sum(decision.market is not None for _listing, decision in decisions),
+            "eligible": sum(
+                decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+                for _listing, decision in decisions
+            ),
+            "pro_sent": sum(
+                item.state is OutboxState.SENT and item.template_version == "pro/v1"
+                for item in outbox
+            ),
+            "free_sent": sum(
+                item.state is OutboxState.SENT and item.template_version == "free/v3"
+                for item in outbox
+            ),
+            "actions": action_counts,
+        }
+
     def schema_version(self) -> str:
         return "2"
 
@@ -1521,6 +1563,24 @@ class LocalRepository:
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         with self._connect() as connection:
+            previous = connection.execute(
+                "SELECT payload_json FROM source_health WHERE source_name = ?",
+                (source_name,),
+            ).fetchone()
+            previous_payload = json.loads(previous["payload_json"]) if previous else {}
+            completed_at = payload.get("completed_at")
+            previous_completed_at = previous_payload.get("completed_at")
+            if completed_at and previous_completed_at:
+                current_time = datetime.fromisoformat(str(completed_at))
+                previous_time = datetime.fromisoformat(str(previous_completed_at))
+                payload = {
+                    **payload,
+                    "previous_completed_at": previous_completed_at,
+                    "actual_interval_seconds": round(
+                        (current_time - previous_time).total_seconds(),
+                        3,
+                    ),
+                }
             connection.execute(
                 """
                 INSERT INTO source_health(source_name, payload_json) VALUES (?, ?)

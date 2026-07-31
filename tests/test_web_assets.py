@@ -75,7 +75,7 @@ def test_admin_keeps_verified_password_auth_until_r82() -> None:
     assert "/admin/sources/${button.dataset.source}/run" in script
     assert 'call("/admin/source-test"' in script
     assert 'call("/admin/sources"' in script
-    assert "Promise.allSettled" in script
+    assert "settleLimited" in script
     assert "getIdToken(true)" in script
     assert "transientStatuses" in script
     assert "Add source" in page
@@ -89,8 +89,8 @@ def test_admin_keeps_verified_password_auth_until_r82() -> None:
     assert "Historical failed records are diagnostic only" in script
     assert "[hidden]{display:none!important}" in (WEB / "styles.css").read_text(encoding="utf-8")
     runtime = json.loads((WEB / "runtime-config.json").read_text(encoding="utf-8"))
-    assert runtime["adminApiBase"] == runtime["apiBase"]
-    assert runtime["adminGoogleAuthEnabled"] is False
+    assert runtime["adminApiBase"].endswith(".run.app")
+    assert runtime["adminGoogleAuthEnabled"] is True
 
 
 def test_hosting_csp_allows_required_firebase_and_gateway_connections() -> None:
@@ -105,6 +105,7 @@ def test_hosting_csp_allows_required_firebase_and_gateway_connections() -> None:
 
     assert "https://www.gstatic.com" in csp
     assert "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev" in csp
+    assert "https://deal-sniper-api-1054850076890.me-central1.run.app" in csp
     assert config["hosting"]["rewrites"] == []
 
 
@@ -119,6 +120,7 @@ def test_gateway_declares_preflight_for_every_admin_browser_route() -> None:
         "/admin/runs",
         "/admin/schedulers/{job_name}/action",
         "/admin/listings",
+        "/admin/listing-pipeline",
         "/admin/decisions",
         "/admin/users",
         "/admin/errors",

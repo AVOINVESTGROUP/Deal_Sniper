@@ -321,3 +321,18 @@ DubiCars/CarSwitch/Cars24/OpenSooq 143/120/125/141 записей, однако 
 `sha256:b6a2e5cb…de75f4`. План R8.1.3 обновлён: единый immutable runtime, правильные интервалы,
 schema-compatible adapters, source-aware rate limiting, tiered deterministic comparables,
 event-driven Pro→Free и Admin funnel. Код и production до явного утверждения R8.1.3 не меняются.
+## R8.1.3 — текущий контекст (30 июля 2026)
+
+План R8.1.3 утверждён. Локально реализовано восстановление контура автомобильных
+объявлений без ослабления доказательности: правильные десятиминутные cron, устойчивый
+DubiCars parser, source-aware verification retry/rate limit, tiered comparable selector,
+двухволновая обработка для перерасчёта рынка, event-driven Pro→Free и отдельный
+15-минутный reconciliation publisher. Free по-прежнему создаётся только после точной
+Pro revision со статусом `sent`; выдуманные объекты, цены и аналоги запрещены.
+
+Admin Web получил воронку `fetched → verified → normalized → market → decision → Pro
+sent → Free sent`, ограниченную параллельность запросов и прямой Cloud Run admin API с
+Firebase ID token. Локальный gate успешен: Ruff, strict mypy, 143 passed / 2 skipped,
+Terraform fmt/validate и Docker build. Production остаётся на прежнем релизе: deploy,
+replay и Telegram-доставка допускаются только после immutable commit/build,
+delivery-off staging evidence и отдельного разрешения владельца.

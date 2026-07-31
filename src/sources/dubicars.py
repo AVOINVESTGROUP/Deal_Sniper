@@ -95,17 +95,37 @@ def parse_search_page(
 ) -> list[ListingSnapshot]:
     """Преобразует ItemList JSON-LD в доменные снимки."""
     soup = BeautifulSoup(html, "html.parser")
+    found_item_list = False
     for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
         raw = script.string or script.get_text()
         try:
             document = json.loads(raw)
         except json.JSONDecodeError:
             continue
-        graph = document.get("@graph", []) if isinstance(document, dict) else []
-        for node in graph:
-            if isinstance(node, dict) and node.get("@type") == "ItemList":
-                return _parse_item_list(node.get("itemListElement", []), aed_to_usd_rate)
+        for node in _item_lists(document):
+            found_item_list = True
+            parsed = _parse_item_list(node.get("itemListElement", []), aed_to_usd_rate)
+            if parsed:
+                return parsed
+    if found_item_list:
+        return []
     raise SourceError("В странице отсутствует ItemList JSON-LD")
+
+
+def _item_lists(value: Any) -> list[dict[str, Any]]:
+    """Находит ItemList в direct, @graph и вложенных вариантах JSON-LD."""
+    if isinstance(value, list):
+        result: list[dict[str, Any]] = []
+        for item in value:
+            result.extend(_item_lists(item))
+        return result
+    if not isinstance(value, dict):
+        return []
+    result = [value] if value.get("@type") == "ItemList" else []
+    for child in value.values():
+        if isinstance(child, (dict, list)):
+            result.extend(_item_lists(child))
+    return result
 
 
 def _parse_item_list(elements: Any, aed_to_usd_rate: Decimal) -> list[ListingSnapshot]:
@@ -114,13 +134,22 @@ def _parse_item_list(elements: Any, aed_to_usd_rate: Decimal) -> list[ListingSna
         return results
     for element in elements:
         try:
-            item = element["item"]
+            if not isinstance(element, dict):
+                continue
+            item = element.get("item") or element.get("mainEntity") or element
+            if not isinstance(item, dict):
+                continue
             if str(item.get("itemCondition", "")).endswith("NewCondition"):
                 continue
-            offer = item["offers"]
-            url = str(item["url"])
-            price = Decimal(str(offer["price"]))
-            currency = offer.get("priceCurrency")
+            offer = _fixed_price_offer(item)
+            if offer is None:
+                logger.info("DubiCars listing пропущен: отсутствует фиксированная цена")
+                continue
+            url = str(item.get("url") or element.get("url") or "")
+            if not url:
+                continue
+            price = Decimal(str(offer["price"]).replace(",", ""))
+            currency = str(offer.get("priceCurrency") or "").upper()
             if currency == "USD":
                 price *= aed_to_usd_rate
             elif currency != "AED":
@@ -131,30 +160,66 @@ def _parse_item_list(elements: Any, aed_to_usd_rate: Decimal) -> list[ListingSna
             make = _name_from_schema_id(item.get("brand"))
             model = _name_from_schema_id(item.get("model"))
             mileage = item.get("mileageFromOdometer", {}).get("value")
-            image = item.get("image")
+            images = item.get("image") or []
+            if isinstance(images, (str, dict)):
+                images = [images]
+            image_urls = [
+                HttpUrl(str(image.get("url") if isinstance(image, dict) else image))
+                for image in images
+                if (image.get("url") if isinstance(image, dict) else image)
+            ]
             results.append(
                 ListingSnapshot(
                     source="dubicars",
                     source_listing_id=listing_id,
                     url=HttpUrl(url),
-                    title=str(item["name"]),
+                    title=str(item.get("name") or item.get("headline") or "").strip(),
                     price_aed=price,
                     observed_at=datetime.now(UTC),
                     make=make,
                     model=model,
                     trim=str(item.get("vehicleConfiguration") or "").strip() or None,
-                    year=int(item["vehicleModelDate"]),
+                    year=int(str(item.get("vehicleModelDate") or item.get("modelDate"))),
                     mileage_km=int(mileage) if mileage is not None else None,
                     body_type=str(item.get("bodyType") or "").strip() or None,
                     transmission=str(item.get("vehicleTransmission") or "").strip() or None,
                     fuel_type=str(item.get("fuelType") or "").strip() or None,
                     seller_type=SellerType.DEALER,
-                    image_urls=[HttpUrl(str(image))] if image else [],
+                    image_urls=image_urls,
                 )
             )
         except (KeyError, TypeError, ValueError, InvalidOperation):
             logger.warning("Пропущена некорректная запись JSON-LD", exc_info=True)
     return results
+
+
+def _fixed_price_offer(item: dict[str, Any]) -> dict[str, Any] | None:
+    """Возвращает только явный разовый fixed-price offer, без платежей и P.O.R."""
+    raw_offers = item.get("offers")
+    offers = raw_offers if isinstance(raw_offers, list) else [raw_offers]
+    price_specification = item.get("priceSpecification")
+    if isinstance(price_specification, dict):
+        offers.append(price_specification)
+    for offer in offers:
+        if not isinstance(offer, dict):
+            continue
+        price = offer.get("price")
+        currency = str(offer.get("priceCurrency") or "").upper()
+        label = " ".join(
+            str(offer.get(key) or "")
+            for key in ("name", "description", "priceType", "unitText")
+        ).casefold()
+        if price in (None, "") or currency not in {"AED", "USD"}:
+            continue
+        if any(token in label for token in ("month", "monthly", "installment", "request")):
+            continue
+        try:
+            if Decimal(str(price).replace(",", "")) <= 0:
+                continue
+        except InvalidOperation:
+            continue
+        return {"price": price, "priceCurrency": currency}
+    return None
 
 
 def _source_listing_id(url: str) -> str:
@@ -165,7 +230,13 @@ def _source_listing_id(url: str) -> str:
 
 
 def _name_from_schema_id(value: Any) -> str | None:
-    if not isinstance(value, dict) or "@id" not in value:
+    if isinstance(value, str):
+        return value.strip() or None
+    if not isinstance(value, dict):
+        return None
+    if value.get("name"):
+        return str(value["name"]).strip() or None
+    if "@id" not in value:
         return None
     path = urlparse(str(value["@id"])).path.rstrip("/")
     slug = path.split("/")[-1].split("#", maxsplit=1)[0]

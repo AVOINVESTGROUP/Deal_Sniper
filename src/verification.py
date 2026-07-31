@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -24,7 +27,17 @@ from src.domain.models import (
 
 MAX_DETAIL_PRICE_GAP = Decimal("0.03")
 DEFAULT_VERIFICATION_TTL = timedelta(minutes=30)
-EXTRACTOR_VERSION = "detail-jsonld/v2"
+EXTRACTOR_VERSION = "detail-jsonld/v3"
+MAX_VERIFICATION_ATTEMPTS = 3
+MAX_RETRY_DELAY_SECONDS = 15.0
+SOURCE_MIN_INTERVAL_SECONDS = {
+    "dubicars": 1.5,
+    "carswitch": 0.75,
+    "cars24": 0.75,
+    "opensooq": 0.75,
+}
+_SOURCE_LOCKS: dict[str, asyncio.Lock] = {}
+_SOURCE_NEXT_REQUEST_AT: dict[str, float] = {}
 
 
 class TemporaryVerificationError(RuntimeError):
@@ -75,34 +88,59 @@ async def verify_listing_price(
         )
     }
     started = datetime.now(UTC)
-    try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=timeout_seconds,
-            headers=headers,
-        ) as client:
-            response = await client.get(str(listing.url))
-    except (httpx.TimeoutException, httpx.NetworkError) as error:
+    response: httpx.Response | None = None
+    last_network_error: Exception | None = None
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=timeout_seconds,
+        headers=headers,
+    ) as client:
+        for attempt in range(MAX_VERIFICATION_ATTEMPTS):
+            await _wait_for_source_slot(listing.source)
+            try:
+                response = await client.get(str(listing.url))
+                last_network_error = None
+            except (httpx.TimeoutException, httpx.NetworkError) as error:
+                last_network_error = error
+                if attempt + 1 >= MAX_VERIFICATION_ATTEMPTS:
+                    break
+                await asyncio.sleep(_retry_delay(listing, attempt, None))
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt + 1 >= MAX_VERIFICATION_ATTEMPTS:
+                    break
+                delay = _retry_delay(listing, attempt, response.headers.get("Retry-After"))
+                _SOURCE_NEXT_REQUEST_AT[listing.source] = max(
+                    _SOURCE_NEXT_REQUEST_AT.get(listing.source, 0.0),
+                    monotonic() + delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            break
+    if response is None:
+        error_name = type(last_network_error).__name__ if last_network_error else "NetworkError"
         return PriceVerification(
             VerificationStatus.TEMPORARY_ERROR,
             None,
-            f"Detail page временно недоступна: {type(error).__name__}",
+            f"timeout:{error_name}",
         )
     latency_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
     checksum = hashlib.sha256(response.content).hexdigest()
     if response.status_code == 429 or response.status_code >= 500:
+        category = "rate_limited" if response.status_code == 429 else "upstream_error"
         return PriceVerification(
             VerificationStatus.TEMPORARY_ERROR,
             None,
-            f"Временный HTTP status {response.status_code}",
+            f"{category}:HTTP {response.status_code}",
             checksum_sha256=checksum,
             latency_ms=latency_ms,
         )
     if response.status_code >= 400:
+        category = "blocked" if response.status_code in {401, 403} else "http_invalid"
         return PriceVerification(
             VerificationStatus.PERMANENT_INVALID,
             None,
-            f"Постоянный HTTP status {response.status_code}",
+            f"{category}:HTTP {response.status_code}",
             checksum_sha256=checksum,
             latency_ms=latency_ms,
         )
@@ -112,7 +150,7 @@ async def verify_listing_price(
         return PriceVerification(
             VerificationStatus.PERMANENT_INVALID,
             None,
-            "Конкретный listing не подтвердил фиксированную цену AED",
+            "missing_price:конкретный listing не подтвердил фиксированную цену AED",
             checksum_sha256=checksum,
             latency_ms=latency_ms,
         )
@@ -122,7 +160,7 @@ async def verify_listing_price(
         return PriceVerification(
             VerificationStatus.PERMANENT_INVALID,
             detail_price,
-            f"Цена detail page отличается на {relative_gap:.1%}",
+            f"price_mismatch:цена detail page отличается на {relative_gap:.1%}",
             checksum_sha256=checksum,
             currency="AED",
             latency_ms=latency_ms,
@@ -135,6 +173,51 @@ async def verify_listing_price(
         currency="AED",
         latency_ms=latency_ms,
     )
+
+
+async def _wait_for_source_slot(source: str) -> None:
+    """Сериализует detail-запросы источника внутри одного runtime instance."""
+    lock = _SOURCE_LOCKS.setdefault(source, asyncio.Lock())
+    async with lock:
+        delay = _SOURCE_NEXT_REQUEST_AT.get(source, 0.0) - monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+        _SOURCE_NEXT_REQUEST_AT[source] = monotonic() + SOURCE_MIN_INTERVAL_SECONDS.get(
+            source,
+            0.5,
+        )
+
+
+def _retry_delay(
+    listing: ListingSnapshot,
+    attempt: int,
+    retry_after: str | None,
+) -> float:
+    """Возвращает bounded Retry-After/backoff с устойчивым jitter для listing revision."""
+    parsed_retry_after = _parse_retry_after(retry_after)
+    if parsed_retry_after is not None:
+        return min(MAX_RETRY_DELAY_SECONDS, max(0.0, parsed_retry_after))
+    seed = hashlib.sha256(
+        f"{listing.source}:{listing.source_listing_id}:{attempt}".encode()
+    ).digest()[0]
+    jitter = seed / 255
+    return float(min(MAX_RETRY_DELAY_SECONDS, (2**attempt) + jitter))
+
+
+def _parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
+    if not value:
+        return None
+    stripped = value.strip()
+    try:
+        return max(0.0, float(stripped))
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(stripped)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        return max(0.0, (retry_at - (now or datetime.now(UTC))).total_seconds())
 
 
 def build_evidence(

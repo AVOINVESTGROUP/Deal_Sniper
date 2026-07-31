@@ -21,9 +21,9 @@ from src.domain.models import (
 MONEY_STEP = Decimal("0.01")
 INTERMEDIATE_STEP = Decimal("0.0001")
 PERCENT_STEP = Decimal("0.1")
-DECISION_ENGINE_VERSION = "3.1.0"
+DECISION_ENGINE_VERSION = "3.2.0"
 FINANCIAL_CONFIG_VERSION = "provisional-2026-07-v1"
-ADJUSTMENT_VERSION = "comparable-adjustments/v2"
+ADJUSTMENT_VERSION = "comparable-adjustments/v3"
 
 
 def money(value: Decimal) -> Decimal:
@@ -216,6 +216,18 @@ class ComparablePriceEngine:
         if len(accepted) < min_comparables:
             return None
 
+        # Широкая когорта tier 3 допустима только при ограниченной дисперсии.
+        # Это не позволяет получить привлекательный «рынок» из разных поколений
+        # или комплектаций одной модели с несопоставимыми ценами.
+        if any(item.cohort_tier == 3 for item in accepted):
+            accepted_values = [item.adjusted_price_aed or item.price_aed for item in accepted]
+            accepted_center = Decimal(str(median(accepted_values)))
+            accepted_mad = Decimal(
+                str(median(abs(value - accepted_center) for value in accepted_values))
+            )
+            if accepted_center <= 0 or accepted_mad / accepted_center > Decimal("0.35"):
+                return None
+
         accepted_prices = [item.adjusted_price_aed or item.price_aed for item in accepted]
         count = len(accepted_prices)
         low = accepted_prices[max(0, round((count - 1) * 0.25))]
@@ -228,6 +240,8 @@ class ComparablePriceEngine:
                 "price_aed": money_value(item.price_aed),
                 "adjusted_price_aed": money_value(item.adjusted_price_aed or item.price_aed),
                 "source_role": item.seller_type.value,
+                "cohort_tier": item.cohort_tier,
+                "reason": item.reason,
                 "accepted": item in accepted,
                 "adjustment_version": item.adjustment_version,
             }

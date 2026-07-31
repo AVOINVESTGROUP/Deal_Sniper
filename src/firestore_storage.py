@@ -578,6 +578,40 @@ class FirestoreRepository:
         }
         return {"counts": counts, "outbox_states": outbox_states}
 
+    def listing_pipeline_summary(self) -> dict[str, Any]:
+        """Считает воронку агрегатами и читает только небольшой sent outbox."""
+        current = self.client.collection("current_decisions")
+        total = _aggregation_count(current)
+        action_counts = {
+            action.value: _aggregation_count(current.where("action", "==", action.value))
+            for action in DecisionAction
+        }
+        sent_records: list[OutboxRecord] = []
+        for document in self.client.collection("delivery_outbox").where(
+            "state", "==", OutboxState.SENT.value
+        ).stream():
+            data = document.to_dict() or {}
+            payload = data.get("payload")
+            if isinstance(payload, dict):
+                sent_records.append(OutboxRecord.model_validate(payload))
+        return {
+            "fetched": self.count_snapshots(),
+            "verified": _aggregation_count(
+                self.client.collection("verification_evidence").where(
+                    "status", "==", "verified"
+                )
+            ),
+            "normalized": _aggregation_count(self.client.collection("normalized_vehicles")),
+            "decision": total,
+            "market": _aggregation_count(current.where("has_market", "==", True)),
+            "eligible": action_counts[DecisionAction.CONTACT.value]
+            + action_counts[DecisionAction.INSPECT.value],
+            "pro_sent": sum(item.template_version == "pro/v1" for item in sent_records),
+            "free_sent": sum(item.template_version == "free/v3" for item in sent_records),
+            "unclassified_legacy": total - sum(action_counts.values()),
+            "actions": action_counts,
+        }
+
     def schema_version(self) -> str:
         data = self.client.collection("schema_ledger").document("current").get().to_dict()
         return str((data or {}).get("schema_version", "legacy"))
@@ -768,6 +802,10 @@ class FirestoreRepository:
                     "listing_id": listing_id,
                     "content_hash": content_hash,
                     "engine_version": decision.engine_version,
+                    "action": decision.action.value,
+                    "has_market": decision.market is not None,
+                    "verification_version": decision.verification_version,
+                    "market_fingerprint": decision.market_fingerprint,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -1088,6 +1126,23 @@ class FirestoreRepository:
 
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         document = self.client.collection("source_registry").document(source_name)
+        get_document = getattr(document, "get", None)
+        existing = get_document().to_dict() or {} if callable(get_document) else {}
+        previous_value = existing.get("last_run")
+        previous: dict[str, Any] = previous_value if isinstance(previous_value, dict) else {}
+        completed_at = payload.get("completed_at")
+        previous_completed_at = previous.get("completed_at")
+        if completed_at and previous_completed_at:
+            current_time = datetime.fromisoformat(str(completed_at))
+            previous_time = datetime.fromisoformat(str(previous_completed_at))
+            payload = {
+                **payload,
+                "previous_completed_at": previous_completed_at,
+                "actual_interval_seconds": round(
+                    (current_time - previous_time).total_seconds(),
+                    3,
+                ),
+            }
         values = {"last_run": payload, "updated_at": datetime.now(UTC)}
         try:
             # update() заменяет top-level map last_run целиком.

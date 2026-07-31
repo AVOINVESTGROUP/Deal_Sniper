@@ -81,6 +81,21 @@ async def test_pipeline_is_versioned_and_does_not_reprocess_unchanged_data(
         == f"{item.listing.source}:{item.listing.source_listing_id}"
         for item in first.decisions
     )
+    funnel = service.repository.listing_pipeline_summary()
+    assert funnel["fetched"] == 7
+    assert funnel["verified"] == 7
+    assert funnel["normalized"] == 7
+    assert funnel["decision"] == 7
+    assert 1 <= funnel["market"] <= funnel["decision"]
+    assert funnel["eligible"] >= 1
+    assert sum(funnel["actions"].values()) == 7
+    for evaluated in first.decisions:
+        await service.process_listing(
+            f"{evaluated.listing.source}:{evaluated.listing.source_listing_id}",
+            evaluated.content_hash,
+        )
+    recalculated_funnel = service.repository.listing_pipeline_summary()
+    assert recalculated_funnel["market"] == 7
     assert second.new == 0
     assert second.changed == 0
     assert second.decisions == []

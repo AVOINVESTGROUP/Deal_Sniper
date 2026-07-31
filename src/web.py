@@ -848,6 +848,16 @@ async def admin_listings(authorization: str | None = Header(default=None)) -> di
     return {"items": [_admin_decision_item(listing, decision) for listing, decision in pairs]}
 
 
+@app.get("/admin/listing-pipeline")
+async def admin_listing_pipeline(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает причины отсутствия объектов без чтения секретов и догадок."""
+    firebase_principal(authorization, require_admin=True)
+    summary = await asyncio.to_thread(service.repository.listing_pipeline_summary)
+    return {"funnel": summary}
+
+
 @app.get("/admin/decisions")
 async def admin_decisions(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Текущие решения Deal Engine для операционного контроля."""

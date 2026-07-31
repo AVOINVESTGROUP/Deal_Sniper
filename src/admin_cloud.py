@@ -28,7 +28,11 @@ def cloud_runtime_status(project_id: str, region: str) -> dict[str, Any]:
     )
     run_url = f"https://run.googleapis.com/v2/projects/{project_id}/locations/{region}/services"
     requests = {
-        "scheduler": (scheduler_url, "jobs", ("name", "state", "schedule")),
+        "scheduler": (
+            scheduler_url,
+            "jobs",
+            ("name", "state", "schedule", "lastAttemptTime", "scheduleTime", "status"),
+        ),
         "queues": (queues_url, "queues", ("name", "state")),
         "services": (run_url, "services", ("name", "latestReadyRevision", "traffic")),
     }

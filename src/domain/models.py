@@ -222,7 +222,8 @@ class ComparableVehicle(BaseModel):
     evidence_revision_id: str | None = None
     accepted: bool = True
     reason: str = "accepted"
-    adjustment_version: str = "comparable-adjustments/v1"
+    cohort_tier: int = Field(default=1, ge=1, le=3)
+    adjustment_version: str = "comparable-adjustments/v3"
 
 
 class MarketEstimate(BaseModel):

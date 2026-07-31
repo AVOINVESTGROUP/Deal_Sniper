@@ -97,9 +97,9 @@ locals {
     opensooq  = "OPENSOOQ_MAX_PAGES"
   }
   source_schedules = {
-    dubicars  = "0/10 * * * *"
-    carswitch = "2/10 * * * *"
-    cars24    = "4/10 * * * *"
-    opensooq  = "6/10 * * * *"
+    dubicars  = "0,10,20,30,40,50 * * * *"
+    carswitch = "2,12,22,32,42,52 * * * *"
+    cars24    = "4,14,24,34,44,54 * * * *"
+    opensooq  = "6,16,26,36,46,56 * * * *"
   }
 }

@@ -79,6 +79,9 @@ paths:
   /admin/listings:
     get: {operationId: adminListings, responses: {"200": {description: Listings}}}
     options: {operationId: adminListingsOptions, responses: {"200": {description: CORS}}}
+  /admin/listing-pipeline:
+    get: {operationId: adminListingPipeline, responses: {"200": {description: Listing pipeline}}}
+    options: {operationId: adminListingPipelineOptions, responses: {"200": {description: CORS}}}
   /admin/decisions:
     get: {operationId: adminDecisions, responses: {"200": {description: Decisions}}}
     options: {operationId: adminDecisionsOptions, responses: {"200": {description: CORS}}}

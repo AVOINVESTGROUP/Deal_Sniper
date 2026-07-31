@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from google.api_core.exceptions import AlreadyExists
@@ -29,6 +29,7 @@ class CloudTaskDispatcher:
         content_hash: str,
         engine_version: str,
         recalculation_epoch: str | None = None,
+        delay_seconds: int = 0,
     ) -> None:
         epoch = recalculation_epoch or datetime.now(UTC).strftime("%Y%m%d%H")
         await self._enqueue(
@@ -49,6 +50,7 @@ class CloudTaskDispatcher:
                     "recalculation_epoch": epoch,
                 },
             ),
+            delay_seconds=delay_seconds,
         )
 
     async def enqueue_processing_batch(
@@ -57,13 +59,20 @@ class CloudTaskDispatcher:
         engine_version: str,
         concurrency: int = 20,
         recalculation_epoch: str | None = None,
+        delay_seconds: int = 0,
     ) -> None:
         """Ставит большой backfill в очередь с ограниченной параллельностью."""
         semaphore = asyncio.Semaphore(concurrency)
 
         async def enqueue(item: tuple[str, str]) -> None:
             async with semaphore:
-                await self.enqueue_processing(item[0], item[1], engine_version, recalculation_epoch)
+                await self.enqueue_processing(
+                    item[0],
+                    item[1],
+                    engine_version,
+                    recalculation_epoch,
+                    delay_seconds,
+                )
 
         await asyncio.gather(*(enqueue(item) for item in pending))
 
@@ -130,6 +139,7 @@ class CloudTaskDispatcher:
         path: str,
         payload: dict[str, Any],
         identity: str,
+        delay_seconds: int = 0,
     ) -> None:
         client = self.client
         if client is None:
@@ -155,10 +165,13 @@ class CloudTaskDispatcher:
                 "service_account_email": self.settings.task_invoker_service_account,
                 "audience": self.settings.cloud_run_api_url,
             }
+        task: dict[str, Any] = {"name": task_name, "http_request": request}
+        if delay_seconds > 0:
+            task["schedule_time"] = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         try:
             await asyncio.to_thread(
                 client.create_task,
-                request={"parent": parent, "task": {"name": task_name, "http_request": request}},
+                request={"parent": parent, "task": task},
             )
         except AlreadyExists:
             return

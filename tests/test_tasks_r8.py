@@ -61,6 +61,28 @@ def test_cloud_tasks_client_is_initialized_lazily(monkeypatch: pytest.MonkeyPatc
     assert dispatcher.client is None
 
 
+@pytest.mark.asyncio
+async def test_market_recalculation_is_scheduled_after_verification_wave(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = cloud_settings(monkeypatch, delivery=False)
+    dispatcher = CloudTaskDispatcher(settings)
+    fake = FakeTasksClient()
+    dispatcher.client = fake  # type: ignore[assignment]
+
+    await dispatcher.enqueue_processing(
+        "source:car-1",
+        "content-hash",
+        "engine-v1",
+        recalculation_epoch="batch-market",
+        delay_seconds=300,
+    )
+
+    task = fake.created[0]["task"]
+    assert "schedule_time" in task
+    assert task["http_request"]["url"].endswith("/tasks/process-listing")
+
+
 def test_staging_delivery_requires_isolated_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -103,13 +103,59 @@ resource "google_cloud_tasks_queue" "processing" {
   name     = "listing-processing"
   location = var.region
   rate_limits {
-    max_concurrent_dispatches = 5
-    max_dispatches_per_second = 5
+    max_concurrent_dispatches = 2
+    max_dispatches_per_second = 2
   }
   retry_config {
     max_attempts = 5
     min_backoff  = "5s"
     max_backoff  = "300s"
+  }
+}
+
+resource "google_cloud_run_v2_job" "publisher" {
+  name     = "deal-sniper-publisher"
+  location = var.region
+  template {
+    template {
+      service_account = google_service_account.runtime.email
+      timeout         = "600s"
+      max_retries     = 1
+      containers {
+        image   = var.image
+        command = ["python"]
+        args    = ["main.py", "publish"]
+        dynamic "env" {
+          for_each = {
+            GOOGLE_CLOUD_PROJECT         = var.project_id
+            GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
+            FIRESTORE_DATABASE           = var.firestore_database
+            STORAGE_BACKEND              = "firestore"
+            DELIVERY_ENABLED             = "true"
+            CLOUD_RUN_API_URL            = var.api_base_url
+            CLOUD_TASKS_LOCATION         = var.region
+            TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
+            TASK_INVOKER_SERVICE_ACCOUNT = google_service_account.runtime.email
+            TELEGRAM_CHANNEL_ID          = var.telegram_channel_id
+            TELEGRAM_PRO_CHANNEL_ID      = var.telegram_pro_channel_id
+          }
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        env {
+          name = "INTERNAL_TASK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.task_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -466,6 +512,25 @@ resource "google_cloud_scheduler_job" "content" {
   http_target {
     http_method = "POST"
     uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.content.name}:run"
+    oauth_token { service_account_email = google_service_account.scheduler.email }
+  }
+}
+
+resource "google_cloud_scheduler_job" "publisher" {
+  name             = "deal-sniper-publisher-every-15m"
+  region           = var.region
+  schedule         = "3,18,33,48 * * * *"
+  time_zone        = "Asia/Dubai"
+  paused           = !var.production_enabled
+  attempt_deadline = "180s"
+  retry_config {
+    retry_count          = 2
+    min_backoff_duration = "15s"
+    max_backoff_duration = "300s"
+  }
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.publisher.name}:run"
     oauth_token { service_account_email = google_service_account.scheduler.email }
   }
 }

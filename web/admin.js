@@ -20,6 +20,20 @@ const money = (value) => `${number(value)} AED`;
 
 const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
+async function settleLimited(factories, concurrency = 3) {
+  const results = new Array(factories.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < factories.length) {
+      const index = cursor++;
+      try { results[index] = {status: "fulfilled", value: await factories[index]()}; }
+      catch (reason) { results[index] = {status: "rejected", reason}; }
+    }
+  }
+  await Promise.all(Array.from({length: Math.min(concurrency, factories.length)}, worker));
+  return results;
+}
+
 async function call(path, options = {}, attempt = 0) {
   let response;
   try {
@@ -49,7 +63,10 @@ function metric(label, value, hint = "") { return `<article class="metric-card">
 function sourceState(run, enabled) {
   if (!enabled) return {label: "Paused", good: false};
   if (!run || Object.keys(run).length === 0) return {label: "Not run", good: false};
-  if (run.success === true && !run.error) return {label: "Healthy", good: true};
+  if (run.success === true && !run.error) {
+    if (Number(run.actual_interval_seconds || 0) > 900) return {label: "Late", good: false};
+    return {label: "Healthy", good: true};
+  }
   return {label: "Attention", good: false};
 }
 function shortName(value) { const text = String(value || ""); return text.split("/").pop() || text || "Unknown"; }
@@ -63,7 +80,8 @@ function renderSources(data) {
     const run = data.sources?.[name] || {};
     const state = sourceState(run, enabled);
     if (state.good) healthy += 1;
-    const stats = run.error ? `<span class="source-error" title="${safe(run.error)}">${safe(String(run.error).slice(0, 120))}</span>` : `<span>${number(run.fetched)} fetched</span><span>${number(run.new)} new</span><span>${number(run.changed)} changed</span><span>${safe(run.duration_seconds || "—")} sec</span>`;
+    const interval = run.actual_interval_seconds ? `${Math.round(Number(run.actual_interval_seconds) / 60)} min interval` : "interval pending";
+    const stats = run.error ? `<span class="source-error" title="${safe(run.error)}">${safe(String(run.error).slice(0, 120))}</span>` : `<span>${number(run.fetched)} fetched</span><span>${number(run.new)} new</span><span>${number(run.changed)} changed</span><span>${safe(run.duration_seconds || "—")} sec</span><span>${safe(interval)}</span><span>last ${safe(run.completed_at || "—")}</span>`;
     const remove = dynamicSources.has(name) ? `<button class="danger-button remove-source" data-source="${safe(name)}">Remove</button>` : "";
     return `<article class="data-row"><div class="data-primary"><div><strong>${safe(name)}</strong>${dynamicSources.has(name) ? statusPill("Custom feed", true) : ""}${statusPill(state.label, state.good)}</div><div class="row-meta">${stats}</div></div><div class="row-actions"><button class="secondary run-source" data-source="${safe(name)}" ${enabled ? "" : "disabled"}>Run now</button><button class="toggle-source ${enabled ? "danger-button" : ""}" data-source="${safe(name)}" data-enabled="${enabled}">${enabled ? "Pause" : "Enable"}</button>${remove}</div></article>`;
   }).join("") || '<div class="empty-state">No source adapters installed.</div>';
@@ -279,6 +297,22 @@ function render(data, pulse, preview, unknown, failed) {
   document.querySelectorAll(".reconcile").forEach((button) => button.addEventListener("click", () => reconcile(button.dataset.id, button.dataset.action)));
 }
 
+function renderListingPipeline(payload = {}) {
+  const funnel = payload.funnel || {};
+  byId("listing-pipeline").innerHTML = keyValues({
+    fetched_snapshots: funnel.fetched,
+    detail_verified: funnel.verified,
+    normalized: funnel.normalized,
+    market_calculated: funnel.market,
+    decisions: funnel.decision,
+    eligible_for_publication: funnel.eligible,
+    pro_sent: funnel.pro_sent,
+    free_sent: funnel.free_sent,
+    legacy_not_replayed: funnel.unclassified_legacy || 0,
+  });
+  byId("listing-actions").innerHTML = keyValues(funnel.actions || {});
+}
+
 function showError(caught) { byId("error").hidden = false; byId("error").textContent = caught instanceof Error ? caught.message : String(caught); }
 async function reconcile(deliveryId, action) { try { await call(`/admin/outbox/${encodeURIComponent(deliveryId)}/reconcile`, {method: "POST", body: JSON.stringify({action})}); await refresh(); } catch (error) { showError(error); } }
 function renderProPublications(payload = {}) {
@@ -308,8 +342,17 @@ async function publishProNow() {
 async function refresh() {
   byId("error").hidden = true; byId("refresh").disabled = true;
   try {
-    const requests = [call("/admin/overview"), call("/content/market-pulse"), call("/admin/preview"), call("/admin/outbox?state=unknown"), call("/admin/outbox?state=failed"), call("/admin/runs"), call("/admin/listings"), call("/admin/decisions"), call("/admin/users"), call("/admin/errors"), call("/admin/settings"), call("/admin/pro-publications"), call("/admin/news-feeds"), call("/admin/news-evidence")];
-    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult, newsEvidenceResult] = await Promise.allSettled(requests);
+    const requests = [
+      () => call("/admin/overview"), () => call("/content/market-pulse"),
+      () => call("/admin/preview"), () => call("/admin/outbox?state=unknown"),
+      () => call("/admin/outbox?state=failed"), () => call("/admin/runs"),
+      () => call("/admin/listings"), () => call("/admin/decisions"),
+      () => call("/admin/users"), () => call("/admin/errors"),
+      () => call("/admin/settings"), () => call("/admin/pro-publications"),
+      () => call("/admin/news-feeds"), () => call("/admin/news-evidence"),
+      () => call("/admin/listing-pipeline"),
+    ];
+    const [overviewResult, pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult, newsEvidenceResult, pipelineResult] = await settleLimited(requests, 3);
     if (overviewResult.status === "rejected") throw overviewResult.reason;
     const pulse = pulseResult.status === "fulfilled" ? pulseResult.value : {};
     const preview = previewResult.status === "fulfilled" ? previewResult.value : {};
@@ -320,7 +363,8 @@ async function refresh() {
     if (proPublicationsResult.status === "fulfilled") renderProPublications(proPublicationsResult.value);
     if (newsFeedsResult.status === "fulfilled") renderNewsFeeds(newsFeedsResult.value);
     if (newsEvidenceResult.status === "fulfilled") renderNewsEvidence(newsEvidenceResult.value);
-    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult, newsEvidenceResult].filter((result) => result.status === "rejected");
+    if (pipelineResult.status === "fulfilled") renderListingPipeline(pipelineResult.value);
+    const partialErrors = [pulseResult, previewResult, unknownResult, failedResult, runsResult, listingsResult, decisionsResult, usersResult, errorsResult, settingsResult, proPublicationsResult, newsFeedsResult, newsEvidenceResult, pipelineResult].filter((result) => result.status === "rejected");
     if (partialErrors.length) showError(new Error(`${partialErrors.length} section(s) are temporarily unavailable. Refresh will retry them.`));
     byId("updated").textContent = `Updated ${new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
   } catch (error) { showError(error); } finally { byId("refresh").disabled = false; }

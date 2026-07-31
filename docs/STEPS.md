@@ -527,3 +527,24 @@
 - CI теперь выводит блокирующий table-отчёт и всегда сохраняет отдельный SARIF artifact, не меняя severity, `ignore-unfixed` или exit code.
 - Полный локальный gate успешен: Ruff, strict mypy, 136 passed / 2 skipped, coverage 61,5%, pip-audit, Terraform и JavaScript syntax.
 - Production и staging не изменялись. Следующий gate — GitHub Actions на точном commit.
+## R8.1.3 — локальная реализация восстановления автомобильных публикаций (30 июля 2026)
+
+- Владелец явно утвердил план R8.1.3; production deploy отдельно не разрешён.
+- Cloud Scheduler для четырёх источников переведён на явные десятиминутные минуты со
+  сдвигом между источниками.
+- DubiCars принимает допустимые варианты ItemList/Offer/priceSpecification и
+  fail-closed отклоняет `Price on request`, рассрочку и некорректную цену.
+- Detail verification использует source pacing, bounded retry, `Retry-After`, backoff и
+  устойчивый jitter; processing queue ограничена до 2 concurrent / 2 rps.
+- Добавлена двухволновая постановка: первичная верификация и отложенный на 5 минут
+  пересчёт затронутых автомобилей после наполнения verified market.
+- Comparable engine 3.2.0 использует три доказуемых cohort tier, версионируемые
+  корректировки и блокировку рынка при высокой дисперсии.
+- Добавлен отдельный `deal-sniper-publisher` и scheduler каждые 15 минут; порядок
+  остаётся строгим: точная Pro-карточка `sent`, затем связанный Free teaser.
+- Admin Web получил `Listing pipeline`, фактические интервалы источников и ограничение
+  параллельных API-запросов; admin API переведён с нестабильного Gateway path на прямой
+  Cloud Run endpoint с тем же Firebase admin auth и точным CORS allowlist.
+- Gate успешен: Ruff, strict mypy, 143 passed / 2 skipped, Terraform fmt/validate,
+  локальный Docker image `deal-sniper:r8.1.3-local`.
+- Production, production Firestore, очереди, scheduler и Telegram-каналы не изменялись.

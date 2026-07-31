@@ -18,7 +18,7 @@ from src.domain.models import (
     OutboxRecord,
     PublicationEvent,
 )
-from src.free_publication import reconcile_free_publications
+from src.free_publication import FreePublicationSummary, reconcile_free_publications
 from src.pro_news import ProNewsPublicationSummary, reconcile_pro_news_publication
 from src.pro_publication import ProPublicationSummary, reconcile_pro_publications
 from src.runtime_config import effective_settings
@@ -125,6 +125,26 @@ async def run_content_publication(
     )
     event_id = await enqueue_market_pulse(settings)
     return event_id, pro_summary, news_summary
+
+
+async def run_deal_publication(
+    settings: Settings,
+) -> tuple[ProPublicationSummary, FreePublicationSummary]:
+    """Сверяет только проверенные объявления Pro→Free без новостей и Market Pulse."""
+    service = DealService.from_settings(settings)
+    current = effective_settings(service.repository, settings)
+    dispatcher = CloudTaskDispatcher(current)
+    pro_summary = await reconcile_pro_publications(
+        service.repository,
+        current,
+        dispatcher,
+    )
+    free_summary = await reconcile_free_publications(
+        service.repository,
+        current,
+        dispatcher,
+    )
+    return pro_summary, free_summary
 
 
 async def run_news_publication(settings: Settings) -> ProNewsPublicationSummary:
