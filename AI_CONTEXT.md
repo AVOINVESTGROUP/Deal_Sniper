@@ -392,3 +392,30 @@ Telegram secrets отсутствуют.
 всех девяти jobs, Scheduler и очередей. Полное evidence находится в
 `docs/RELEASE_EVIDENCE_2026-07-31-R8_1_3.md`. Production deploy, replay и Telegram-доставка
 по-прежнему запрещены без отдельной команды владельца `Разрешаю production deploy R8.1.3`.
+
+## R8.1.3G — migration allowlist blocker (31 июля 2026)
+
+После явного разрешения production deploy preflight не допустил production-мутаций. Старый
+migration replay epoch покрывает только 2 326 из 4 179 текущих revisions; 1 757 current
+decisions используют engine 3.1.0, тогда как release требует 3.2.0. Дополнительный exact
+staging replay завершился без application errors (`2 390 completed`, `389 skipped`), delivery
+была выключена, staging queue PAUSED и пуста.
+
+Новый migration epoch обязателен, но exact dry-run `deal-sniper-migration-staging-2wm9j`
+остановился до apply: одиннадцать `publication_events` имеют фактически используемый
+`publication-event/v3`, который пишет `src/firestore_storage.py`, а migration tool 1.2.0
+явно знает только publication-event/v1 и общий `/v2`. План R8.1.3G ограничивает исправление
+явным allowlist v3, generic upgrade только legacy `None`/`"1"`, сохранение всех уже
+валидированных native contracts без write, bump tool до 1.2.1, validation/apply regression
+tests, новый immutable build и полный staging migration/replay. Production не изменён. Код
+и новый digest запрещены до утверждения владельцем `План R8.1.3G утверждаю`.
+
+Read-only production schema audit подтвердил точную границу: `publication_events=177`, из
+них `48` v1 и `129` v3; других unknown schema versions среди всех коллекций migrator и
+вложенных snapshots нет. Migration apply текущего digest запускать нельзя.
+
+Независимый review других code/schema blockers не нашёл и уточнил rollback: Firestore import
+имеет merge-семантику. Staging apply выполняется только на disposable restored clone; при
+сбое clone создаётся заново. Production при сбое остаётся STOP и delivery=false; предыдущий
+digest является только maintenance rollback, а resume запрещён до компенсирующей процедуры
+и сверки с export/ledger.

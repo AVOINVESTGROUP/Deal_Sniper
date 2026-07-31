@@ -276,3 +276,87 @@ Production revision/digest, job specs/generations, Scheduler и очереди �
 снимку до/после не изменились. Полное evidence зафиксировано в
 `docs/RELEASE_EVIDENCE_2026-07-31-R8_1_3.md`. Реализация и staging завершены; production deploy,
 bounded replay и Telegram smoke всё ещё требуют отдельной явной команды владельца.
+
+## 9. Дополнение R8.1.3G — совместимость migration dry-run с PublicationEvent v3
+
+### Подтверждённый диагноз
+
+После разрешения production deploy повторный сквозной preflight обнаружил, что старый
+набор `migration_replay_requests` не покрывает текущие revisions. В production существуют
+`4 179` текущих revisions, а старый набор может реально обработать только `2 326`; все
+`1 757` current decisions используют engine `3.1.0`, тогда как R8.1.3 требует `3.2.0`.
+Поэтому новый migration epoch и полный delivery-off replay обязательны, а не являются
+оптимизацией.
+
+Exact staging migration dry-run на digest `sha256:48ddd19e…22323` корректно остановился до
+apply: одиннадцать уже существующих `publication_events` имеют актуальный контракт
+`publication-event/v3`, но `KNOWN_SCHEMA_VERSIONS` migration tool `1.2.0` явно знает только
+`publication-event/v1` и общий суффикс `/v2`. При этом production writer в
+`src/firestore_storage.py` сам сохраняет `publication-event/v3`. Таким образом, это
+несогласованность allowlist мигратора с фактическим неизменяемым контрактом, а не
+неизвестные или повреждённые данные.
+
+Отдельный read-only аудит production подтвердил `177` publication events:
+`48` с `publication-event/v1` и `129` с `publication-event/v3`. Полный проход по всем
+коллекциям migrator и вложенным snapshots не нашёл других неизвестных schema versions.
+Следовательно, граница исправления точная и не требует общего ослабления schema gate.
+
+Production не изменён: schedulers, queues, API/jobs, Firestore и Telegram остались на
+предыдущем baseline. Неуспешный dry-run был только в изолированной staging database и не
+выполнял apply.
+
+### Граница исправления
+
+1. Явно добавить `publication-event/v3` в `KNOWN_SCHEMA_VERSIONS`; не вводить общий допуск
+   произвольных `/v3` и не ослаблять fail-closed проверку будущих контрактов.
+2. Исправить generic top-level upgrade: он обновляет в schema `2` только legacy документы
+   со значением `None` или `"1"`. Любой уже валидированный native contract, включая
+   `verification-evidence/v1`, `saved-search/v1`, `outcome/v1`,
+   `publication-event/v1`, `publication-event/v3`, `audit-event/v1`,
+   `migration-replay-request/v1` и контракты `/v2`, сохраняется без write. Validation
+   выполняется раньше и продолжает блокировать любой неизвестный контракт.
+3. Поднять `MIGRATION_TOOL_VERSION` с `1.2.0` до `1.2.1`, чтобы provenance и migration ID
+   однозначно связывались с исправленным allowlist.
+4. Не менять структуру `PublicationEvent`, схему Firestore, финансовые расчёты, parser,
+   delivery, публикации или существующие immutable события.
+5. Не создавать replay-запросы ручным скриптом. Их формирует только утверждённый migration
+   apply с новым `cutover_at` и `export_watermark`.
+
+### Тесты и релизный порядок
+
+1. Regression-тест подтверждает, что `publication-event/v3` принят, а произвольный
+   `publication-event/v4` и неизвестный `/v3` по-прежнему блокируются. Apply-тест с fake
+   Firestore batch доказывает отсутствие write для всех валидированных native contracts и
+   наличие write только для legacy `None`/`"1"`.
+2. Повторить полный локальный gate и GitHub Actions; собрать новый commit-labelled immutable
+   digest. Старый digest `sha256:48ddd19e…22323` после изменения кода не продвигается.
+3. Перед staging apply создать новый staging export. На отдельной database выполнить exact
+   migration dry-run, затем apply с tool `1.2.1` и новым watermark.
+4. Проверить новый replay epoch: один request на каждую текущую revision. Выполнить bounded
+   direct replay, полный catch-up и второй controlled recalculation при
+   `DELIVERY_ENABLED=false`.
+5. Повторить delivery-off publisher rehearsal; staging Telegram queue остаётся `PAUSED`,
+   задач и реальных исходящих сообщений нет.
+6. Только после нового staging evidence запросить отдельное разрешение владельца на
+   production deploy нового digest. Предыдущее разрешение относилось к digest
+   `sha256:48ddd19e…22323` и не разрешает изменённый build.
+7. Production cutover остаётся прежним: STOP → свежий защищённый export → exact migration
+   dry-run/apply → полный replay/reconciliation при выключенной delivery → merge exact RC →
+   deploy/read-back → staged resume collectors → processing → Pro → exact linked Free.
+
+### Rollback
+
+- до production никакого rollback не требуется: текущий production baseline не меняется;
+- staging apply выполняется только на disposable database, восстановленной из export; при
+  ошибке эта database не восстанавливается import поверх себя, а отбрасывается и создаётся
+  заново из исходного export;
+- Firestore import имеет merge-семантику и не является in-place rollback частично
+  выполненных apply/invalidation/replay writes;
+- при production-инциденте schedulers/queues немедленно останавливаются, delivery остаётся
+  выключенной. Предыдущий runtime digest допускается только как maintenance rollback;
+  production resume запрещён до подтверждённой компенсирующей миграции или rollback-reader
+  процедуры и полной сверки с защищённым export и migration ledger. `unknown` delivery
+  автоматически не повторяется.
+
+Это дополнение изменяет код и immutable digest. Реализация запрещена до отдельного явного
+утверждения владельцем: `План R8.1.3G утверждаю`.

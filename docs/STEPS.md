@@ -1,5 +1,22 @@
 # Журнал реализации
 
+## 31 июля 2026 — production gate R8.1.3 остановлен migration dry-run
+
+- Владелец разрешил production deploy R8.1.3, однако production не изменялся: preflight
+  доказал, что старый replay epoch покрывает только `2 326` из `4 179` текущих revisions,
+  а все `1 757` current decisions остаются на engine `3.1.0` вместо release `3.2.0`.
+- Дополнительный staging replay exact digest завершён: bounded `293/0/7`, полный
+  `2 390 completed / 0 failed / 389 skipped`; delivery была выключена, очередь PAUSED и
+  пуста. Publisher rehearsal также успешен, реальных Telegram send не было.
+- Exact migration dry-run остановился до apply на одиннадцати актуальных
+  `publication-event/v3`: writer сохраняет v3, но migration tool `1.2.0` не включает его
+  в явный allowlist. Read-only production audit подтвердил `129` v3 из `177` событий и
+  отсутствие других неизвестных схем. Production baseline и данные не изменены.
+- В `docs/PLAN_R8_1_3_LISTING_PUBLICATION_RECOVERY.md` добавлен план R8.1.3G: явный допуск
+  только `publication-event/v3`, сохранение native contracts без generic rewrite, tool
+  `1.2.1`, регрессионные validation/apply тесты, новый immutable digest и полный staging
+  migration/replay. Код запрещён до утверждения владельцем.
+
 ## 31 июля 2026 — R8.1.3F прошёл immutable delivery-off staging
 
 - Владелец явно утвердил дополнение R8.1.3F.

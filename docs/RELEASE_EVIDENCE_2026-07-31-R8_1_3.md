@@ -173,3 +173,42 @@ resourceVersion и image остались прежними. Эти operational/A
 6. Telegram smoke только на новом реальном допустимом автомобиле либо честный результат
    «новых доказуемых предложений нет»;
 7. итоговая сверка message IDs, exact Pro/Free linkage, очередей и rollback markers.
+
+## Дополнительный preflight после разрешения deploy
+
+Владелец разрешил production deploy R8.1.3, но production не был изменён: обязательная
+проверка полного replay выявила неполное покрытие старого migration epoch. Из `4 179`
+текущих revisions старый request set может обработать только `2 326`; все `1 757`
+current decisions остаются на engine `3.1.0`, а release требует `3.2.0`.
+
+Дополнительный full staging replay старого epoch завершился успешно на exact digest:
+
+- bounded execution `deal-sniper-replay-staging-7ppl8`: `293 completed`, `0 failed`,
+  `7 skipped`;
+- full execution `deal-sniper-replay-staging-l2rtd`: `2 390 completed`, `0 failed`,
+  `389 skipped`, длительность `27m34s`;
+- publisher `deal-sniper-publisher-staging-fkmts` завершился успешно;
+- staging queue осталась `PAUSED` и пустой, реальных Telegram send не было;
+- стабильная воронка после replay: fetched `6 137`, verified `2 033`, normalized `2 819`,
+  market `124`, current decisions `1 198`, eligible `0`.
+
+Regulated migration dry-run `deal-sniper-migration-staging-2wm9j` был запущен на том же
+digest и корректно остановился **до apply**: migration tool `1.2.0` не признаёт одиннадцать
+фактически используемых `publication-event/v3`, хотя writer release сохраняет именно этот
+контракт. Production API/jobs, schedulers, queues, Firestore и Telegram не изменены.
+Read-only production schema audit обнаружил `129` таких v3 событий из `177`; остальные
+`48` используют разрешённый v1. Других неизвестных schema versions во всех коллекциях
+migrator и вложенных snapshots нет.
+
+Исправление описано в дополнении R8.1.3G. Оно меняет код и digest, поэтому текущий release
+candidate остановлен; production deploy нового build запрещён до утверждения R8.1.3G,
+нового immutable build, полного staging migration/replay evidence и нового отдельного
+разрешения владельца.
+
+Независимый review дополнительно установил: простого добавления v3 в allowlist недостаточно,
+поскольку generic top-level upgrade затем переписал бы native `publication-event/v3` в
+общую schema `"2"`. R8.1.3G поэтому также ограничивает write только legacy `None`/`"1"` и
+обязует apply-тестом доказать неизменность всех уже валидированных native contracts.
+Rollback уточнён без ложного обещания in-place restore: Firestore import выполняет merge;
+staging clone при ошибке создаётся заново, а production остаётся STOP/delivery-off до
+компенсирующей процедуры и полной сверки export/ledger.
