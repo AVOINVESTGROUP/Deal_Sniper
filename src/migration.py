@@ -14,7 +14,7 @@ from src.domain.ids import canonical_hash, migration_id
 from src.domain.models import ListingSnapshot
 from src.storage import snapshot_hash
 
-MIGRATION_TOOL_VERSION = "1.2.0"
+MIGRATION_TOOL_VERSION = "1.2.1"
 TARGET_SCHEMA_VERSION = "2"
 KNOWN_SCHEMA_VERSIONS = {
     None,
@@ -29,6 +29,7 @@ KNOWN_SCHEMA_VERSIONS = {
     "saved-search/v1",
     "outcome/v1",
     "publication-event/v1",
+    "publication-event/v3",
     "audit-event/v1",
     "migration-replay-request/v1",
 }
@@ -197,7 +198,10 @@ class FirestoreMigrator:
             for document in self.client.collection(collection).stream():
                 data = document.to_dict() or {}
                 schema = data.get("schema_version")
-                if schema == "2" or str(schema).endswith("/v2"):
+                # Validation выше уже блокирует неизвестные контракты. Здесь обновляются
+                # только legacy-документы; собственные версии неизменяемых сущностей
+                # (v1/v2/v3) нельзя сворачивать в общую строку "2".
+                if schema not in {None, "1"}:
                     continue
                 batch.set(
                     document.reference,

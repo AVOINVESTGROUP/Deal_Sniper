@@ -1,5 +1,21 @@
 # Журнал реализации
 
+## 31 июля 2026 — R8.1.3G реализован локально
+
+- Владелец явно утвердил план R8.1.3G.
+- Migration allowlist точечно принимает `publication-event/v3`, но произвольные `/v3` и
+  `publication-event/v4` по-прежнему блокируются реальным validation path.
+- Generic top-level upgrade теперь пишет schema `"2"` только в legacy `None`/`"1"` и не
+  изменяет валидированные native v1/v2/v3; migration tool поднят до `1.2.1`.
+- Commit-aware regression fixture проверяет две коллекции, точные legacy writes и отсутствие
+  write для native contracts.
+- Полный local gate успешен: Ruff, strict mypy, `156 passed / 2 skipped`, coverage `63%`,
+  pip-audit, Terraform, JavaScript ES-module syntax и Docker Python 3.11 runtime/import без
+  build tooling; внутри образа подтверждён tool `1.2.1`.
+- Production не изменён. Далее разрешены только commit/GitHub Actions, новый immutable digest
+  и полный delivery-off migration/replay rehearsal на disposable staging clone. После нового
+  evidence потребуется отдельное разрешение production deploy.
+
 ## 31 июля 2026 — production gate R8.1.3 остановлен migration dry-run
 
 - Владелец разрешил production deploy R8.1.3, однако production не изменялся: preflight

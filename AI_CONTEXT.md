@@ -419,3 +419,12 @@ Read-only production schema audit подтвердил точную границ
 сбое clone создаётся заново. Production при сбое остаётся STOP и delivery=false; предыдущий
 digest является только maintenance rollback, а resume запрещён до компенсирующей процедуры
 и сверки с export/ledger.
+
+Владелец утвердил R8.1.3G. Локальная реализация завершена в точной границе: explicit
+`publication-event/v3`, generic write только legacy `None`/`"1"`, сохранение native
+v1/v2/v3 и `MIGRATION_TOOL_VERSION=1.2.1`. Усиленные regression-тесты используют реальный
+validation path и commit-aware fake batch. Полный gate: Ruff, strict mypy, 156 passed / 2
+skipped, coverage 63%, pip-audit, Terraform, JavaScript ES-module syntax и Docker Python
+3.11 runtime; внутри образа подтверждён tool 1.2.1. Старый digest не продвигается.
+Production не изменён. Следующий этап — новый immutable build и полный delivery-off
+rehearsal на disposable staging clone; затем требуется новое отдельное разрешение владельца.

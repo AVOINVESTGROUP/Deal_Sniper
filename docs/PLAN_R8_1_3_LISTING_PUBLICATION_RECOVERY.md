@@ -1,8 +1,8 @@
 # План R8.1.3 — восстановление публикации автомобильных объявлений
 
-Статус: **R8.1.3F реализован; локальный gate, GitHub Actions, immutable build и три
-delivery-off staging-цикла 4/4 источников успешны; production не изменён и требует
-отдельного разрешения владельца**.
+Статус: **R8.1.3G реализован локально и прошёл полный local gate; новый GitHub Actions,
+immutable build и полный migration/replay staging rehearsal ещё не выполнены; production
+не изменён и после нового evidence потребует отдельного разрешения владельца**.
 
 ## 0. Статус реализации 31 июля 2026 года
 
@@ -358,5 +358,28 @@ Production не изменён: schedulers, queues, API/jobs, Firestore и Teleg
   процедуры и полной сверки с защищённым export и migration ledger. `unknown` delivery
   автоматически не повторяется.
 
-Это дополнение изменяет код и immutable digest. Реализация запрещена до отдельного явного
-утверждения владельцем: `План R8.1.3G утверждаю`.
+### Статус реализации R8.1.3G — 31 июля 2026
+
+Владелец явно утвердил план. Реализована только согласованная граница:
+
+- `publication-event/v3` добавлен в точный allowlist без общего допуска `/v3`;
+- generic top-level migration пишет только legacy `None` и строку `"1"`;
+- валидированные native v1/v2/v3 остаются без write;
+- migration tool и provenance подняты до `1.2.1`.
+
+Regression-тесты проходят через реальный validation path, отдельно доказывают блокировку
+неизвестных v3/v4 и используют commit-aware fake batch в двух коллекциях. Проверены точные
+пути трёх legacy writes, `merge=true`, schema `"2"`, tool `1.2.1`, два commit и нулевые
+writes для native contracts.
+
+Полный локальный gate успешен: Ruff, strict mypy по 42 source-файлам,
+`156 passed / 2 skipped`, coverage `63%`, dependency audit без известных уязвимостей,
+Terraform fmt/init/validate, JavaScript ES-module syntax, Docker Python 3.11 import и
+отсутствие `pip`, `setuptools`, `wheel` в runtime. Внутри локального образа подтверждён
+`MIGRATION_TOOL_VERSION=1.2.1`. Локальный Trivy отсутствует; блокирующий container scan
+остаётся обязательным GitHub Actions gate.
+
+Следующий разрешённый этап: commit, GitHub Actions, новый commit-labelled immutable digest
+и полный migration/replay rehearsal только на disposable staging clone при выключенной
+delivery. Старый digest `sha256:48ddd19e…22323` не продвигается. Production не изменён;
+предыдущее разрешение deploy не распространяется на новый digest.

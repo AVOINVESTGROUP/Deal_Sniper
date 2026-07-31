@@ -212,3 +212,24 @@ candidate остановлен; production deploy нового build запре�
 Rollback уточнён без ложного обещания in-place restore: Firestore import выполняет merge;
 staging clone при ошибке создаётся заново, а production остаётся STOP/delivery-off до
 компенсирующей процедуры и полной сверки export/ledger.
+
+## Локальное evidence R8.1.3G
+
+После явного утверждения владельцем реализована только согласованная compatibility-правка:
+точный allowlist `publication-event/v3`, legacy-only generic upgrade и migration tool
+`1.2.1`. Validation по-прежнему fail-closed для произвольных `/v3` и v4.
+
+Локальный gate завершён успешно:
+
+- Ruff — без ошибок;
+- strict mypy — 42 source-файла без ошибок;
+- Pytest — `156 passed / 2 skipped`, coverage `63%`;
+- pip-audit — известных уязвимостей нет;
+- Terraform fmt/init/validate — успешно;
+- JavaScript ES-module syntax — успешно;
+- Docker Python 3.11 — приложение импортируется, build tooling отсутствует;
+- container read-back — `MIGRATION_TOOL_VERSION=1.2.1`.
+
+Локальный Trivy в среде не установлен, поэтому GitHub Actions container scan остаётся
+обязательным блокирующим gate. Новый commit, digest, migration ID и staging ledger будут
+добавлены только после CI/build/rehearsal. Production на этом этапе не изменён.
