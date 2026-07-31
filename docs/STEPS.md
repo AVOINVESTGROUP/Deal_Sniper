@@ -1,5 +1,23 @@
 # Журнал реализации
 
+## 31 июля 2026 — R8.1.3F реализован и прошёл локальный gate
+
+- Владелец явно утвердил дополнение R8.1.3F.
+- CarSwitch выполняет строгую semantic validation внутри трёхпопыточного retry:
+  непустое тело, HTML MIME и распознаваемый `ItemList`.
+- Каждый HTTP 200 архивируется до проверки; одинаковые raw-тела дедуплицируются по
+  checksum, но каждый вызов создаёт отдельное append-only событие `raw_snapshot_attempt`
+  с номером, временем и URI. `error_category` и `attempts` сохраняются в source health и
+  видны в Admin.
+- Исчерпанный semantic retry не создаёт snapshots и decisions; fixed-price parser
+  отклоняет месячный платёж, placeholder и отсутствующую цену.
+- Независимый аудит обнаружил, что один счётчик `attempts` не доказывал отдельные capture;
+  дефект закрыт regression-тестом: один физический пустой payload и три audit-события.
+- Полный повторный локальный gate успешен: Ruff, strict mypy, `153 passed / 2 skipped`,
+  coverage `62,44%`, dependency audit, Terraform, JavaScript и Docker Python 3.11.
+- Production не изменён. Далее: commit/CI, новый immutable digest и повтор трёх
+  delivery-off staging-циклов каждого из четырёх источников с отдельным staging raw bucket.
+
 ## 31 июля 2026 — R8.1.3 staging gate остановлен на CarSwitch transient
 
 - Immutable build commit `737cd8a14f5f498adfd6d2a2753e1edc68e92468`, Cloud Build

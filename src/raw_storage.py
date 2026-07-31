@@ -21,6 +21,8 @@ class RawSnapshotArchive(Protocol):
         source_url: str,
         content_type: str,
         payload: bytes,
+        *,
+        attempt_number: int | None = None,
     ) -> RawSnapshotMetadata: ...
 
 
@@ -37,6 +39,8 @@ class LocalRawSnapshotArchive:
         source_url: str,
         content_type: str,
         payload: bytes,
+        *,
+        attempt_number: int | None = None,
     ) -> RawSnapshotMetadata:
         checksum = hashlib.sha256(payload).hexdigest()
         suffix = _suffix(content_type)
@@ -52,6 +56,13 @@ class LocalRawSnapshotArchive:
             size_bytes=len(payload),
         )
         await asyncio.to_thread(self.repository.save_raw_snapshot, metadata)
+        if attempt_number is not None:
+            await asyncio.to_thread(
+                _record_raw_snapshot_attempt,
+                self.repository,
+                metadata,
+                attempt_number,
+            )
         return metadata
 
 
@@ -70,6 +81,8 @@ class GcsRawSnapshotArchive:
         source_url: str,
         content_type: str,
         payload: bytes,
+        *,
+        attempt_number: int | None = None,
     ) -> RawSnapshotMetadata:
         checksum = hashlib.sha256(payload).hexdigest()
         suffix = _suffix(content_type)
@@ -85,7 +98,37 @@ class GcsRawSnapshotArchive:
             size_bytes=len(payload),
         )
         await asyncio.to_thread(self.repository.save_raw_snapshot, metadata)
+        if attempt_number is not None:
+            await asyncio.to_thread(
+                _record_raw_snapshot_attempt,
+                self.repository,
+                metadata,
+                attempt_number,
+            )
         return metadata
+
+
+def _record_raw_snapshot_attempt(
+    repository: Repository,
+    metadata: RawSnapshotMetadata,
+    attempt_number: int,
+) -> None:
+    """Связывает каждый HTTP-захват с дедуплицированным immutable payload."""
+    if attempt_number < 1:
+        raise ValueError("Номер попытки raw snapshot должен быть положительным")
+    repository.record_audit_event(
+        "raw_snapshot_attempt",
+        {
+            "attempt_number": attempt_number,
+            "source": metadata.source,
+            "source_url": str(metadata.source_url),
+            "checksum_sha256": metadata.checksum_sha256,
+            "storage_uri": metadata.storage_uri,
+            "content_type": metadata.content_type,
+            "size_bytes": metadata.size_bytes,
+            "fetched_at": metadata.fetched_at.isoformat(),
+        },
+    )
 
 
 def _write_once(target: Path, payload: bytes) -> None:

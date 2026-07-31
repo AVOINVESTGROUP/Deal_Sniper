@@ -81,7 +81,8 @@ function renderSources(data) {
     const state = sourceState(run, enabled);
     if (state.good) healthy += 1;
     const interval = run.actual_interval_seconds ? `${Math.round(Number(run.actual_interval_seconds) / 60)} min interval` : "interval pending";
-    const stats = run.error ? `<span class="source-error" title="${safe(run.error)}">${safe(String(run.error).slice(0, 120))}</span>` : `<span>${number(run.fetched)} fetched</span><span>${number(run.new)} new</span><span>${number(run.changed)} changed</span><span>${safe(run.duration_seconds || "—")} sec</span><span>${safe(interval)}</span><span>last ${safe(run.completed_at || "—")}</span>`;
+    const failure = run.error ? `${run.error_category || "unexpected_error"} · ${number(run.attempts || 1)} attempt(s) · ${run.error}` : "";
+    const stats = run.error ? `<span class="source-error" title="${safe(failure)}">${safe(String(failure).slice(0, 160))}</span>` : `<span>${number(run.fetched)} fetched</span><span>${number(run.new)} new</span><span>${number(run.changed)} changed</span><span>${safe(run.duration_seconds || "—")} sec</span><span>${safe(interval)}</span><span>last ${safe(run.completed_at || "—")}</span>`;
     const remove = dynamicSources.has(name) ? `<button class="danger-button remove-source" data-source="${safe(name)}">Remove</button>` : "";
     return `<article class="data-row"><div class="data-primary"><div><strong>${safe(name)}</strong>${dynamicSources.has(name) ? statusPill("Custom feed", true) : ""}${statusPill(state.label, state.good)}</div><div class="row-meta">${stats}</div></div><div class="row-actions"><button class="secondary run-source" data-source="${safe(name)}" ${enabled ? "" : "disabled"}>Run now</button><button class="toggle-source ${enabled ? "danger-button" : ""}" data-source="${safe(name)}" data-enabled="${enabled}">${enabled ? "Pause" : "Enable"}</button>${remove}</div></article>`;
   }).join("") || '<div class="empty-state">No source adapters installed.</div>';
@@ -206,7 +207,7 @@ async function changeScheduler(job, action) {
 }
 
 function renderRuns(payload = {}) {
-  byId("runs").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><strong>${safe(item.source || item.event_type)}</strong><div class="row-meta"><span>${safe(item.success === true ? "Successful" : item.success === false ? "Failed" : "Recorded")}</span><span>${number(item.fetched)} fetched</span><span>${safe(item.duration_seconds || "—")} sec</span></div>${item.error ? `<span class="source-error">${safe(item.error)}</span>` : ""}</div></article>`).join("") || '<div class="empty-state">No runs recorded.</div>';
+  byId("runs").innerHTML = (payload.items || []).map((item) => `<article class="data-row"><div class="data-primary"><strong>${safe(item.source || item.event_type)}</strong><div class="row-meta"><span>${safe(item.success === true ? "Successful" : item.success === false ? "Failed" : "Recorded")}</span><span>${number(item.fetched)} fetched</span><span>${safe(item.duration_seconds || "—")} sec</span>${item.error ? `<span>${safe(item.error_category || "unexpected_error")}</span><span>${number(item.attempts || 1)} attempt(s)</span>` : ""}</div>${item.error ? `<span class="source-error">${safe(item.error)}</span>` : ""}</div></article>`).join("") || '<div class="empty-state">No runs recorded.</div>';
 }
 
 function renderListings(payload = {}) {

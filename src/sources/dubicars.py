@@ -23,6 +23,17 @@ LISTING_ID_PATTERN = re.compile(r"-(\d+)\.html$")
 class SourceError(RuntimeError):
     """Источник не смог вернуть проверяемые данные."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        category: str = "source_error",
+        attempts: int = 1,
+    ) -> None:
+        super().__init__(message)
+        self.category = category
+        self.attempts = attempts
+
 
 class DubiCarsSource:
     """Асинхронный адаптер страниц поиска DubiCars."""

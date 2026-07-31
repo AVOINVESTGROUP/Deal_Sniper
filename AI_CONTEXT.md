@@ -1,5 +1,18 @@
 # AI Context: Dubai Deal Sniper
 
+R8.1.3F утверждён владельцем и реализован локально. CarSwitch архивирует каждый HTTP 200
+до semantic validation и в едином bounded budget проверяет строгий HTML MIME, непустое
+тело и `ItemList`. После трёх semantic transient записываются
+`error_category=semantic_empty_response` и `attempts=3`; snapshots/decisions не создаются.
+Admin показывает категорию и число попыток. Content-addressed raw payload дедуплицирует
+одинаковые тела по checksum, а каждый вызов имеет отдельное append-only событие
+`raw_snapshot_attempt` с номером, временем и URI. Regression-тест подтверждает один payload
+и три capture-события. Полный повторный gate успешен: Ruff, strict mypy по 42 source-файлам,
+`153 passed / 2 skipped`, coverage `62,44%`, audit, Terraform, JS и Docker Python 3.11.
+Production не изменён. Нужны commit, CI, новый immutable digest, отдельный staging raw bucket
+и повторный delivery-off staging; старый digest
+`sha256:4ecc211f…8d22` остаётся запрещён к продвижению.
+
 31 июля 2026 delivery-off staging R8.1.3 использовал commit
 `737cd8a14f5f498adfd6d2a2753e1edc68e92468`, Cloud Build
 `5a2f43b7-47f5-4ad5-b654-8e86e08d40c0` и digest
@@ -10,7 +23,7 @@ API revision `deal-sniper-api-staging-00049-8gh` вернула точные com
 с пустым raw body (SHA-256 `e3b0c442…b855`): семантическая ошибка возникает после
 существующего network/HTTP retry и не повторяется. Staging gate остановлен, production
 не изменён. Точный диагноз и требуемое отдельное утверждение исправления зафиксированы
-в разделе R8.1.3F плана; текущий digest запрещено продвигать.
+в разделе R8.1.3F плана; этот digest запрещено продвигать.
 
 ## Production R8.1.1 Free → Pro (29 июля 2026)
 

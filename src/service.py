@@ -250,12 +250,16 @@ class DealService:
             fetched = await source.fetch()
         except Exception as error:
             completed_at = datetime.now(UTC)
+            error_category = getattr(error, "category", "unexpected_error")
+            attempts = getattr(error, "attempts", 1)
             self.repository.record_source_run(
                 metric_name,
                 {
                     "success": False,
                     "duration_seconds": round(perf_counter() - started, 3),
                     "error": f"{type(error).__name__}: {error}",
+                    "error_category": str(error_category),
+                    "attempts": int(attempts),
                     "completed_at": completed_at.isoformat(),
                 },
             )

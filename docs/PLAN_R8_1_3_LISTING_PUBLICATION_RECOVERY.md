@@ -1,7 +1,8 @@
 # План R8.1.3 — восстановление публикации автомобильных объявлений
 
-Статус: **утверждён владельцем; локальная реализация завершена, staging gate временно
-остановлен на подтверждённом transient-дефекте CarSwitch; production не изменён**.
+Статус: **R8.1.3F утверждён владельцем, включая отдельные append-only capture-события;
+полный повторный локальный gate успешен; требуется новый immutable build и delivery-off
+staging; production не изменён**.
 
 ## 0. Статус реализации 30 июля 2026 года
 
@@ -229,3 +230,29 @@ scheduled reconciler каждые 15 минут
 Это дополнение изменяет код и поэтому требует отдельного явного утверждения владельца.
 Production deploy по-прежнему требует ещё одного отдельного разрешения только после
 успешного повторного staging evidence.
+
+### Статус реализации R8.1.3F — 31 июля 2026
+
+Дополнение утверждено владельцем и реализовано. CarSwitch проверяет нормализованный MIME
+(`text/html` или `application/xhtml+xml`), непустое тело и распознаваемый `ItemList`
+внутри общего трёхпопыточного retry. Повторяется только специальная семантическая ошибка
+CarSwitch; постоянные ошибки будущего parser-контракта не маскируются как transient.
+
+Каждый HTTP 200 перед проверкой передаётся в immutable raw archive. Payload-объект остаётся
+content-addressed и одинаковые тела могут физически разделять один объект по checksum, но
+**каждый вызов** обязан дополнительно создавать отдельное append-only событие
+`raw_snapshot_attempt`. Событие содержит номер попытки, `fetched_at`, source URL, checksum,
+storage URI, content type и размер. Поэтому три одинаковых пустых ответа имеют один
+неизменяемый payload и три различимых capture-события. Итоговые `attempts` и
+`error_category=semantic_empty_response` дополнительно сохраняются в source health и
+показываются в Admin Sources и Runs. При исчерпании budget snapshots и decisions не
+создаются.
+
+Append-only capture-события реализованы без изменения schema version: используется
+существующий audit trail, а content-addressed payload сохраняет прежний immutable URI.
+Regression-тест подтверждает один физический пустой payload и три события с номерами 1–3.
+Полный повторный локальный gate успешен: Ruff, strict mypy по 42 source-файлам,
+`153 passed / 2 skipped`, coverage `62,44%`, dependency audit без известных уязвимостей,
+Terraform fmt/init/validate, JavaScript ES-module syntax и Docker Python 3.11 runtime/import
+без `pip`, `setuptools` и `wheel`. Далее разрешены commit, GitHub Actions, новый
+commit-labelled immutable digest и повтор трёх delivery-off staging-циклов 4/4 источников.
