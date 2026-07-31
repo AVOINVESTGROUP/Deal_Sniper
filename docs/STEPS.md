@@ -1,5 +1,18 @@
 # Журнал реализации
 
+## 31 июля 2026 — R8.1.3 staging gate остановлен на CarSwitch transient
+
+- Immutable build commit `737cd8a14f5f498adfd6d2a2753e1edc68e92468`, Cloud Build
+  `5a2f43b7-47f5-4ad5-b654-8e86e08d40c0`, digest `sha256:4ecc211f…8d22` создан.
+- Staging API `deal-sniper-api-staging-00049-8gh` и publisher используют один digest,
+  отдельную базу `deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false`; staging delivery
+  queue остаётся `PAUSED`.
+- Первый реальный цикл DubiCars/CarSwitch/Cars24/OpenSooq прошёл 4/4.
+- Второй цикл остановил gate: CarSwitch получил HTTP 200 с пустым телом и обошёл retry,
+  потому что semantic validation выполнялась после `_get_with_retry`.
+- Production не изменён. Следующий разрешённый шаг — только после утверждения дополнения
+  R8.1.3F: bounded semantic retry, полный gate, новый immutable digest и повтор staging.
+
 ## 30 июля 2026 — повторно подтверждена причина отсутствия автомобильных предложений
 
 - Read-only production-аудит после R8.1.2.1 насчитал 1 690 current decisions: `INSUFFICIENT_DATA=1608`, `REJECT=81`, `INSPECT=1`, `CONTACT=0`; рынок рассчитан только для 82 решений.

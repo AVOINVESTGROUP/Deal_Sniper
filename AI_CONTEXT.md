@@ -1,5 +1,17 @@
 # AI Context: Dubai Deal Sniper
 
+31 июля 2026 delivery-off staging R8.1.3 использовал commit
+`737cd8a14f5f498adfd6d2a2753e1edc68e92468`, Cloud Build
+`5a2f43b7-47f5-4ad5-b654-8e86e08d40c0` и digest
+`sha256:4ecc211ff5d5e32f3ba58610a77775249ea80200276f737ee6fd0b5ca2188d22`.
+API revision `deal-sniper-api-staging-00049-8gh` вернула точные commit/digest,
+`delivery=false`; отдельная очередь `telegram-delivery-staging` осталась `PAUSED`.
+Первый реальный цикл 4/4 источников завершился успешно. Второй выявил CarSwitch HTTP 200
+с пустым raw body (SHA-256 `e3b0c442…b855`): семантическая ошибка возникает после
+существующего network/HTTP retry и не повторяется. Staging gate остановлен, production
+не изменён. Точный диагноз и требуемое отдельное утверждение исправления зафиксированы
+в разделе R8.1.3F плана; текущий digest запрещено продвигать.
+
 ## Production R8.1.1 Free → Pro (29 июля 2026)
 
 R8.1.1 работает в production на source commit `308545a43a3b06d32f984e5d8d5d18294750f87a`, digest `sha256:7a8ed30227434bfe6411e3d457a76b550c5ba39d9dd877560c4fed05223af897`, API revision `deal-sniper-api-00062-s79`. Независимые `free/v2` и объектный `market-watch/v2` отключены; `free/v3` создаётся и доставляется только после exact Pro `sent` той же revision. 75 недоказуемых legacy Free-постов удалены с audit trail, повторный preview показывает `unsafe=0`. Production evidence подтверждает `eligible=1`, `sent=1`, нулевые blocked/failure/legacy-счётчики и точную пару Free message `163` → Pro message `27`. Очередь RUNNING и пуста, content scheduler ENABLED. Полное доказательство: `docs/RELEASE_EVIDENCE_2026-07-29-R8_1_1.md`.

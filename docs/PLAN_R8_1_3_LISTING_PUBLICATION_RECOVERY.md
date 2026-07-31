@@ -1,6 +1,7 @@
 # План R8.1.3 — восстановление публикации автомобильных объявлений
 
-Статус: **утверждён владельцем; локальная реализация и gate завершены, production не изменён**.
+Статус: **утверждён владельцем; локальная реализация завершена, staging gate временно
+остановлен на подтверждённом transient-дефекте CarSwitch; production не изменён**.
 
 ## 0. Статус реализации 30 июля 2026 года
 
@@ -184,3 +185,47 @@ scheduled reconciler каждые 15 минут
 ## 7. Граница разрешения
 
 Утверждение этого документа разрешает реализацию кода и delivery-off staging R8.1.3. Оно **не разрешает production deploy, bounded replay production или отправку новых Telegram-сообщений**. Для них после staging evidence требуется отдельная явная команда владельца.
+
+## 8. Дополнение R8.1.3F — семантически пустой HTTP 200 CarSwitch
+
+### Подтверждённый диагноз
+
+31 июля 2026 immutable staging digest
+`sha256:4ecc211ff5d5e32f3ba58610a77775249ea80200276f737ee6fd0b5ca2188d22`
+прошёл первый реальный цикл всех четырёх источников. Во втором цикле DubiCars, Cars24
+и OpenSooq завершились успешно, а CarSwitch execution
+`deal-sniper-rehearsal-carswitch-staging-qnd8s` завершился ошибкой отсутствующего
+`ItemList`.
+
+Это не даёт права ослабить parser. Raw evidence содержит HTTP-ответ CarSwitch с SHA-256
+пустого тела `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+и размером `0` байт. Текущий `_get_with_retry` повторяет timeout, network error и
+допустимые HTTP-коды, но возвращает пустой HTTP 200 как успешный результат. Ошибка
+структуры возникает позже в `parse_carswitch_page` и поэтому обходит bounded retry.
+
+### Граница исправления
+
+1. CarSwitch обязан считать пустое тело, неподходящий content type и отсутствие
+   распознаваемого `ItemList` семантически неуспешной попыткой получения страницы.
+2. Каждая такая попытка сохраняется как raw evidence, но не создаёт listing, market,
+   decision или публикацию.
+3. Семантический transient получает тот же bounded budget: не более трёх попыток с
+   backoff. Если следующая попытка возвращает валидный `ItemList`, цикл продолжается.
+4. После исчерпания бюджета source run получает наблюдаемую terminal-категорию
+   `semantic_empty_response`; старые данные не выдаются за свежий результат.
+5. Parser не принимает placeholder, request-price или данные, отсутствующие в
+   фактическом ответе.
+
+### Тесты и повтор релизного gate
+
+- unit: `empty HTTP 200 -> valid ItemList` восстанавливается ровно в пределах budget;
+- unit: три пустых HTTP 200 завершаются `semantic_empty_response` без snapshots и решений;
+- regression: валидный CarSwitch ItemList остаётся совместимым;
+- полный локальный gate, GitHub Actions и новый immutable commit-labelled digest;
+- заново выполнить три последовательных delivery-off staging-цикла 4/4 источников;
+- staging Telegram queue всё время остаётся `PAUSED`, `DELIVERY_ENABLED=false`;
+- digest `sha256:4ecc211f…8d22` после изменения кода не может продвигаться в production.
+
+Это дополнение изменяет код и поэтому требует отдельного явного утверждения владельца.
+Production deploy по-прежнему требует ещё одного отдельного разрешения только после
+успешного повторного staging evidence.
