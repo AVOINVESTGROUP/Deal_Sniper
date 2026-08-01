@@ -1,10 +1,12 @@
 """Cloud Run HTTP API и Telegram webhook."""
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -17,6 +19,7 @@ from telegram import (
     Bot,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputFile,
     KeyboardButton,
     ReplyKeyboardMarkup,
     WebAppInfo,
@@ -24,9 +27,13 @@ from telegram import (
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, TimedOut
 
-from src.admin_cloud import cloud_runtime_status
+from src.admin_cloud import cloud_runtime_status, run_publisher_job, scheduler_action
 from src.auth import Principal, verify_firebase_bearer, verify_telegram_init_data
-from src.billing import telegram_subscription_metrics, telegram_subscription_status
+from src.billing import (
+    create_telegram_subscription_link,
+    telegram_subscription_metrics,
+    telegram_subscription_status,
+)
 from src.bot import (
     format_card,
     format_public_teaser,
@@ -49,12 +56,15 @@ from src.cloud_jobs import CloudJobLauncher
 from src.config import Settings
 from src.content import audience_poll, deal_analysis, market_pulse, price_drop, weekly_review
 from src.domain.ids import (
+    canonical_hash,
     delivery_id,
     operation_id,
     publication_event_id,
+    publication_revision_id,
     verification_key,
 )
 from src.domain.models import (
+    NewsFeedConfiguration,
     OutboxRecord,
     OutboxState,
     Outcome,
@@ -64,13 +74,26 @@ from src.domain.models import (
     UserAction,
     UserSettings,
 )
-from src.news import DubaiAutoNewsClient, format_news
-from src.pro_cta import (
-    ProCta,
-    append_pro_cta,
-    pro_cta_count,
-    pro_cta_for_index,
-    validated_subscription_url,
+from src.free_publication import (
+    FREE_TEMPLATE_VERSION,
+    preview_free_pro_integrity,
+    reconcile_free_publications,
+    telegram_message_url,
+)
+from src.news import format_news
+from src.news_evidence import NewsIngestionService, evidence_as_news_item, load_news_asset
+from src.pro_cta import validated_subscription_url
+from src.pro_news import news_pair_delivery_gate, preview_pro_news_publication
+from src.pro_publication import (
+    PRO_EVENT_TYPE,
+    PRO_TEMPLATE_VERSION,
+    current_pro_candidates,
+    preview_pro_reconciliation,
+)
+from src.runtime_config import (
+    RuntimeConfiguration,
+    active_configuration,
+    effective_settings,
 )
 from src.search import build_saved_search, parse_search
 from src.service import DealService, EvaluatedListing
@@ -86,12 +109,6 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 settings = Settings.from_env()
 service = DealService.from_settings(settings)
-news_client = DubaiAutoNewsClient(
-    settings.auto_news_rss_url,
-    settings.request_timeout_seconds,
-    settings.auto_news_max_age_days,
-    settings.auto_news_limit,
-)
 app = FastAPI(title="Dubai Deal Sniper", version="1.1.0")
 
 
@@ -116,10 +133,7 @@ _market_cache_at = 0.0
 _market_cache_lock = asyncio.Lock()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://avo-deal-sniper.web.app",
-        "https://avo-deal-sniper.firebaseapp.com",
-    ],
+    allow_origins=list(settings.cors_allowed_origins),
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -157,13 +171,30 @@ def admin_chat_keyboard() -> InlineKeyboardMarkup | None:
 
 
 def publication_cta_keyboard(
-    button_label: str | None, button_url: str | None
+    button_label: str | None,
+    button_url: str | None,
+    object_button_label: str | None = None,
+    object_button_url: str | None = None,
+    article_button_label: str | None = None,
+    article_button_url: str | None = None,
 ) -> InlineKeyboardMarkup | None:
-    """Создаёт единственную прямую кнопку Pro только для валидной пары полей."""
+    """Создаёт отдельные кнопки подписки и точной карточки Pro."""
+    rows: list[list[InlineKeyboardButton]] = []
     validated_url = validated_subscription_url(button_url or "")
-    if not button_label or not validated_url:
+    validated_object_url = validated_subscription_url(object_button_url or "")
+    if button_label and validated_url:
+        rows.append([InlineKeyboardButton(button_label, url=validated_url)])
+    if object_button_label and validated_object_url:
+        rows.append([InlineKeyboardButton(object_button_label, url=validated_object_url)])
+    if (
+        article_button_label
+        and article_button_url
+        and article_button_url.startswith("https://")
+    ):
+        rows.append([InlineKeyboardButton(article_button_label, url=article_button_url)])
+    if not rows:
         return None
-    return InlineKeyboardMarkup([[InlineKeyboardButton(button_label, url=validated_url)]])
+    return InlineKeyboardMarkup(rows)
 
 
 @app.middleware("http")
@@ -219,6 +250,53 @@ class OutboxReconciliationRequest(BaseModel):
     action: str
 
 
+class RuntimeSettingsRequest(BaseModel):
+    """Несекретные параметры новой immutable revision."""
+
+    pro_price_aed: int = Field(ge=1, le=1_000_000)
+    pro_price_stars: int = Field(ge=1, le=10_000)
+    target_profit_aed: Decimal = Field(ge=0)
+    min_roi_percent: Decimal = Field(ge=0, le=1_000)
+    min_comparables_count: int = Field(ge=2, le=100)
+    channel_max_posts_per_run: int = Field(ge=1, le=100)
+    pro_deals_enabled: bool = True
+    pro_news_enabled: bool = False
+    pro_news_max_items: int = Field(default=3, ge=1, le=3)
+    pro_news_min_interval_hours: int = Field(default=6, ge=1, le=168)
+    pro_news_ai_summary_enabled: bool = False
+    operation_id: str = Field(min_length=8, max_length=120)
+    confirmation: str = Field(default="", max_length=100)
+
+
+class RuntimeRollbackRequest(BaseModel):
+    version: str = Field(min_length=1, max_length=120)
+    operation_id: str = Field(min_length=8, max_length=120)
+    confirmation: str = Field(min_length=1, max_length=100)
+
+
+class SchedulerActionRequest(BaseModel):
+    action: str = Field(pattern=r"^(run|pause|resume)$")
+    operation_id: str = Field(min_length=8, max_length=120)
+    confirmation: str = Field(min_length=1, max_length=120)
+
+
+class ProPublicationRunRequest(BaseModel):
+    operation_id: str = Field(min_length=8, max_length=120)
+    confirmation: str = Field(min_length=1, max_length=120)
+
+
+class NewsFeedCreateRequest(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
+    publisher: str = Field(min_length=2, max_length=120)
+    url: HttpUrl
+    publisher_domains: list[str] = Field(default_factory=list, max_length=20)
+    image_domains: list[str] = Field(default_factory=list, max_length=20)
+
+
+class NewsFeedStateRequest(BaseModel):
+    enabled: bool
+
+
 class TmaAuthRequest(BaseModel):
     init_data: str
 
@@ -270,6 +348,19 @@ class ContentDeliveryTask(BaseModel):
     image_url: str | None = None
     pro_cta_button_label: str | None = None
     pro_cta_button_url: str | None = None
+    pro_object_button_label: str | None = None
+    pro_object_button_url: str | None = None
+    decision_id: str | None = None
+    listing_id: str | None = None
+    content_hash: str | None = None
+    parent_pro_delivery_id: str | None = None
+    parent_pro_message_id: str | None = None
+    news_evidence_id: str | None = None
+    image_storage_uri: str | None = None
+    image_sha256: str | None = None
+    image_content_type: str | None = None
+    article_button_label: str | None = None
+    article_button_url: str | None = None
 
 
 class WhatsAppDeliveryTask(BaseModel):
@@ -336,6 +427,11 @@ def firebase_principal(authorization: str | None, *, require_admin: bool) -> Pri
     return principal
 
 
+def runtime_settings() -> Settings:
+    """Возвращает единую active revision поверх безопасного environment baseline."""
+    return effective_settings(service.repository, settings)
+
+
 async def current_market_snapshot() -> list[tuple[Any, Any]]:
     """Объединяет параллельные TMA-запросы в одно чтение Firestore на 30 секунд."""
     global _market_cache, _market_cache_at
@@ -375,36 +471,39 @@ async def launch_scan(source_name: str | None = None) -> list[str]:
 
 
 def default_user_settings(user_id: int, language_code: str = "en") -> UserSettings:
+    current = runtime_settings()
     return UserSettings(
         user_id=user_id,
-        min_profit_aed=settings.target_profit_aed,
-        min_roi_percent=settings.min_roi_percent,
+        min_profit_aed=current.target_profit_aed,
+        min_roi_percent=current.min_roi_percent,
         language_code=telegram_language(language_code),
     )
 
 
 def pro_subscription_text(active: bool) -> str:
     """Формирует прозрачное предложение единственного платного тарифа."""
+    current = runtime_settings()
     status = "Your Pro access is active." if active else "Your current plan is Free."
     return (
-        f"<b>Dubai Deal Sniper Pro — {settings.pro_price_aed} AED / 30 days</b>\n\n"
+        f"<b>Dubai Deal Sniper Pro — {current.pro_price_aed} AED / 30 days</b>\n\n"
         f"{status}\n\n"
         "Pro includes full verified deal cards: listing photo and link, market range, "
         "maximum purchase price, costs, expected profit, ROI and risks.\n\n"
-        f"Telegram payment: {settings.pro_price_stars:,} Stars every 30 days."
+        f"Telegram payment: {current.pro_price_stars:,} Stars every 30 days."
     )
 
 
 def pro_subscription_keyboard() -> InlineKeyboardMarkup | None:
     """Возвращает нативную Telegram Stars ссылку без раскрытия в исходном коде."""
-    if not settings.telegram_pro_subscription_url:
+    current = runtime_settings()
+    if not current.telegram_pro_subscription_url:
         return None
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
                     "Subscribe to Pro",
-                    url=settings.telegram_pro_subscription_url,
+                    url=current.telegram_pro_subscription_url,
                 )
             ]
         ]
@@ -503,11 +602,26 @@ async def version() -> dict[str, str]:
 async def admin_overview(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Безопасный агрегат панели без секретных значений."""
     firebase_principal(authorization, require_admin=True)
-    cloud = await asyncio.to_thread(
-        cloud_runtime_status, settings.google_cloud_project, settings.google_cloud_region
+    current = runtime_settings()
+    (
+        cloud,
+        subscription_metrics,
+        source_health,
+        snapshot_count,
+        operations,
+        referrals,
+    ) = await asyncio.gather(
+        asyncio.to_thread(
+            cloud_runtime_status,
+            settings.google_cloud_project,
+            settings.google_cloud_region,
+        ),
+        telegram_subscription_metrics(current),
+        asyncio.to_thread(service.repository.source_health),
+        asyncio.to_thread(service.repository.count_snapshots),
+        asyncio.to_thread(service.repository.admin_summary),
+        asyncio.to_thread(service.repository.referral_summary),
     )
-    subscription_metrics = await telegram_subscription_metrics(settings)
-    source_health = await asyncio.to_thread(service.repository.source_health)
     normalized_health: dict[str, dict[str, Any]] = {}
     for source_name, payload in source_health.items():
         run = dict(payload)
@@ -518,7 +632,7 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
         run["status"] = "healthy" if run.get("success") is True else "attention"
         normalized_health[source_name] = run
     return {
-        "snapshot_count": await asyncio.to_thread(service.repository.count_snapshots),
+        "snapshot_count": snapshot_count,
         "sources": normalized_health,
         "source_switches": service.source_statuses(),
         "dynamic_sources": sorted(service.dynamic_source_names()),
@@ -529,21 +643,406 @@ async def admin_overview(authorization: str | None = Header(default=None)) -> di
         and settings.whatsapp_phone_number_id
         else "disabled",
         "schema_version": settings.schema_version,
-        "operations": await asyncio.to_thread(service.repository.admin_summary),
+        "operations": operations,
         "cloud": cloud,
         "financial_config": {
-            "version": settings.financial_config_version,
-            "target_profit_aed": str(settings.target_profit_aed),
-            "min_roi_percent": str(settings.min_roi_percent),
-            "min_comparables": settings.min_comparables_count,
+            "version": current.financial_config_version,
+            "target_profit_aed": str(current.target_profit_aed),
+            "min_roi_percent": str(current.min_roi_percent),
+            "min_comparables": current.min_comparables_count,
         },
         "subscription": {
-            "price_aed": settings.pro_price_aed,
-            "price_stars": settings.pro_price_stars,
+            "price_aed": current.pro_price_aed,
+            "price_stars": current.pro_price_stars,
             **subscription_metrics,
         },
-        "referrals": await asyncio.to_thread(service.repository.referral_summary),
+        "referrals": referrals,
     }
+
+
+def _runtime_candidate(
+    request: RuntimeSettingsRequest,
+    *,
+    actor: str,
+    subscription_url: str,
+    telegram_link_name: str,
+) -> RuntimeConfiguration:
+    """Строит и валидирует новую immutable revision."""
+    now = datetime.now(UTC)
+    version_hash = canonical_hash(
+        "runtime-configuration/v1",
+        {
+            "operation_id": request.operation_id,
+            "actor": actor,
+            "pro_price_aed": request.pro_price_aed,
+            "pro_price_stars": request.pro_price_stars,
+            "target_profit_aed": str(request.target_profit_aed),
+            "min_roi_percent": str(request.min_roi_percent),
+            "min_comparables_count": request.min_comparables_count,
+            "channel_max_posts_per_run": request.channel_max_posts_per_run,
+            "pro_deals_enabled": request.pro_deals_enabled,
+            "pro_news_enabled": request.pro_news_enabled,
+            "pro_news_max_items": request.pro_news_max_items,
+            "pro_news_min_interval_hours": request.pro_news_min_interval_hours,
+            "pro_news_ai_summary_enabled": request.pro_news_ai_summary_enabled,
+        },
+    )[:12]
+    return RuntimeConfiguration(
+        version=f"r7-{now:%Y%m%d%H%M%S}-{version_hash}",
+        pro_price_aed=request.pro_price_aed,
+        pro_price_stars=request.pro_price_stars,
+        pro_subscription_url=subscription_url,
+        target_profit_aed=request.target_profit_aed,
+        min_roi_percent=request.min_roi_percent,
+        min_comparables_count=request.min_comparables_count,
+        channel_max_posts_per_run=request.channel_max_posts_per_run,
+        pro_deals_enabled=request.pro_deals_enabled,
+        pro_news_enabled=request.pro_news_enabled,
+        pro_news_max_items=request.pro_news_max_items,
+        pro_news_min_interval_hours=request.pro_news_min_interval_hours,
+        pro_news_ai_summary_enabled=request.pro_news_ai_summary_enabled,
+        created_at=now,
+        created_by=actor,
+        telegram_link_name=telegram_link_name,
+    )
+
+
+@app.get("/admin/settings")
+async def admin_settings(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Возвращает active revision и безопасную историю настроек."""
+    firebase_principal(authorization, require_admin=True)
+    active = active_configuration(service.repository, settings)
+    revisions = await asyncio.to_thread(service.repository.list_runtime_configurations, 20)
+    return {
+        "active": active.public_dict(),
+        "revisions": [
+            RuntimeConfiguration.model_validate(item).public_dict() for item in revisions
+        ],
+        "secrets": {
+            "telegram_bot_token": "configured" if settings.telegram_bot_token else "not configured",
+            "telegram_webhook_secret": "configured"
+            if settings.telegram_webhook_secret
+            else "not configured",
+            "whatsapp_access_token": "configured"
+            if settings.whatsapp_access_token
+            else "not configured",
+        },
+    }
+
+
+@app.get("/admin/runs")
+async def admin_runs(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Последние известные запуски источников и административные операции."""
+    firebase_principal(authorization, require_admin=True)
+    health, audits = await asyncio.gather(
+        asyncio.to_thread(service.repository.source_health),
+        asyncio.to_thread(service.repository.list_audit_events, 50),
+    )
+    items = [
+        {"source": source, **dict(payload)}
+        for source, payload in health.items()
+    ]
+    return {"items": items, "audit": audits}
+
+
+@app.post("/admin/schedulers/{job_name}/action")
+async def admin_scheduler_action(
+    job_name: str,
+    request: SchedulerActionRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Запускает, останавливает или возобновляет только allowlisted scheduler job."""
+    principal = firebase_principal(authorization, require_admin=True)
+    required = f"{request.action.upper()} {job_name}"
+    if request.confirmation != required:
+        raise HTTPException(status_code=422, detail=f"Введите: {required}")
+    operation_name = f"scheduler_{request.action}"
+    operation_payload = {"job_name": job_name, "action": request.action}
+    claimed = await asyncio.to_thread(
+        service.repository.claim_admin_operation,
+        request.operation_id,
+        operation_name,
+        operation_payload,
+    )
+    if not claimed:
+        previous = await asyncio.to_thread(
+            service.repository.get_admin_operation,
+            request.operation_id,
+        )
+        if previous is None or previous.get("operation") != operation_name:
+            raise HTTPException(status_code=409, detail="Operation ID уже использован")
+        return {"ok": previous.get("state") == "completed", "replayed": True, **previous}
+    try:
+        result = await asyncio.to_thread(
+            scheduler_action,
+            settings.google_cloud_project,
+            settings.google_cloud_region,
+            job_name,
+            request.action,
+        )
+    except ValueError as error:
+        await asyncio.to_thread(
+            service.repository.complete_admin_operation,
+            request.operation_id,
+            "failed",
+            {"error": str(error)},
+        )
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RuntimeError as error:
+        await asyncio.to_thread(
+            service.repository.complete_admin_operation,
+            request.operation_id,
+            "failed",
+            {"error": str(error)},
+        )
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    await asyncio.to_thread(
+        service.repository.complete_admin_operation,
+        request.operation_id,
+        "completed",
+        result,
+    )
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_scheduler_action",
+        {
+            "operation_id": request.operation_id,
+            "actor": principal.email or principal.subject,
+            "job_name": job_name,
+            "action": request.action,
+        },
+    )
+    return {"ok": True, "operation_id": request.operation_id, **result}
+
+
+def _admin_decision_item(listing: Any, decision: Any) -> dict[str, Any]:
+    market = decision.market
+    return {
+        "listing_id": f"{listing.source}:{listing.source_listing_id}",
+        "source": listing.source,
+        "title": listing.title,
+        "url": str(listing.url),
+        "price_aed": str(listing.price_aed),
+        "year": listing.year,
+        "make": listing.make,
+        "model": listing.model,
+        "observed_at": listing.observed_at,
+        "action": decision.action.value,
+        "market_low_aed": str(market.low_aed) if market else None,
+        "market_high_aed": str(market.high_aed) if market else None,
+        "max_purchase_price_aed": str(decision.max_purchase_price_aed),
+        "expected_profit_aed": str(decision.expected_profit_aed),
+        "roi_percent": str(decision.roi_percent),
+        "confidence": str(decision.confidence),
+        "comparables_count": len(market.comparable_ids) if market else 0,
+        "engine_version": decision.engine_version,
+        "financial_config_version": decision.financial_config_version,
+    }
+
+
+@app.get("/admin/listings")
+async def admin_listings(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Ограниченная выборка current listings без полного Firestore scan."""
+    firebase_principal(authorization, require_admin=True)
+    pairs = await asyncio.to_thread(service.repository.current_decisions, 100)
+    return {"items": [_admin_decision_item(listing, decision) for listing, decision in pairs]}
+
+
+@app.get("/admin/listing-pipeline")
+async def admin_listing_pipeline(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает причины отсутствия объектов без чтения секретов и догадок."""
+    firebase_principal(authorization, require_admin=True)
+    summary = await asyncio.to_thread(service.repository.listing_pipeline_summary)
+    return {"funnel": summary}
+
+
+@app.get("/admin/decisions")
+async def admin_decisions(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Текущие решения Deal Engine для операционного контроля."""
+    firebase_principal(authorization, require_admin=True)
+    pairs = await asyncio.to_thread(service.repository.current_decisions, 100)
+    return {"items": [_admin_decision_item(listing, decision) for listing, decision in pairs]}
+
+
+@app.get("/admin/users")
+async def admin_users(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Минимизированные пользовательские настройки без секретов и контактов."""
+    firebase_principal(authorization, require_admin=True)
+    users = await asyncio.to_thread(service.repository.list_admin_users, 100)
+    items = []
+    for item in users:
+        user_settings = dict(item.get("settings") or {})
+        items.append(
+            {
+                "user_id": item.get("user_id"),
+                "tariff": user_settings.get("tariff", "free"),
+                "language_code": user_settings.get("language_code", "en"),
+                "makes": user_settings.get("makes", []),
+                "models": user_settings.get("models", []),
+                "updated_at": item.get("updated_at"),
+            }
+        )
+    return {"items": items}
+
+
+@app.get("/admin/errors")
+async def admin_errors(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Консолидирует только состояния, реально требующие внимания."""
+    firebase_principal(authorization, require_admin=True)
+    health, unknown, failed = await asyncio.gather(
+        asyncio.to_thread(service.repository.source_health),
+        asyncio.to_thread(service.repository.list_outbox, OutboxState.UNKNOWN, 100),
+        asyncio.to_thread(service.repository.list_outbox, OutboxState.FAILED, 100),
+    )
+    source_errors = [
+        {"kind": "source", "id": name, "message": payload.get("error") or "Source needs attention"}
+        for name, payload in health.items()
+        if payload.get("error") or payload.get("success") is False
+    ]
+    delivery_errors = [
+        {"kind": item.state.value, "id": item.delivery_id, "message": item.last_error}
+        for item in [*unknown, *failed]
+    ]
+    return {"items": [*source_errors, *delivery_errors]}
+
+
+@app.post("/admin/settings/preview")
+async def admin_settings_preview(
+    request: RuntimeSettingsRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Проверяет изменение и показывает последствия без внешних мутаций."""
+    principal = firebase_principal(authorization, require_admin=True)
+    current = active_configuration(service.repository, settings)
+    candidate = _runtime_candidate(
+        request,
+        actor=principal.email or principal.subject,
+        subscription_url=current.pro_subscription_url,
+        telegram_link_name="preview",
+    )
+    return {
+        "valid": True,
+        "confirmation_required": f"APPLY {request.pro_price_stars} STARS",
+        "creates_new_telegram_link": request.pro_price_stars != current.pro_price_stars,
+        "current": current.public_dict(),
+        "candidate": candidate.public_dict(),
+    }
+
+
+@app.post("/admin/settings/apply")
+async def admin_settings_apply(
+    request: RuntimeSettingsRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Создаёт платную ссылку и атомарно активирует новую revision."""
+    principal = firebase_principal(authorization, require_admin=True)
+    required_confirmation = f"APPLY {request.pro_price_stars} STARS"
+    if request.confirmation != required_confirmation:
+        raise HTTPException(status_code=422, detail=f"Введите: {required_confirmation}")
+    repeated = await asyncio.to_thread(
+        service.repository.runtime_configuration_for_operation,
+        request.operation_id,
+    )
+    if repeated is not None:
+        return {
+            "ok": True,
+            "replayed": True,
+            "active": RuntimeConfiguration.model_validate(repeated).public_dict(),
+        }
+    actor = principal.email or principal.subject
+    current = active_configuration(service.repository, settings)
+    link_name = f"R7 {request.pro_price_stars} Stars"
+    subscription_url = current.pro_subscription_url
+    if request.pro_price_stars != current.pro_price_stars or not subscription_url:
+        try:
+            subscription_url = await create_telegram_subscription_link(
+                settings,
+                price_stars=request.pro_price_stars,
+                name=link_name,
+            )
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=502, detail=str(error)) from error
+    candidate = _runtime_candidate(
+        request,
+        actor=actor,
+        subscription_url=subscription_url,
+        telegram_link_name=link_name,
+    )
+    try:
+        stored = await asyncio.to_thread(
+            service.repository.activate_runtime_configuration,
+            candidate.model_dump(mode="json"),
+            request.operation_id,
+        )
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return {"ok": True, "active": RuntimeConfiguration.model_validate(stored).public_dict()}
+
+
+@app.post("/admin/settings/rollback")
+async def admin_settings_rollback(
+    request: RuntimeRollbackRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Активирует параметры старой revision через новую проверяемую Stars-ссылку."""
+    principal = firebase_principal(authorization, require_admin=True)
+    if request.confirmation != f"ROLLBACK {request.version}":
+        raise HTTPException(status_code=422, detail=f"Введите: ROLLBACK {request.version}")
+    repeated = await asyncio.to_thread(
+        service.repository.runtime_configuration_for_operation,
+        request.operation_id,
+    )
+    if repeated is not None:
+        return {
+            "ok": True,
+            "replayed": True,
+            "active": RuntimeConfiguration.model_validate(repeated).public_dict(),
+        }
+    revisions = await asyncio.to_thread(service.repository.list_runtime_configurations, 100)
+    selected = next(
+        (item for item in revisions if str(item.get("version")) == request.version),
+        None,
+    )
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Revision не найдена")
+    previous = RuntimeConfiguration.model_validate(selected)
+    try:
+        subscription_url = await create_telegram_subscription_link(
+            settings,
+            price_stars=previous.pro_price_stars,
+            name=f"Rollback {previous.pro_price_stars} Stars",
+        )
+    except (ValueError, RuntimeError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    rollback_request = RuntimeSettingsRequest(
+        pro_price_aed=previous.pro_price_aed,
+        pro_price_stars=previous.pro_price_stars,
+        target_profit_aed=previous.target_profit_aed,
+        min_roi_percent=previous.min_roi_percent,
+        min_comparables_count=previous.min_comparables_count,
+        channel_max_posts_per_run=previous.channel_max_posts_per_run,
+        pro_deals_enabled=previous.pro_deals_enabled,
+        pro_news_enabled=previous.pro_news_enabled,
+        pro_news_max_items=previous.pro_news_max_items,
+        pro_news_min_interval_hours=previous.pro_news_min_interval_hours,
+        pro_news_ai_summary_enabled=previous.pro_news_ai_summary_enabled,
+        operation_id=request.operation_id,
+        confirmation=f"APPLY {previous.pro_price_stars} STARS",
+    )
+    candidate = _runtime_candidate(
+        rollback_request,
+        actor=principal.email or principal.subject,
+        subscription_url=subscription_url,
+        telegram_link_name=f"Rollback from {request.version}"[:32],
+    )
+    stored = await asyncio.to_thread(
+        service.repository.activate_runtime_configuration,
+        candidate.model_dump(mode="json"),
+        request.operation_id,
+    )
+    return {"ok": True, "active": RuntimeConfiguration.model_validate(stored).public_dict()}
 
 
 @app.post("/admin/sources/{source_name}")
@@ -794,6 +1293,281 @@ async def admin_preview(
     }
 
 
+@app.get("/admin/pro-publications")
+async def admin_pro_publications(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает фактическое покрытие текущих Pro-решений outbox-записями."""
+    firebase_principal(authorization, require_admin=True)
+    current = runtime_settings()
+    summary, news_preview_result, free_integrity, audits = await asyncio.gather(
+        asyncio.to_thread(preview_pro_reconciliation, service.repository, current),
+        preview_pro_news_publication(service.repository, current),
+        asyncio.to_thread(preview_free_pro_integrity, service.repository, current),
+        asyncio.to_thread(service.repository.list_audit_events, 100),
+    )
+    news_summary, _news_items = news_preview_result
+    last = next(
+        (
+            item
+            for item in audits
+            if item.get("event_type") == "pro_publication_reconciliation"
+        ),
+        None,
+    )
+    last_news = next(
+        (item for item in audits if item.get("event_type") == "pro_news_publication"),
+        None,
+    )
+    pending_actions = min(
+        summary.pending + summary.missing,
+        current.channel_max_posts_per_run,
+    )
+    news_pending = int(
+        news_summary.enabled
+        and (
+            news_summary.pending > 0
+            or (news_summary.interval_open and news_summary.unpublished > 0)
+        )
+    )
+    pending_actions += news_pending
+    return {
+        **summary.public_dict(),
+        "deals": summary.public_dict(),
+        "news": news_summary.public_dict(),
+        "free_integrity": free_integrity.public_dict(),
+        "pending_actions": pending_actions,
+        "batch_limit": current.channel_max_posts_per_run,
+        "confirmation_required": f"PUBLISH {pending_actions} PRO",
+        "last_reconciliation": last,
+        "last_news_reconciliation": last_news,
+    }
+
+
+@app.post("/admin/pro-publications/run")
+async def admin_run_pro_publications(
+    request: ProPublicationRunRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Запускает allowlisted publisher job после preview и точного подтверждения."""
+    principal = firebase_principal(authorization, require_admin=True)
+    current = runtime_settings()
+    preview, news_preview_result = await asyncio.gather(
+        asyncio.to_thread(
+            preview_pro_reconciliation,
+            service.repository,
+            current,
+        ),
+        preview_pro_news_publication(service.repository, current),
+    )
+    news_preview, _news_items = news_preview_result
+    pending_actions = min(
+        preview.pending + preview.missing,
+        current.channel_max_posts_per_run,
+    )
+    pending_actions += int(
+        news_preview.enabled
+        and (
+            news_preview.pending > 0
+            or (news_preview.interval_open and news_preview.unpublished > 0)
+        )
+    )
+    required = f"PUBLISH {pending_actions} PRO"
+    if request.confirmation != required:
+        raise HTTPException(status_code=422, detail=f"Введите: {required}")
+    if pending_actions == 0:
+        return {"ok": True, "started": False, "preview": preview.public_dict()}
+    operation_payload = {
+        "pending_actions": pending_actions,
+        "batch_limit": current.channel_max_posts_per_run,
+    }
+    claimed = await asyncio.to_thread(
+        service.repository.claim_admin_operation,
+        request.operation_id,
+        "run_pro_publisher",
+        operation_payload,
+    )
+    if not claimed:
+        previous = await asyncio.to_thread(
+            service.repository.get_admin_operation,
+            request.operation_id,
+        )
+        if previous is None or previous.get("operation") != "run_pro_publisher":
+            raise HTTPException(status_code=409, detail="Operation ID уже использован")
+        return {"ok": previous.get("state") == "completed", "replayed": True, **previous}
+    try:
+        result = await asyncio.to_thread(
+            run_publisher_job,
+            settings.google_cloud_project,
+            settings.google_cloud_region,
+            current.publisher_job_name,
+        )
+    except (RuntimeError, ValueError) as error:
+        await asyncio.to_thread(
+            service.repository.complete_admin_operation,
+            request.operation_id,
+            "failed",
+            {"error": str(error)},
+        )
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    await asyncio.to_thread(
+        service.repository.complete_admin_operation,
+        request.operation_id,
+        "completed",
+        result,
+    )
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_pro_publisher_started",
+        {
+            "operation_id": request.operation_id,
+            "actor": principal.email or principal.subject,
+            "pending_actions": pending_actions,
+        },
+    )
+    return {
+        "ok": True,
+        "started": True,
+        "preview": preview.public_dict(),
+        "news_preview": news_preview.public_dict(),
+        **result,
+    }
+
+
+@app.get("/admin/news-feeds")
+async def admin_news_feeds(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает установленный проверяемый registry новостных лент."""
+    firebase_principal(authorization, require_admin=True)
+    feeds = await asyncio.to_thread(service.repository.list_news_feed_configurations)
+    return {"items": [item.model_dump(mode="json") for item in feeds]}
+
+
+@app.get("/admin/news-evidence")
+async def admin_news_evidence(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Показывает оператору provenance, изображение и статусы доставки новости."""
+    firebase_principal(authorization, require_admin=True)
+    evidence = await asyncio.to_thread(
+        service.repository.active_news_evidence, 50, datetime.now(UTC)
+    )
+    outbox = await asyncio.to_thread(service.repository.list_outbox, None, 500)
+    items: list[dict[str, Any]] = []
+    for item in evidence:
+        deliveries = [record for record in outbox if record.decision_id == item.evidence_id]
+        items.append(
+            {
+                **item.model_dump(mode="json"),
+                "deliveries": [
+                    {
+                        "recipient": record.recipient,
+                        "template_version": record.template_version,
+                        "state": record.state.value,
+                        "telegram_message_id": record.telegram_message_id,
+                        "last_error": record.last_error,
+                    }
+                    for record in deliveries
+                ],
+            }
+        )
+    return {"items": items}
+
+
+@app.post("/admin/news-feeds")
+async def admin_add_news_feed(
+    request: NewsFeedCreateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Сохраняет ленту только после живого HTTPS/parse/relevance теста."""
+    principal = firebase_principal(authorization, require_admin=True)
+    if not str(request.url).startswith("https://"):
+        raise HTTPException(status_code=422, detail="Разрешены только HTTPS-ленты")
+    now = datetime.now(UTC)
+    config = NewsFeedConfiguration(
+        name=request.name,
+        publisher=request.publisher,
+        url=request.url,
+        publisher_domains=request.publisher_domains,
+        image_domains=request.image_domains,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        sample_count=0,
+    )
+    sample = await NewsIngestionService(service.repository, settings).ingest([config], now=now)
+    if not sample:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Лента не вернула свежий Dubai/UAE automotive материал с проверенным "
+                "изображением и допустимым publisher domain"
+            ),
+        )
+    config = config.model_copy(update={"sample_count": len(sample)})
+    await asyncio.to_thread(service.repository.save_news_feed_configuration, config)
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_news_feed_saved",
+        {
+            "name": config.name,
+            "publisher": config.publisher,
+            "actor": principal.email or principal.subject,
+            "sample_count": config.sample_count,
+        },
+    )
+    return {"ok": True, "feed": config.model_dump(mode="json")}
+
+
+@app.post("/admin/news-feeds/{name}")
+async def admin_set_news_feed_state(
+    name: str,
+    request: NewsFeedStateRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Включает или приостанавливает установленную ленту."""
+    principal = firebase_principal(authorization, require_admin=True)
+    feeds = await asyncio.to_thread(service.repository.list_news_feed_configurations)
+    selected = next((item for item in feeds if item.name == name), None)
+    if selected is None:
+        raise HTTPException(status_code=404, detail="Новостная лента не найдена")
+    updated = selected.model_copy(
+        update={"enabled": request.enabled, "updated_at": datetime.now(UTC)}
+    )
+    await asyncio.to_thread(service.repository.save_news_feed_configuration, updated)
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_news_feed_state",
+        {
+            "name": name,
+            "enabled": request.enabled,
+            "actor": principal.email or principal.subject,
+        },
+    )
+    return {"ok": True, "feed": updated.model_dump(mode="json")}
+
+
+@app.post("/admin/news-feeds/{name}/remove")
+async def admin_remove_news_feed(
+    name: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """Удаляет только registry entry, не затрагивая историю публикаций."""
+    principal = firebase_principal(authorization, require_admin=True)
+    removed = await asyncio.to_thread(
+        service.repository.delete_news_feed_configuration, name
+    )
+    if not removed:
+        raise HTTPException(status_code=404, detail="Новостная лента не найдена")
+    await asyncio.to_thread(
+        service.repository.record_audit_event,
+        "admin_news_feed_removed",
+        {"name": name, "actor": principal.email or principal.subject},
+    )
+    return {"ok": True, "name": name}
+
+
 @app.get("/content/market-pulse")
 async def content_market_pulse() -> dict[str, Any]:
     report = await asyncio.to_thread(market_pulse, service.repository)
@@ -903,15 +1677,16 @@ async def tma_subscription(authorization: str | None = Header(default=None)) -> 
     principal = firebase_principal(authorization, require_admin=False)
     if principal.telegram_user_id is None:
         raise HTTPException(status_code=403, detail="Owner scope отсутствует")
-    subscription = await telegram_subscription_status(settings, principal.telegram_user_id)
+    current = runtime_settings()
+    subscription = await telegram_subscription_status(current, principal.telegram_user_id)
     return {
         "plan": "pro" if subscription.active else "free",
         "active": subscription.active,
         "member_status": subscription.member_status,
-        "price_aed": settings.pro_price_aed,
-        "price_stars": settings.pro_price_stars,
+        "price_aed": current.pro_price_aed,
+        "price_stars": current.pro_price_stars,
         "period_days": 30,
-        "subscription_url": settings.telegram_pro_subscription_url,
+        "subscription_url": current.telegram_pro_subscription_url,
         "referral_url": (
             f"https://t.me/DubaiDealSniper111_bot?start=ref_{principal.telegram_user_id}"
         ),
@@ -1445,7 +2220,12 @@ async def telegram_webhook(
                         reply_markup=main_chat_keyboard(),
                     )
                 elif intent is ChatIntent.NEWS:
-                    news = await news_client.latest()
+                    news_evidence = await asyncio.to_thread(
+                        service.repository.active_news_evidence,
+                        settings.auto_news_limit,
+                        datetime.now(UTC),
+                    )
+                    news = [evidence_as_news_item(item) for item in news_evidence]
                     if news:
                         await bot.send_message(
                             chat_id=chat_id,
@@ -1541,10 +2321,14 @@ async def process_listing_task(
 ) -> dict[str, bool]:
     """Рассчитывает одну версию и ставит подходящую карточку в очередь доставки."""
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
-    if task.engine_version != service.decision_engine.version:
+    current = runtime_settings()
+    runtime_service = (
+        DealService.from_settings(current) if isinstance(service, DealService) else service
+    )
+    if task.engine_version != runtime_service.decision_engine.version:
         return {"ok": True}
-    evaluated = await service.process_listing(task.listing_id, task.content_hash)
-    if evaluated is None or not is_publishable(evaluated.decision, settings):
+    evaluated = await runtime_service.process_listing(task.listing_id, task.content_hash)
+    if evaluated is None or not is_publishable(evaluated.decision, current):
         return {"ok": True}
     current_decision_id = evaluated.decision.decision_id or task.listing_id
     vehicle_id = evaluated.decision.vehicle_id or task.listing_id
@@ -1553,17 +2337,6 @@ async def process_listing_task(
         vehicle_id=vehicle_id,
         event_type="deal-candidate",
     )
-    subscription_url = validated_subscription_url(settings.telegram_pro_subscription_url)
-    pro_cta: ProCta | None = None
-    if settings.telegram_channel_id and subscription_url:
-        cta_index = await asyncio.to_thread(
-            service.repository.reserve_pro_cta_variant,
-            event_id,
-            pro_cta_count(),
-        )
-        pro_cta = pro_cta_for_index(cta_index)
-    elif settings.telegram_channel_id:
-        logger.error("Free-публикация заблокирована: ссылка подписки Pro отсутствует или невалидна")
     await asyncio.to_thread(
         service.repository.save_publication_event,
         PublicationEvent(
@@ -1571,17 +2344,11 @@ async def process_listing_task(
             decision_id=current_decision_id,
             vehicle_id=vehicle_id,
             event_type="deal-candidate",
-            template_version="deal/v2",
-            pro_cta_variant_id=pro_cta.variant_id if pro_cta else None,
-            pro_cta_text=pro_cta.text if pro_cta else None,
-            pro_cta_button_label=pro_cta.button_label if pro_cta else None,
-            pro_cta_target=subscription_url if pro_cta else None,
-            pro_cta_fingerprint=pro_cta.fingerprint if pro_cta else None,
-            pro_cta_template_version=pro_cta.template_version if pro_cta else None,
+            template_version="deal/v1",
         ),
     )
     targets: dict[str, tuple[str, str]] = {}
-    for user_id in settings.telegram_allowed_user_ids:
+    for user_id in current.telegram_allowed_user_ids:
         user_settings = await asyncio.to_thread(
             service.repository.get_user_settings,
             user_id,
@@ -1606,20 +2373,15 @@ async def process_listing_task(
                 telegram_language(saved_search.filters.language_code),
                 template,
             )
-    if settings.telegram_pro_channel_id:
-        targets[settings.telegram_pro_channel_id] = ("en", "pro/v1")
-    if settings.telegram_channel_id and pro_cta and subscription_url:
-        targets[settings.telegram_channel_id] = ("en", "free/v2")
-    dispatcher = CloudTaskDispatcher(settings)
+    if current.telegram_pro_channel_id:
+        targets[current.telegram_pro_channel_id] = ("en", "pro/v1")
+    dispatcher = CloudTaskDispatcher(current)
     for target_id, (target_language, template_version) in targets.items():
-        is_free_channel = template_version == "free/v2"
         card = (
             format_public_teaser(evaluated.listing, target_language)
-            if template_version in {"free/v2", "personal-free/v1"}
+            if template_version == "personal-free/v1"
             else format_card(evaluated.listing, evaluated.decision, target_language)
         )
-        if is_free_channel and pro_cta:
-            card = append_pro_cta(card, pro_cta)
         stable_delivery_id = delivery_id(
             decision_id_value=current_decision_id,
             recipient_id=target_id,
@@ -1637,27 +2399,47 @@ async def process_listing_task(
             "template_version": template_version,
             "format": "telegram",
         }
-        if template_version in {"free/v2", "personal-free/v1"}:
-            delivery_payload["image_url"] = settings.free_teaser_image_url
+        pro_event: PublicationEvent | None = None
+        if template_version == PRO_TEMPLATE_VERSION:
+            pro_event_id = publication_revision_id(
+                decision_id_value=current_decision_id,
+                vehicle_id=vehicle_id,
+                event_type=PRO_EVENT_TYPE,
+                recipient_id=target_id,
+                template_version=PRO_TEMPLATE_VERSION,
+            )
+            delivery_payload["publication_event_id"] = pro_event_id
+            pro_event = PublicationEvent(
+                publication_event_id=pro_event_id,
+                decision_id=current_decision_id,
+                vehicle_id=vehicle_id,
+                listing_id=task.listing_id,
+                content_hash=task.content_hash,
+                recipient=target_id,
+                event_type=PRO_EVENT_TYPE,
+                template_version=PRO_TEMPLATE_VERSION,
+            )
+        if template_version == "personal-free/v1":
+            delivery_payload["image_url"] = current.free_teaser_image_url
         elif evaluated.listing.image_urls:
             delivery_payload["image_url"] = str(evaluated.listing.image_urls[0])
-        if is_free_channel and pro_cta and subscription_url:
-            delivery_payload["pro_cta_button_label"] = pro_cta.button_label
-            delivery_payload["pro_cta_button_url"] = subscription_url
-            delivery_payload["pro_cta_variant_id"] = pro_cta.variant_id
-            delivery_payload["pro_cta_fingerprint"] = pro_cta.fingerprint
-        await asyncio.to_thread(
-            service.repository.put_outbox,
-            OutboxRecord(
-                delivery_id=stable_delivery_id,
-                decision_id=current_decision_id,
-                recipient=target_id,
-                template_version=template_version,
-                format="telegram",
-                payload=delivery_payload,
-            ),
+        outbox = OutboxRecord(
+            delivery_id=stable_delivery_id,
+            decision_id=current_decision_id,
+            recipient=target_id,
+            template_version=template_version,
+            format="telegram",
+            payload=delivery_payload,
         )
-        await dispatcher.enqueue_delivery(delivery_payload)
+        if pro_event is None:
+            stored_outbox = await asyncio.to_thread(service.repository.put_outbox, outbox)
+        else:
+            stored_outbox = await asyncio.to_thread(
+                service.repository.commit_publication_with_outbox,
+                pro_event,
+                outbox,
+            )
+        await dispatcher.enqueue_delivery(dict(stored_outbox.payload))
     return {"ok": True}
 
 
@@ -1670,6 +2452,17 @@ async def deliver_telegram_task(
     """Доставляет Telegram-карточку ровно один раз на получателя и версию."""
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
     if not settings.delivery_enabled:
+        return {"ok": True}
+    if task.template_version == "free/v2":
+        await asyncio.to_thread(
+            service.repository.record_audit_event,
+            "free_pro_integrity_block",
+            {
+                "delivery_id": task.delivery_id,
+                "reason": "legacy_independent_free_template_disabled",
+                "template_version": task.template_version,
+            },
+        )
         return {"ok": True}
     if task.engine_version != service.decision_engine.version:
         return {"ok": True}
@@ -1734,6 +2527,13 @@ async def deliver_telegram_task(
         OutboxState.SENT,
         telegram_message_id=str(sent.message_id),
     )
+    active = runtime_settings()
+    if task.template_version == "pro/v1" and task.target_id == active.telegram_pro_channel_id:
+        await reconcile_free_publications(
+            service.repository,
+            active,
+            CloudTaskDispatcher(active),
+        )
     return {"ok": True}
 
 
@@ -1746,6 +2546,109 @@ async def deliver_content_task(
     require_internal_task(x_internal_task_secret, x_cloudtasks_taskname)
     if not settings.delivery_enabled:
         return {"ok": True}
+    if task.template_version == "market-watch/v2":
+        await asyncio.to_thread(
+            service.repository.record_audit_event,
+            "free_pro_integrity_block",
+            {
+                "delivery_id": task.delivery_id,
+                "reason": "legacy_independent_market_watch_disabled",
+                "template_version": task.template_version,
+            },
+        )
+        return {"ok": True}
+    if task.template_version in {"free-news/v1", "pro-news/v2"}:
+        if not task.news_evidence_id:
+            raise HTTPException(status_code=422, detail="News evidence ID обязателен")
+        allowed, terminal, reason = await asyncio.to_thread(
+            news_pair_delivery_gate,
+            service.repository,
+            runtime_settings(),
+            task.delivery_id,
+            task.news_evidence_id,
+        )
+        if not allowed:
+            await asyncio.to_thread(
+                service.repository.record_audit_event,
+                "news_pair_delivery_block",
+                {
+                    "delivery_id": task.delivery_id,
+                    "news_evidence_id": task.news_evidence_id,
+                    "reason": reason,
+                    "terminal": terminal,
+                },
+            )
+            if terminal:
+                return {"ok": True}
+            raise HTTPException(status_code=503, detail=f"News pair ожидает готовности: {reason}")
+    if task.template_version == FREE_TEMPLATE_VERSION:
+        required = (
+            task.decision_id,
+            task.listing_id,
+            task.content_hash,
+            task.parent_pro_delivery_id,
+            task.parent_pro_message_id,
+            task.pro_object_button_url,
+        )
+        if not all(required):
+            return {"ok": True}
+        assert task.parent_pro_delivery_id is not None
+        assert task.parent_pro_message_id is not None
+        assert task.decision_id is not None
+        assert task.listing_id is not None
+        assert task.content_hash is not None
+        assert task.pro_object_button_url is not None
+        active = runtime_settings()
+        parent = await asyncio.to_thread(
+            service.repository.get_outbox,
+            task.parent_pro_delivery_id,
+        )
+        candidates = await asyncio.to_thread(
+            current_pro_candidates,
+            service.repository,
+            active,
+        )
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if item.delivery_id == task.parent_pro_delivery_id
+                and item.decision_id == task.decision_id
+                and item.listing_id == task.listing_id
+                and (item.decision.content_hash or snapshot_hash(item.listing))
+                == task.content_hash
+            ),
+            None,
+        )
+        expected_url = (
+            telegram_message_url(parent.recipient, parent.telegram_message_id)
+            if parent is not None and parent.telegram_message_id
+            else None
+        )
+        parent_payload = parent.payload if parent is not None else {}
+        valid_parent = (
+            candidate is not None
+            and parent is not None
+            and parent.state is OutboxState.SENT
+            and parent.template_version == "pro/v1"
+            and parent.recipient == active.telegram_pro_channel_id
+            and parent.telegram_message_id == task.parent_pro_message_id
+            and parent.decision_id == task.decision_id
+            and str(parent_payload.get("listing_id") or "") == task.listing_id
+            and str(parent_payload.get("content_hash") or "") == task.content_hash
+            and expected_url == task.pro_object_button_url
+        )
+        if not valid_parent:
+            await asyncio.to_thread(
+                service.repository.record_audit_event,
+                "free_pro_integrity_block",
+                {
+                    "delivery_id": task.delivery_id,
+                    "parent_pro_delivery_id": task.parent_pro_delivery_id,
+                    "reason": "exact_sent_pro_revision_required",
+                },
+            )
+            return {"ok": True}
     claimed = await asyncio.to_thread(
         service.repository.claim_outbox,
         task.delivery_id,
@@ -1757,9 +2660,29 @@ async def deliver_content_task(
         reply_markup = publication_cta_keyboard(
             task.pro_cta_button_label,
             task.pro_cta_button_url,
+            task.pro_object_button_label,
+            task.pro_object_button_url,
+            task.article_button_label,
+            task.article_button_url,
         )
         async with Bot(settings.require_bot_token()) as bot:
-            if task.image_url:
+            if task.template_version in {"free-news/v1", "pro-news/v2"}:
+                if not task.news_evidence_id or not task.image_storage_uri or not task.image_sha256:
+                    raise ValueError("Новостная карточка не содержит immutable image evidence")
+                image_bytes = await load_news_asset(settings, task.image_storage_uri)
+                if hashlib.sha256(image_bytes).hexdigest() != task.image_sha256:
+                    raise ValueError("SHA-256 новостного изображения не совпадает с evidence")
+                suffix = ".webp" if task.image_content_type == "image/webp" else ".jpg"
+                sent = await bot.send_photo(
+                    chat_id=task.target_id,
+                    photo=InputFile(
+                        image_bytes, filename=f"news-{task.image_sha256}{suffix}"
+                    ),
+                    caption=task.text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
+                )
+            elif task.image_url:
                 sent = await bot.send_photo(
                     chat_id=task.target_id,
                     photo=task.image_url,

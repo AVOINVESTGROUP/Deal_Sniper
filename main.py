@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from dotenv import load_dotenv
 
@@ -16,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dubai Deal Sniper")
     parser.add_argument(
         "command",
-        choices=("bot", "scan", "collect", "content", "replay"),
+        choices=("bot", "scan", "collect", "publish", "content", "news", "replay"),
         help="Режим запуска",
     )
     parser.add_argument(
@@ -60,9 +61,17 @@ async def collect_once(settings: Settings, source_name: str | None) -> None:
     service = DealService.from_settings(settings)
     report = await service.collect(source_name)
     dispatcher = CloudTaskDispatcher(settings)
+    batch_id = datetime.now(UTC).strftime("%Y%m%d%H%M")
     await dispatcher.enqueue_processing_batch(
         report.pending,
         service.decision_engine.version,
+        recalculation_epoch=f"{batch_id}-verify",
+    )
+    await dispatcher.enqueue_processing_batch(
+        report.pending,
+        service.decision_engine.version,
+        recalculation_epoch=f"{batch_id}-market",
+        delay_seconds=300,
     )
     print(report.summary())
 
@@ -83,11 +92,42 @@ def main() -> None:
         if not settings.delivery_enabled:
             raise RuntimeError("DELIVERY_ENABLED=false: Telegram long polling запрещён")
         run_bot(settings)
-    elif args.command == "content":
-        from src.content_job import enqueue_market_pulse
+    elif args.command == "publish":
+        from src.content_job import run_deal_publication
 
-        event_id = asyncio.run(enqueue_market_pulse(settings))
-        print(f"PublicationEvent: {event_id or 'channel-not-configured'}")
+        pro, free = asyncio.run(run_deal_publication(settings))
+        blocked = (
+            free.blocked_no_pro
+            + free.blocked_not_sent
+            + free.blocked_revision_mismatch
+        )
+        print(
+            f"Deals: Pro selected={pro.selected}, created={pro.created}, "
+            f"requeued={pro.requeued}, skipped={pro.skipped}, failed={pro.failures}; "
+            f"Free eligible={free.eligible}, created={free.created}, "
+            f"requeued={free.requeued}, blocked={blocked}, "
+            f"failed={free.failures}"
+        )
+    elif args.command == "content":
+        from src.content_job import run_content_publication
+
+        event_id, pro, news = asyncio.run(run_content_publication(settings))
+        print(
+            f"PublicationEvent: {event_id or 'channel-not-configured'}; "
+            f"Pro: selected={pro.selected}, created={pro.created}, "
+            f"requeued={pro.requeued}, skipped={pro.skipped}, failed={pro.failures}; "
+            f"News: selected={news.selected}, created={news.created}, "
+            f"requeued={news.requeued}, skipped={news.skipped}, failed={news.failures}"
+        )
+    elif args.command == "news":
+        from src.content_job import run_news_publication
+
+        news = asyncio.run(run_news_publication(settings))
+        print(
+            f"News: selected={news.selected}, created={news.created}, "
+            f"requeued={news.requeued}, paired={news.paired_enqueued}, "
+            f"blocked={news.blocked_pair}, failed={news.failures}"
+        )
     elif args.command == "collect":
         asyncio.run(collect_once(settings, args.source))
     elif args.command == "replay":

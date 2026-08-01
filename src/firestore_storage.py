@@ -11,6 +11,8 @@ from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
+    NewsEvidence,
+    NewsFeedConfiguration,
     NormalizedVehicle,
     OutboxRecord,
     OutboxState,
@@ -27,6 +29,16 @@ from src.domain.models import (
     VerificationEvidence,
 )
 from src.storage import snapshot_hash
+
+PUBLICATION_TRANSACTION_MAX_ATTEMPTS = 20
+
+
+def _aggregation_count(query: Any) -> int:
+    """Возвращает Firestore COUNT без потокового чтения всех документов."""
+    results = query.count(alias="total").get()
+    if not results or not results[0]:
+        return 0
+    return int(results[0][0].value)
 
 
 class FirestoreRepository:
@@ -434,11 +446,75 @@ class FirestoreRepository:
                     "event_type": event.event_type,
                     "payload": event.model_dump(mode="json"),
                     "created_at": event.created_at,
-                    "schema_version": "publication-event/v2",
+                    "schema_version": "publication-event/v3",
                 }
             )
         except AlreadyExists:
             return
+
+    def commit_publication_with_outbox(
+        self, event: PublicationEvent, record: OutboxRecord
+    ) -> OutboxRecord:
+        """Атомарно фиксирует immutable publication revision и её outbox."""
+        if record.payload.get("publication_event_id") != event.publication_event_id:
+            raise ValueError("Outbox ссылается на другую publication revision")
+        event_ref = self.client.collection("publication_events").document(
+            event.publication_event_id
+        )
+        outbox_ref = self.client.collection("delivery_outbox").document(record.delivery_id)
+        transaction = self.client.transaction(
+            max_attempts=PUBLICATION_TRANSACTION_MAX_ATTEMPTS
+        )
+
+        @firestore.transactional
+        def commit(transaction: firestore.Transaction) -> OutboxRecord:
+            event_snapshot = event_ref.get(transaction=transaction)
+            outbox_snapshot = outbox_ref.get(transaction=transaction)
+            if event_snapshot.exists != outbox_snapshot.exists:
+                raise RuntimeError("Нарушена атомарность publication revision и outbox")
+            if event_snapshot.exists and outbox_snapshot.exists:
+                event_data = event_snapshot.to_dict() or {}
+                outbox_data = outbox_snapshot.to_dict() or {}
+                stored_event = PublicationEvent.model_validate(event_data["payload"])
+                stored_record = OutboxRecord.model_validate(outbox_data["payload"])
+                if (
+                    stored_event.model_dump(exclude={"created_at"})
+                    != event.model_dump(exclude={"created_at"})
+                    or stored_record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    != record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    or stored_record.payload != record.payload
+                ):
+                    raise RuntimeError("Retry изменил immutable publication payload")
+                return stored_record
+            transaction.set(
+                event_ref,
+                {
+                    "publication_event_id": event.publication_event_id,
+                    "decision_id": event.decision_id,
+                    "vehicle_id": event.vehicle_id,
+                    "event_type": event.event_type,
+                    "payload": event.model_dump(mode="json"),
+                    "created_at": event.created_at,
+                    "schema_version": "publication-event/v3",
+                },
+            )
+            transaction.set(
+                outbox_ref,
+                {
+                    "delivery_id": record.delivery_id,
+                    "state": record.state.value,
+                    "payload": record.model_dump(mode="json"),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "schema_version": "outbox/v2",
+                },
+            )
+            return record
+
+        return cast(OutboxRecord, commit(transaction))
 
     def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int:
         """Атомарно вращает CTA и возвращает прежний выбор при retry."""
@@ -448,7 +524,9 @@ class FirestoreRepository:
             publication_event_id
         )
         state_ref = self.client.collection("publication_control").document("pro_cta")
-        transaction = self.client.transaction()
+        transaction = self.client.transaction(
+            max_attempts=PUBLICATION_TRANSACTION_MAX_ATTEMPTS
+        )
 
         @firestore.transactional
         def reserve(transaction: firestore.Transaction) -> int:
@@ -490,18 +568,195 @@ class FirestoreRepository:
             "outcomes": "outcomes",
         }
         counts = {
-            name: sum(1 for _document in self.client.collection(collection).stream())
+            name: _aggregation_count(self.client.collection(collection))
             for name, collection in collections.items()
         }
-        outbox_states: dict[str, int] = {}
-        for document in self.client.collection("delivery_outbox").stream():
-            state = str((document.to_dict() or {}).get("state", "unknown"))
-            outbox_states[state] = outbox_states.get(state, 0) + 1
+        outbox = self.client.collection("delivery_outbox")
+        outbox_states = {
+            state.value: _aggregation_count(outbox.where("state", "==", state.value))
+            for state in OutboxState
+        }
         return {"counts": counts, "outbox_states": outbox_states}
+
+    def listing_pipeline_summary(self) -> dict[str, Any]:
+        """Считает воронку агрегатами и читает только небольшой sent outbox."""
+        current = self.client.collection("current_decisions")
+        total = _aggregation_count(current)
+        action_counts = {
+            action.value: _aggregation_count(current.where("action", "==", action.value))
+            for action in DecisionAction
+        }
+        sent_records: list[OutboxRecord] = []
+        for document in self.client.collection("delivery_outbox").where(
+            "state", "==", OutboxState.SENT.value
+        ).stream():
+            data = document.to_dict() or {}
+            payload = data.get("payload")
+            if isinstance(payload, dict):
+                sent_records.append(OutboxRecord.model_validate(payload))
+        return {
+            "fetched": self.count_snapshots(),
+            "verified": _aggregation_count(
+                self.client.collection("verification_evidence").where(
+                    "status", "==", "verified"
+                )
+            ),
+            "normalized": _aggregation_count(self.client.collection("normalized_vehicles")),
+            "decision": total,
+            "market": _aggregation_count(current.where("has_market", "==", True)),
+            "eligible": action_counts[DecisionAction.CONTACT.value]
+            + action_counts[DecisionAction.INSPECT.value],
+            "pro_sent": sum(item.template_version == "pro/v1" for item in sent_records),
+            "free_sent": sum(item.template_version == "free/v3" for item in sent_records),
+            "unclassified_legacy": total - sum(action_counts.values()),
+            "actions": action_counts,
+        }
 
     def schema_version(self) -> str:
         data = self.client.collection("schema_ledger").document("current").get().to_dict()
         return str((data or {}).get("schema_version", "legacy"))
+
+    def get_active_runtime_configuration(self) -> dict[str, Any] | None:
+        data = self.client.collection("runtime_configuration").document("active").get().to_dict()
+        return data
+
+    def list_runtime_configurations(self, limit: int = 20) -> list[dict[str, Any]]:
+        query = (
+            self.client.collection("runtime_configuration_revisions")
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(max(1, min(limit, 100)))
+        )
+        return [cast(dict[str, Any], document.to_dict()) for document in query.stream()]
+
+    def activate_runtime_configuration(
+        self, payload: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]:
+        version = str(payload["version"])
+        active_ref = self.client.collection("runtime_configuration").document("active")
+        revision_ref = self.client.collection("runtime_configuration_revisions").document(version)
+        operation_ref = self.client.collection("admin_operations").document(operation_id)
+        transaction = self.client.transaction()
+
+        @firestore.transactional
+        def activate(transaction: firestore.Transaction) -> dict[str, Any]:
+            repeated = operation_ref.get(transaction=transaction)
+            if repeated.exists:
+                repeated_data = repeated.to_dict() or {}
+                existing_version = str(repeated_data.get("version", ""))
+                existing = (
+                    self.client.collection("runtime_configuration_revisions")
+                    .document(existing_version)
+                    .get(transaction=transaction)
+                    .to_dict()
+                )
+                if existing is None:
+                    raise RuntimeError("Повторная операция ссылается на отсутствующую revision")
+                return existing
+            if revision_ref.get(transaction=transaction).exists:
+                raise ValueError("Версия конфигурации уже существует")
+            active = active_ref.get(transaction=transaction)
+            previous_data = active.to_dict() or {}
+            previous_version = str(previous_data.get("version", "")) or None
+            if previous_version:
+                previous_ref = self.client.collection("runtime_configuration_revisions").document(
+                    previous_version
+                )
+                transaction.set(previous_ref, {"state": "archived"}, merge=True)
+            stored = {**payload, "state": "active", "previous_version": previous_version}
+            transaction.create(revision_ref, stored)
+            transaction.set(active_ref, stored)
+            transaction.create(
+                operation_ref,
+                {
+                    "operation_id": operation_id,
+                    "version": version,
+                    "operation": "runtime_configuration_activated",
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            return stored
+
+        result = cast(dict[str, Any], activate(transaction))
+        self.record_audit_event(
+            "runtime_configuration_activated",
+            {
+                "operation_id": operation_id,
+                "version": result["version"],
+                "previous_version": result.get("previous_version"),
+            },
+        )
+        return result
+
+    def runtime_configuration_for_operation(self, operation_id: str) -> dict[str, Any] | None:
+        operation = self.client.collection("admin_operations").document(operation_id).get()
+        data = operation.to_dict() or {}
+        version = str(data.get("version", ""))
+        if not version:
+            return None
+        return (
+            self.client.collection("runtime_configuration_revisions")
+            .document(version)
+            .get()
+            .to_dict()
+        )
+
+    def claim_admin_operation(
+        self, operation_id: str, operation: str, payload: dict[str, Any]
+    ) -> bool:
+        """Создаёт operation record один раз до внешней мутации."""
+        try:
+            self.client.collection("admin_operations").document(operation_id).create(
+                {
+                    "operation_id": operation_id,
+                    "operation": operation,
+                    "state": "running",
+                    "payload": payload,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+        except AlreadyExists:
+            return False
+        return True
+
+    def complete_admin_operation(
+        self, operation_id: str, state: str, result: dict[str, Any]
+    ) -> None:
+        if state not in {"completed", "failed"}:
+            raise ValueError("Недопустимое состояние административной операции")
+        self.client.collection("admin_operations").document(operation_id).set(
+            {
+                "state": state,
+                "result": result,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+    def get_admin_operation(self, operation_id: str) -> dict[str, Any] | None:
+        data = (
+            self.client.collection("admin_operations").document(operation_id).get().to_dict()
+        )
+        return data if data else None
+
+    def list_admin_users(self, limit: int = 100) -> list[dict[str, Any]]:
+        query = self.client.collection("user_settings").limit(max(1, min(limit, 500)))
+        return [
+            {
+                "user_id": document.id,
+                "settings": (data := document.to_dict() or {}).get("payload", data),
+                "updated_at": data.get("updated_at"),
+            }
+            for document in query.stream()
+        ]
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        query = (
+            self.client.collection("audit_events")
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(max(1, min(limit, 500)))
+        )
+        return [cast(dict[str, Any], document.to_dict()) for document in query.stream()]
 
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
         immutable_id = decision.decision_id or _stable_id(
@@ -547,6 +802,10 @@ class FirestoreRepository:
                     "listing_id": listing_id,
                     "content_hash": content_hash,
                     "engine_version": decision.engine_version,
+                    "action": decision.action.value,
+                    "has_market": decision.market is not None,
+                    "verification_version": decision.verification_version,
+                    "market_fingerprint": decision.market_fingerprint,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 },
             )
@@ -734,7 +993,7 @@ class FirestoreRepository:
         ]
 
     def count_snapshots(self) -> int:
-        return sum(1 for _document in self.client.collection_group("snapshots").stream())
+        return _aggregation_count(self.client.collection_group("snapshots"))
 
     def notification_sent(self, target_id: str, listing_id: str, content_hash: str) -> bool:
         return (
@@ -803,8 +1062,87 @@ class FirestoreRepository:
         reference.delete()
         return True
 
+    def list_news_feed_configurations(self) -> list[NewsFeedConfiguration]:
+        results: list[NewsFeedConfiguration] = []
+        for document in self.client.collection("news_feed_registry").stream():
+            data = document.to_dict() or {}
+            config = data.get("configuration")
+            if isinstance(config, dict):
+                results.append(NewsFeedConfiguration.model_validate(config))
+        return sorted(results, key=lambda item: item.name)
+
+    def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None:
+        self.client.collection("news_feed_registry").document(config.name).set(
+            {
+                "name": config.name,
+                "enabled": config.enabled,
+                "configuration": config.model_dump(mode="json"),
+                "updated_at": datetime.now(UTC),
+            },
+            merge=True,
+        )
+
+    def delete_news_feed_configuration(self, name: str) -> bool:
+        reference = self.client.collection("news_feed_registry").document(name)
+        snapshot = reference.get()
+        if not snapshot.exists:
+            return False
+        reference.delete()
+        return True
+
+    def save_news_evidence(self, evidence: NewsEvidence) -> None:
+        self.client.collection("news_evidence").document(evidence.evidence_id).set(
+            {
+                **evidence.model_dump(mode="json"),
+                "updated_at": datetime.now(UTC),
+            },
+            merge=True,
+        )
+
+    def get_news_evidence(self, evidence_id: str) -> NewsEvidence | None:
+        snapshot = self.client.collection("news_evidence").document(evidence_id).get()
+        if not snapshot.exists:
+            return None
+        return NewsEvidence.model_validate(snapshot.to_dict() or {})
+
+    def active_news_evidence(
+        self, limit: int = 20, now: datetime | None = None
+    ) -> list[NewsEvidence]:
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        results: list[NewsEvidence] = []
+        query = self.client.collection("news_evidence").where(
+            "freshness_status", "==", "active"
+        )
+        for document in query.stream():
+            data = document.to_dict() or {}
+            try:
+                evidence = NewsEvidence.model_validate(data)
+            except ValueError:
+                continue
+            if evidence.valid_until > current:
+                results.append(evidence)
+        results.sort(key=lambda item: item.published_at, reverse=True)
+        return results[: max(1, limit)]
+
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         document = self.client.collection("source_registry").document(source_name)
+        get_document = getattr(document, "get", None)
+        existing = get_document().to_dict() or {} if callable(get_document) else {}
+        previous_value = existing.get("last_run")
+        previous: dict[str, Any] = previous_value if isinstance(previous_value, dict) else {}
+        completed_at = payload.get("completed_at")
+        previous_completed_at = previous.get("completed_at")
+        if completed_at and previous_completed_at:
+            current_time = datetime.fromisoformat(str(completed_at))
+            previous_time = datetime.fromisoformat(str(previous_completed_at))
+            payload = {
+                **payload,
+                "previous_completed_at": previous_completed_at,
+                "actual_interval_seconds": round(
+                    (current_time - previous_time).total_seconds(),
+                    3,
+                ),
+            }
         values = {"last_run": payload, "updated_at": datetime.now(UTC)}
         try:
             # update() заменяет top-level map last_run целиком.

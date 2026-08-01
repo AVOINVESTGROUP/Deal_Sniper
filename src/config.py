@@ -4,6 +4,12 @@ import os
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import urlsplit
+
+DEFAULT_CORS_ALLOWED_ORIGINS = (
+    "https://avo-deal-sniper.web.app",
+    "https://avo-deal-sniper.firebaseapp.com",
+)
 
 
 def _integer_set(value: str) -> frozenset[int]:
@@ -12,6 +18,33 @@ def _integer_set(value: str) -> frozenset[int]:
 
 def _string_set(value: str) -> frozenset[str]:
     return frozenset(item.strip().casefold() for item in value.split(",") if item.strip())
+
+
+def _cors_origins(value: str) -> tuple[str, ...]:
+    """Проверяет точные HTTPS origins для credentialed CORS без wildcard."""
+    origins: list[str] = []
+    for item in value.split(","):
+        candidate = item.strip().rstrip("/")
+        if not candidate:
+            continue
+        parsed = urlsplit(candidate)
+        if (
+            parsed.scheme.casefold() != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or "*" in candidate
+        ):
+            raise ValueError("CORS_ALLOWED_ORIGINS должен содержать точные HTTPS origins")
+        normalized = f"https://{parsed.netloc.casefold()}"
+        if normalized not in origins:
+            origins.append(normalized)
+    if not origins:
+        raise ValueError("CORS_ALLOWED_ORIGINS не должен быть пустым")
+    return tuple(origins)
 
 
 def _enabled(value: str) -> bool:
@@ -41,6 +74,8 @@ class Settings:
     telegram_pro_channel_id: str | None
     telegram_pro_subscription_url: str
     telegram_webhook_secret: str
+    production_telegram_channel_ids: frozenset[str]
+    deployment_environment: str
     google_cloud_project: str
     google_cloud_region: str
     firestore_database: str
@@ -53,6 +88,7 @@ class Settings:
     internal_task_secret: str
     delivery_enabled: bool
     admin_emails: frozenset[str]
+    cors_allowed_origins: tuple[str, ...]
     whatsapp_enabled: bool
     whatsapp_access_token: str
     whatsapp_phone_number_id: str
@@ -63,12 +99,20 @@ class Settings:
     auto_news_rss_url: str
     auto_news_max_age_days: int
     auto_news_limit: int
+    pro_deals_enabled: bool
+    pro_news_enabled: bool
+    pro_news_max_items: int
+    pro_news_min_interval_hours: int
+    pro_news_ai_summary_enabled: bool
+    vertex_ai_location: str
+    vertex_ai_model: str
     free_teaser_image_url: str
     schema_version: str
     migration_tool_version: str
     git_commit: str
     runtime_image_digest: str
     collector_job_prefix: str
+    publisher_job_name: str
     storage_backend: str
     database_path: Path
     local_raw_snapshots_path: Path
@@ -101,6 +145,33 @@ class Settings:
     financial_config_version: str
     aed_to_usd_rate: Decimal
 
+    def __post_init__(self) -> None:
+        """Блокирует смешение staging и production при включённой доставке."""
+        allowed = {"local", "staging", "production"}
+        if self.deployment_environment not in allowed:
+            raise ValueError("DEPLOYMENT_ENVIRONMENT должен быть local, staging или production")
+        if not self.delivery_enabled or self.deployment_environment == "local":
+            return
+        if self.deployment_environment == "staging":
+            if self.firestore_database == "(default)":
+                raise ValueError("Staging delivery запрещена для production Firestore database")
+            if not self.telegram_delivery_queue.endswith("-staging"):
+                raise ValueError("Staging delivery требует отдельную очередь с суффиксом -staging")
+            if not self.publisher_job_name.endswith("-staging"):
+                raise ValueError("Staging delivery требует отдельный publisher Job")
+            if not self.production_telegram_channel_ids:
+                raise ValueError("Staging delivery требует список production Telegram recipients")
+            staging_recipients = {
+                item
+                for item in (self.telegram_channel_id, self.telegram_pro_channel_id)
+                if item
+            }
+            collisions = staging_recipients & self.production_telegram_channel_ids
+            if collisions:
+                raise ValueError("Staging delivery не может использовать production recipient")
+        elif self.telegram_delivery_queue.endswith("-staging"):
+            raise ValueError("Production delivery не может использовать staging queue")
+
     @classmethod
     def from_env(cls) -> "Settings":
         """Создаёт конфигурацию без неявных секретов и mock-режима."""
@@ -112,6 +183,10 @@ class Settings:
             telegram_pro_channel_id=os.getenv("TELEGRAM_PRO_CHANNEL_ID") or None,
             telegram_pro_subscription_url=os.getenv("TELEGRAM_PRO_SUBSCRIPTION_URL", "").strip(),
             telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip(),
+            production_telegram_channel_ids=_string_set(
+                os.getenv("PRODUCTION_TELEGRAM_CHANNEL_IDS", "")
+            ),
+            deployment_environment=os.getenv("DEPLOYMENT_ENVIRONMENT", "local").strip().lower(),
             google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
             google_cloud_region=os.getenv("GOOGLE_CLOUD_REGION", "me-central1").strip(),
             firestore_database=os.getenv("FIRESTORE_DATABASE", "(default)").strip(),
@@ -128,6 +203,9 @@ class Settings:
             internal_task_secret=os.getenv("INTERNAL_TASK_SECRET", "").strip(),
             delivery_enabled=_enabled(os.getenv("DELIVERY_ENABLED", "false")),
             admin_emails=_string_set(os.getenv("ADMIN_EMAILS", "")),
+            cors_allowed_origins=_cors_origins(
+                os.getenv("CORS_ALLOWED_ORIGINS", ",".join(DEFAULT_CORS_ALLOWED_ORIGINS))
+            ),
             whatsapp_enabled=_enabled(os.getenv("WHATSAPP_ENABLED", "false")),
             whatsapp_access_token=os.getenv("WHATSAPP_ACCESS_TOKEN", "").strip(),
             whatsapp_phone_number_id=os.getenv("WHATSAPP_PHONE_NUMBER_ID", "").strip(),
@@ -137,16 +215,32 @@ class Settings:
             pro_price_stars=max(1, int(os.getenv("PRO_PRICE_STARS", "1500"))),
             auto_news_rss_url=os.getenv(
                 "AUTO_NEWS_RSS_URL",
-                "https://news.google.com/rss/search?q=%28Dubai%20OR%20UAE%29%20%28used%20cars%20OR%20automotive%20market%29&hl=en-AE&gl=AE&ceid=AE%3Aen",
+                "",
             ).strip(),
             auto_news_max_age_days=max(1, int(os.getenv("AUTO_NEWS_MAX_AGE_DAYS", "45"))),
             auto_news_limit=max(1, min(5, int(os.getenv("AUTO_NEWS_LIMIT", "3")))),
+            pro_deals_enabled=_enabled(os.getenv("PRO_DEALS_ENABLED", "true")),
+            pro_news_enabled=_enabled(os.getenv("PRO_NEWS_ENABLED", "false")),
+            pro_news_max_items=max(
+                1, min(3, int(os.getenv("PRO_NEWS_MAX_ITEMS", "3")))
+            ),
+            pro_news_min_interval_hours=max(
+                1, min(168, int(os.getenv("PRO_NEWS_MIN_INTERVAL_HOURS", "6")))
+            ),
+            pro_news_ai_summary_enabled=_enabled(
+                os.getenv("PRO_NEWS_AI_SUMMARY_ENABLED", "false")
+            ),
+            vertex_ai_location=os.getenv("VERTEX_AI_LOCATION", "global").strip(),
+            vertex_ai_model=os.getenv("VERTEX_AI_MODEL", "").strip(),
             free_teaser_image_url=os.getenv("FREE_TEASER_IMAGE_URL", "").strip(),
             schema_version=os.getenv("SCHEMA_VERSION", "2").strip(),
             migration_tool_version=os.getenv("MIGRATION_TOOL_VERSION", "1.1.0").strip(),
             git_commit=os.getenv("GIT_COMMIT", "unknown").strip(),
             runtime_image_digest=os.getenv("RUNTIME_IMAGE_DIGEST", "unknown").strip(),
             collector_job_prefix=os.getenv("COLLECTOR_JOB_PREFIX", "deal-sniper-collector").strip(),
+            publisher_job_name=os.getenv(
+                "PUBLISHER_JOB_NAME", "deal-sniper-publisher"
+            ).strip(),
             storage_backend=os.getenv("STORAGE_BACKEND", "local").strip().lower(),
             database_path=Path(os.getenv("LOCAL_DATABASE_PATH", "data/deal_sniper.db")),
             local_raw_snapshots_path=Path(os.getenv("LOCAL_RAW_SNAPSHOTS_PATH", "data/raw")),

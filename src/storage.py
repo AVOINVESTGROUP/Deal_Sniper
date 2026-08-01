@@ -6,13 +6,15 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from src.domain.ids import canonical_hash
 from src.domain.models import (
     DealDecision,
     DecisionAction,
     ListingSnapshot,
+    NewsEvidence,
+    NewsFeedConfiguration,
     NormalizedVehicle,
     OutboxRecord,
     OutboxState,
@@ -92,6 +94,20 @@ class Repository(Protocol):
 
     def delete_source_configuration(self, source_name: str) -> bool: ...
 
+    def list_news_feed_configurations(self) -> list[NewsFeedConfiguration]: ...
+
+    def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None: ...
+
+    def delete_news_feed_configuration(self, name: str) -> bool: ...
+
+    def save_news_evidence(self, evidence: NewsEvidence) -> None: ...
+
+    def get_news_evidence(self, evidence_id: str) -> NewsEvidence | None: ...
+
+    def active_news_evidence(
+        self, limit: int = 20, now: datetime | None = None
+    ) -> list[NewsEvidence]: ...
+
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None: ...
 
     def source_health(self) -> dict[str, dict[str, Any]]: ...
@@ -162,9 +178,39 @@ class Repository(Protocol):
 
     def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int: ...
 
+    def commit_publication_with_outbox(
+        self, event: PublicationEvent, record: OutboxRecord
+    ) -> OutboxRecord: ...
+
     def admin_summary(self) -> dict[str, Any]: ...
 
+    def listing_pipeline_summary(self) -> dict[str, Any]: ...
+
     def schema_version(self) -> str: ...
+
+    def get_active_runtime_configuration(self) -> dict[str, Any] | None: ...
+
+    def list_runtime_configurations(self, limit: int = 20) -> list[dict[str, Any]]: ...
+
+    def activate_runtime_configuration(
+        self, payload: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]: ...
+
+    def runtime_configuration_for_operation(self, operation_id: str) -> dict[str, Any] | None: ...
+
+    def claim_admin_operation(
+        self, operation_id: str, operation: str, payload: dict[str, Any]
+    ) -> bool: ...
+
+    def complete_admin_operation(
+        self, operation_id: str, state: str, result: dict[str, Any]
+    ) -> None: ...
+
+    def get_admin_operation(self, operation_id: str) -> dict[str, Any] | None: ...
+
+    def list_admin_users(self, limit: int = 100) -> list[dict[str, Any]]: ...
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]: ...
 
 
 def snapshot_hash(snapshot: ListingSnapshot) -> str:
@@ -279,6 +325,21 @@ class LocalRepository:
                     payload_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS news_feed_configurations (
+                    name TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS news_evidence (
+                    evidence_id TEXT PRIMARY KEY,
+                    semantic_fingerprint TEXT NOT NULL,
+                    valid_until TEXT NOT NULL,
+                    freshness_status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_news_evidence_active
+                    ON news_evidence(freshness_status, valid_until);
                 CREATE TABLE IF NOT EXISTS telegram_updates (
                     update_id INTEGER PRIMARY KEY,
                     claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -369,6 +430,26 @@ class LocalRepository:
                     publication_event_id TEXT NOT NULL UNIQUE,
                     variant_index INTEGER NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS runtime_configurations (
+                    version TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    operation_id TEXT NOT NULL UNIQUE,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS runtime_configuration_active (
+                    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                    version TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS admin_operations (
+                    operation_id TEXT PRIMARY KEY,
+                    operation TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    result_json TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 """
             )
@@ -838,6 +919,56 @@ class LocalRepository:
                 (event.publication_event_id, event.model_dump_json()),
             )
 
+    def commit_publication_with_outbox(
+        self, event: PublicationEvent, record: OutboxRecord
+    ) -> OutboxRecord:
+        """Атомарно фиксирует immutable publication revision и её outbox."""
+        if record.payload.get("publication_event_id") != event.publication_event_id:
+            raise ValueError("Outbox ссылается на другую publication revision")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            event_row = connection.execute(
+                "SELECT payload_json FROM publication_events WHERE publication_event_id = ?",
+                (event.publication_event_id,),
+            ).fetchone()
+            outbox_row = connection.execute(
+                "SELECT payload_json FROM delivery_outbox WHERE delivery_id = ?",
+                (record.delivery_id,),
+            ).fetchone()
+            if (event_row is None) != (outbox_row is None):
+                raise RuntimeError("Нарушена атомарность publication revision и outbox")
+            if event_row is not None and outbox_row is not None:
+                stored_event = PublicationEvent.model_validate_json(event_row["payload_json"])
+                stored_record = OutboxRecord.model_validate_json(outbox_row["payload_json"])
+                if (
+                    stored_event.model_dump(exclude={"created_at"})
+                    != event.model_dump(exclude={"created_at"})
+                    or stored_record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    != record.model_dump(
+                        exclude={"state", "attempts", "created_at", "updated_at"}
+                    )
+                    or stored_record.payload != record.payload
+                ):
+                    raise RuntimeError("Retry изменил immutable publication payload")
+                return stored_record
+            connection.execute(
+                """
+                INSERT INTO publication_events(publication_event_id, payload_json)
+                VALUES (?, ?)
+                """,
+                (event.publication_event_id, event.model_dump_json()),
+            )
+            connection.execute(
+                """
+                INSERT INTO delivery_outbox(delivery_id, state, payload_json)
+                VALUES (?, ?, ?)
+                """,
+                (record.delivery_id, record.state.value, record.model_dump_json()),
+            )
+            return record
+
     def reserve_pro_cta_variant(self, publication_event_id: str, variant_count: int) -> int:
         """Атомарно назначает следующий CTA, сохраняя выбор для повторной задачи."""
         if variant_count < 1:
@@ -890,8 +1021,206 @@ class LocalRepository:
             }
         return {"counts": counts, "outbox_states": outbox_states}
 
+    def listing_pipeline_summary(self) -> dict[str, Any]:
+        """Возвращает объяснимую воронку локального автомобильного контура."""
+        decisions = self.current_decisions(limit=100_000)
+        outbox = self.list_outbox(limit=100_000)
+        action_counts = {action.value: 0 for action in DecisionAction}
+        for _listing, decision in decisions:
+            action_counts[decision.action.value] += 1
+        with self._connect() as connection:
+            verified = int(
+                connection.execute(
+                    "SELECT COUNT(*) AS amount FROM verification_evidence WHERE status = ?",
+                    ("verified",),
+                ).fetchone()["amount"]
+            )
+            normalized = int(
+                connection.execute(
+                    "SELECT COUNT(*) AS amount FROM normalized_vehicles"
+                ).fetchone()["amount"]
+            )
+        return {
+            "fetched": self.count_snapshots(),
+            "verified": verified,
+            "normalized": normalized,
+            "decision": len(decisions),
+            "market": sum(decision.market is not None for _listing, decision in decisions),
+            "eligible": sum(
+                decision.action in {DecisionAction.CONTACT, DecisionAction.INSPECT}
+                for _listing, decision in decisions
+            ),
+            "pro_sent": sum(
+                item.state is OutboxState.SENT and item.template_version == "pro/v1"
+                for item in outbox
+            ),
+            "free_sent": sum(
+                item.state is OutboxState.SENT and item.template_version == "free/v3"
+                for item in outbox
+            ),
+            "actions": action_counts,
+        }
+
     def schema_version(self) -> str:
         return "2"
+
+    def get_active_runtime_configuration(self) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT revision.payload_json
+                FROM runtime_configuration_active AS active
+                JOIN runtime_configurations AS revision ON revision.version = active.version
+                WHERE active.singleton = 1
+                """
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def list_runtime_configurations(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM runtime_configurations ORDER BY created_at DESC LIMIT ?",
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def activate_runtime_configuration(
+        self, payload: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]:
+        version = str(payload["version"])
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            repeated = connection.execute(
+                "SELECT payload_json FROM runtime_configurations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if repeated:
+                return cast(dict[str, Any], json.loads(repeated["payload_json"]))
+            active = connection.execute(
+                "SELECT version FROM runtime_configuration_active WHERE singleton = 1"
+            ).fetchone()
+            previous_version = str(active["version"]) if active else None
+            if previous_version:
+                previous = connection.execute(
+                    "SELECT payload_json FROM runtime_configurations WHERE version = ?",
+                    (previous_version,),
+                ).fetchone()
+                if previous:
+                    previous_payload = json.loads(previous["payload_json"])
+                    previous_payload["state"] = "archived"
+                    connection.execute(
+                        "UPDATE runtime_configurations SET state = 'archived', "
+                        "payload_json = ? WHERE version = ?",
+                        (json.dumps(previous_payload, ensure_ascii=False), previous_version),
+                    )
+            stored = {**payload, "state": "active", "previous_version": previous_version}
+            connection.execute(
+                "INSERT INTO runtime_configurations"
+                "(version, state, operation_id, payload_json) "
+                "VALUES (?, 'active', ?, ?)",
+                (version, operation_id, json.dumps(stored, ensure_ascii=False)),
+            )
+            connection.execute(
+                "INSERT INTO runtime_configuration_active(singleton, version) VALUES (1, ?) "
+                "ON CONFLICT(singleton) DO UPDATE SET version = excluded.version",
+                (version,),
+            )
+            connection.execute(
+                "INSERT INTO audit_events(event_type, payload_json) VALUES (?, ?)",
+                (
+                    "runtime_configuration_activated",
+                    json.dumps(
+                        {
+                            "operation_id": operation_id,
+                            "version": version,
+                            "previous_version": previous_version,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+        return stored
+
+    def runtime_configuration_for_operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM runtime_configurations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        return cast(dict[str, Any], json.loads(row["payload_json"])) if row else None
+
+    def claim_admin_operation(
+        self, operation_id: str, operation: str, payload: dict[str, Any]
+    ) -> bool:
+        """Атомарно резервирует идентификатор административной операции."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO admin_operations"
+                "(operation_id, operation, state, payload_json) VALUES (?, ?, 'running', ?)",
+                (operation_id, operation, json.dumps(payload, ensure_ascii=False)),
+            )
+        return cursor.rowcount == 1
+
+    def complete_admin_operation(
+        self, operation_id: str, state: str, result: dict[str, Any]
+    ) -> None:
+        if state not in {"completed", "failed"}:
+            raise ValueError("Недопустимое состояние административной операции")
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE admin_operations SET state = ?, result_json = ?, "
+                "updated_at = CURRENT_TIMESTAMP WHERE operation_id = ?",
+                (state, json.dumps(result, ensure_ascii=False), operation_id),
+            )
+
+    def get_admin_operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT operation_id, operation, state, payload_json, result_json "
+                "FROM admin_operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "operation_id": row["operation_id"],
+            "operation": row["operation"],
+            "state": row["state"],
+            "payload": json.loads(row["payload_json"]),
+            "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        }
+
+    def list_admin_users(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT user_id, payload_json, updated_at FROM user_settings "
+                "ORDER BY updated_at DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return [
+            {
+                "user_id": int(row["user_id"]),
+                "settings": json.loads(row["payload_json"]),
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+    def list_audit_events(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT event_type, payload_json, created_at FROM audit_events "
+                "ORDER BY event_id DESC LIMIT ?",
+                (max(1, min(limit, 500)),),
+            ).fetchall()
+        return [
+            {
+                "event_type": row["event_type"],
+                "payload": json.loads(row["payload_json"]),
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def save_decision(self, listing_id: str, content_hash: str, decision: DealDecision) -> None:
         """Идемпотентно сохраняет решение для конкретной версии."""
@@ -1158,8 +1487,100 @@ class LocalRepository:
             connection.execute("DELETE FROM source_registry WHERE source_name = ?", (source_name,))
         return cursor.rowcount > 0
 
+    def list_news_feed_configurations(self) -> list[NewsFeedConfiguration]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM news_feed_configurations ORDER BY name"
+            ).fetchall()
+        return [NewsFeedConfiguration.model_validate_json(row["payload_json"]) for row in rows]
+
+    def save_news_feed_configuration(self, config: NewsFeedConfiguration) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO news_feed_configurations(name, payload_json, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(name) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (config.name, config.model_dump_json()),
+            )
+
+    def delete_news_feed_configuration(self, name: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM news_feed_configurations WHERE name = ?", (name,)
+            )
+        return cursor.rowcount > 0
+
+    def save_news_evidence(self, evidence: NewsEvidence) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO news_evidence(
+                    evidence_id, semantic_fingerprint, valid_until,
+                    freshness_status, payload_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(evidence_id) DO UPDATE SET
+                    valid_until = excluded.valid_until,
+                    freshness_status = excluded.freshness_status,
+                    payload_json = excluded.payload_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    evidence.evidence_id,
+                    evidence.semantic_fingerprint,
+                    evidence.valid_until.isoformat(),
+                    evidence.freshness_status.value,
+                    evidence.model_dump_json(),
+                ),
+            )
+
+    def get_news_evidence(self, evidence_id: str) -> NewsEvidence | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM news_evidence WHERE evidence_id = ?",
+                (evidence_id,),
+            ).fetchone()
+        return NewsEvidence.model_validate_json(row["payload_json"]) if row else None
+
+    def active_news_evidence(
+        self, limit: int = 20, now: datetime | None = None
+    ) -> list[NewsEvidence]:
+        current = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json FROM news_evidence
+                WHERE freshness_status = ? AND valid_until > ?
+                ORDER BY valid_until DESC LIMIT ?
+                """,
+                ("active", current, max(1, limit)),
+            ).fetchall()
+        evidence = [NewsEvidence.model_validate_json(row["payload_json"]) for row in rows]
+        return sorted(evidence, key=lambda item: item.published_at, reverse=True)
+
     def record_source_run(self, source_name: str, payload: dict[str, Any]) -> None:
         with self._connect() as connection:
+            previous = connection.execute(
+                "SELECT payload_json FROM source_health WHERE source_name = ?",
+                (source_name,),
+            ).fetchone()
+            previous_payload = json.loads(previous["payload_json"]) if previous else {}
+            completed_at = payload.get("completed_at")
+            previous_completed_at = previous_payload.get("completed_at")
+            if completed_at and previous_completed_at:
+                current_time = datetime.fromisoformat(str(completed_at))
+                previous_time = datetime.fromisoformat(str(previous_completed_at))
+                payload = {
+                    **payload,
+                    "previous_completed_at": previous_completed_at,
+                    "actual_interval_seconds": round(
+                        (current_time - previous_time).total_seconds(),
+                        3,
+                    ),
+                }
             connection.execute(
                 """
                 INSERT INTO source_health(source_name, payload_json) VALUES (?, ?)

@@ -3,6 +3,14 @@ variable "region" {
   type    = string
   default = "me-central1"
 }
+variable "deployment_environment" {
+  type    = string
+  default = "production"
+  validation {
+    condition     = contains(["staging", "production"], var.deployment_environment)
+    error_message = "deployment_environment должен быть staging или production"
+  }
+}
 variable "image" { type = string }
 variable "api_base_url" { type = string }
 variable "firestore_database" {
@@ -71,6 +79,7 @@ variable "monthly_budget_aed" {
 
 locals {
   runtime_sa   = "deal-sniper-runtime"
+  publisher_sa = "deal-sniper-publisher"
   collector_sa = "deal-sniper-collector"
   migration_sa = "deal-sniper-migration"
   scheduler_sa = "deal-sniper-scheduler"
@@ -88,9 +97,9 @@ locals {
     opensooq  = "OPENSOOQ_MAX_PAGES"
   }
   source_schedules = {
-    dubicars  = "0/10 * * * *"
-    carswitch = "2/10 * * * *"
-    cars24    = "4/10 * * * *"
-    opensooq  = "6/10 * * * *"
+    dubicars  = "0,10,20,30,40,50 * * * *"
+    carswitch = "2,12,22,32,42,52 * * * *"
+    cars24    = "4,14,24,34,44,54 * * * *"
+    opensooq  = "6,16,26,36,46,56 * * * *"
   }
 }

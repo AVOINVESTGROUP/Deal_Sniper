@@ -103,13 +103,59 @@ resource "google_cloud_tasks_queue" "processing" {
   name     = "listing-processing"
   location = var.region
   rate_limits {
-    max_concurrent_dispatches = 5
-    max_dispatches_per_second = 5
+    max_concurrent_dispatches = 2
+    max_dispatches_per_second = 2
   }
   retry_config {
     max_attempts = 5
     min_backoff  = "5s"
     max_backoff  = "300s"
+  }
+}
+
+resource "google_cloud_run_v2_job" "publisher" {
+  name     = "deal-sniper-publisher"
+  location = var.region
+  template {
+    template {
+      service_account = google_service_account.runtime.email
+      timeout         = "600s"
+      max_retries     = 1
+      containers {
+        image   = var.image
+        command = ["python"]
+        args    = ["main.py", "publish"]
+        dynamic "env" {
+          for_each = {
+            GOOGLE_CLOUD_PROJECT         = var.project_id
+            GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
+            FIRESTORE_DATABASE           = var.firestore_database
+            STORAGE_BACKEND              = "firestore"
+            DELIVERY_ENABLED             = "true"
+            CLOUD_RUN_API_URL            = var.api_base_url
+            CLOUD_TASKS_LOCATION         = var.region
+            TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
+            TASK_INVOKER_SERVICE_ACCOUNT = google_service_account.runtime.email
+            TELEGRAM_CHANNEL_ID          = var.telegram_channel_id
+            TELEGRAM_PRO_CHANNEL_ID      = var.telegram_pro_channel_id
+          }
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        env {
+          name = "INTERNAL_TASK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.task_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -124,6 +170,20 @@ resource "google_cloud_tasks_queue" "delivery" {
     max_attempts = 8
     min_backoff  = "5s"
     max_backoff  = "600s"
+  }
+}
+
+resource "google_cloud_tasks_queue" "delivery_staging" {
+  name     = "telegram-delivery-staging"
+  location = var.region
+  rate_limits {
+    max_concurrent_dispatches = 1
+    max_dispatches_per_second = 1
+  }
+  retry_config {
+    max_attempts = 3
+    min_backoff  = "10s"
+    max_backoff  = "300s"
   }
 }
 
@@ -143,6 +203,7 @@ resource "google_cloud_run_v2_service" "api" {
         for_each = {
           GOOGLE_CLOUD_PROJECT         = var.project_id
           GOOGLE_CLOUD_REGION          = var.region
+          DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
           FIRESTORE_DATABASE           = var.firestore_database
           STORAGE_BACKEND              = "firestore"
           RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
@@ -224,6 +285,7 @@ resource "google_cloud_run_v2_job" "collector" {
           for_each = merge({
             GOOGLE_CLOUD_PROJECT         = var.project_id
             GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
             RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
@@ -301,6 +363,7 @@ resource "google_cloud_run_v2_job" "replay" {
         dynamic "env" {
           for_each = {
             GOOGLE_CLOUD_PROJECT         = var.project_id
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
             DELIVERY_ENABLED             = "false"
@@ -345,8 +408,55 @@ resource "google_cloud_run_v2_job" "content" {
           for_each = {
             GOOGLE_CLOUD_PROJECT         = var.project_id
             GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
             FIRESTORE_DATABASE           = var.firestore_database
             STORAGE_BACKEND              = "firestore"
+            RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
+            CLOUD_RUN_API_URL            = var.api_base_url
+            CLOUD_TASKS_LOCATION         = var.region
+            TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
+            TASK_INVOKER_SERVICE_ACCOUNT = google_service_account.runtime.email
+            TELEGRAM_CHANNEL_ID          = var.telegram_channel_id
+          }
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+        env {
+          name = "INTERNAL_TASK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.task_secret.secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+resource "google_cloud_run_v2_job" "news" {
+  name     = "deal-sniper-news-publisher"
+  location = var.region
+  template {
+    template {
+      service_account = google_service_account.runtime.email
+      timeout         = "300s"
+      max_retries     = 1
+      containers {
+        image   = var.image
+        command = ["python"]
+        args    = ["main.py", "news"]
+        dynamic "env" {
+          for_each = {
+            GOOGLE_CLOUD_PROJECT         = var.project_id
+            GOOGLE_CLOUD_REGION          = var.region
+            DEPLOYMENT_ENVIRONMENT       = var.deployment_environment
+            FIRESTORE_DATABASE           = var.firestore_database
+            STORAGE_BACKEND              = "firestore"
+            RAW_SNAPSHOTS_BUCKET         = google_storage_bucket.raw.name
             CLOUD_RUN_API_URL            = var.api_base_url
             CLOUD_TASKS_LOCATION         = var.region
             TELEGRAM_DELIVERY_QUEUE      = google_cloud_tasks_queue.delivery.name
@@ -406,6 +516,39 @@ resource "google_cloud_scheduler_job" "content" {
   }
 }
 
+resource "google_cloud_scheduler_job" "publisher" {
+  name             = "deal-sniper-publisher-every-15m"
+  region           = var.region
+  schedule         = "3,18,33,48 * * * *"
+  time_zone        = "Asia/Dubai"
+  paused           = !var.production_enabled
+  attempt_deadline = "180s"
+  retry_config {
+    retry_count          = 2
+    min_backoff_duration = "15s"
+    max_backoff_duration = "300s"
+  }
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.publisher.name}:run"
+    oauth_token { service_account_email = google_service_account.scheduler.email }
+  }
+}
+
+resource "google_cloud_scheduler_job" "news" {
+  name             = "deal-sniper-news-every-6h"
+  region           = var.region
+  schedule         = "0 */6 * * *"
+  time_zone        = "Asia/Dubai"
+  paused           = !var.production_enabled
+  attempt_deadline = "180s"
+  http_target {
+    http_method = "POST"
+    uri         = "https://run.googleapis.com/v2/projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.news.name}:run"
+    oauth_token { service_account_email = google_service_account.scheduler.email }
+  }
+}
+
 resource "google_cloud_run_v2_service_iam_member" "api_public" {
   project  = var.project_id
   location = var.region
@@ -419,6 +562,25 @@ resource "google_project_iam_member" "runtime_roles" {
   project  = var.project_id
   role     = each.key
   member   = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+resource "google_project_iam_custom_role" "runtime_scheduler_operator" {
+  role_id     = "dealSniperSchedulerOperator"
+  title       = "Deal Sniper Scheduler Operator"
+  description = "Минимальные права Control Center для allowlisted Scheduler jobs"
+  permissions = [
+    "cloudscheduler.jobs.get",
+    "cloudscheduler.jobs.list",
+    "cloudscheduler.jobs.run",
+    "cloudscheduler.jobs.pause",
+    "cloudscheduler.jobs.enable",
+  ]
+}
+
+resource "google_project_iam_member" "runtime_scheduler_operator" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.runtime_scheduler_operator.name
+  member  = "serviceAccount:${google_service_account.runtime.email}"
 }
 
 resource "google_project_iam_member" "collector_roles" {
@@ -451,6 +613,18 @@ resource "google_storage_bucket_iam_member" "raw_writer" {
   bucket = google_storage_bucket.raw.name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.collector.email}"
+}
+
+resource "google_storage_bucket_iam_member" "runtime_news_assets" {
+  bucket = google_storage_bucket.raw.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+resource "google_storage_bucket_iam_member" "publisher_news_assets" {
+  bucket = google_storage_bucket.raw.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${local.publisher_sa}@${var.project_id}.iam.gserviceaccount.com"
 }
 
 resource "google_storage_bucket_iam_member" "migration_export_reader" {

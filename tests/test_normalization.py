@@ -66,7 +66,7 @@ def test_invalid_vin_does_not_trigger_cross_source_auto_merge() -> None:
     assert mapping[first.listing_id] != mapping[second.listing_id]
 
 
-def test_comparable_selection_rejects_different_year_and_trim() -> None:
+def test_comparable_selection_uses_tier_two_for_different_trim() -> None:
     target = normalize_listing(snapshot("cars24", "1"))
     old = normalize_listing(snapshot("carswitch", "2", year=2018))
     wrong_trim = normalize_listing(snapshot("dubicars", "3", trim="Sport"))
@@ -75,4 +75,8 @@ def test_comparable_selection_rejects_different_year_and_trim() -> None:
     assert wrong_trim is not None
     identities, mapping = resolve_vehicle_identities([target, old, wrong_trim])
     assert identities
-    assert select_comparables(target, [target, old, wrong_trim], mapping) == []
+    comparables = select_comparables(target, [target, old, wrong_trim], mapping)
+    assert len(comparables) == 1
+    assert comparables[0].listing_id == wrong_trim.listing_id
+    assert comparables[0].cohort_tier == 2
+    assert any("комплектации" in item for item in comparables[0].adjustments)

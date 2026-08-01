@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -11,8 +12,24 @@ from urllib.parse import urlparse
 from xml.etree import ElementTree
 
 import httpx
+from bs4 import BeautifulSoup
+
+from src.domain.ids import canonical_hash
 
 logger = logging.getLogger(__name__)
+
+NEWS_AGGREGATOR_HOSTS = frozenset(
+    {
+        "news.google.com",
+        "www.google.com",
+        "news.yahoo.com",
+    }
+)
+AUTOMOTIVE_TOPIC_PATTERN = re.compile(
+    r"\b(?:cars?|vehicles?|automotive|pre[- ]owned|used\s+autos?|"
+    r"electric\s+vehicles?|evs?|mobility)\b",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +40,21 @@ class NewsItem:
     publisher: str
     url: str
     published_at: datetime
+    summary: str = ""
+    image_url: str = ""
+    image_source_type: str = ""
+
+    @property
+    def fingerprint(self) -> str:
+        """Стабильная идентичность статьи для защиты от повторной публикации."""
+        return canonical_hash(
+            "pro-news-item/v1",
+            {
+                "url": canonical_news_url(self.url),
+                "publisher": self.publisher.casefold().strip(),
+                "published_at": self.published_at.astimezone(UTC).date().isoformat(),
+            },
+        )
 
 
 class DubaiAutoNewsClient:
@@ -34,16 +66,20 @@ class DubaiAutoNewsClient:
         timeout_seconds: float,
         max_age_days: int,
         limit: int,
+        publisher_hint: str = "",
     ) -> None:
-        if urlparse(feed_url).scheme != "https":
+        if feed_url and urlparse(feed_url).scheme != "https":
             raise ValueError("AUTO_NEWS_RSS_URL должен использовать HTTPS")
         self.feed_url = feed_url
         self.timeout_seconds = timeout_seconds
         self.max_age_days = max(1, max_age_days)
         self.limit = max(1, min(limit, 5))
+        self.publisher_hint = publisher_hint.strip()
 
     async def latest(self, now: datetime | None = None) -> list[NewsItem]:
         """Возвращает свежие уникальные материалы либо пустой список при ошибке."""
+        if not self.feed_url:
+            return []
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout_seconds,
@@ -57,6 +93,7 @@ class DubaiAutoNewsClient:
                 now=now or datetime.now(UTC),
                 max_age_days=self.max_age_days,
                 limit=self.limit,
+                publisher_hint=self.publisher_hint,
             )
         except (httpx.HTTPError, ElementTree.ParseError, ValueError) as error:
             logger.warning("Новостная лента временно недоступна: %s", type(error).__name__)
@@ -69,35 +106,54 @@ def parse_news_feed(
     now: datetime,
     max_age_days: int,
     limit: int,
+    publisher_hint: str = "",
 ) -> list[NewsItem]:
-    """Разбирает RSS и отбрасывает старые, неполные и небезопасные записи."""
+    """Разбирает RSS/Atom и отбрасывает старые, неполные и нерелевантные записи."""
     root = ElementTree.fromstring(payload)
     cutoff = now.astimezone(UTC) - timedelta(days=max(1, max_age_days))
     items: list[NewsItem] = []
     seen: set[str] = set()
-    for node in root.findall(".//item"):
-        title = (node.findtext("title") or "").strip()
-        url = (node.findtext("link") or "").strip()
-        published_raw = (node.findtext("pubDate") or "").strip()
-        source = node.find("source")
-        publisher = ((source.text if source is not None else "") or "").strip()
-        normalized_title = title.casefold()
-        has_location = "dubai" in normalized_title or "uae" in normalized_title
-        has_automotive_topic = any(
-            token in normalized_title
-            for token in ("car", "vehicle", "automotive", "pre-owned", "used auto", "ev ")
-        )
+    nodes = [*root.findall(".//item"), *root.findall(".//{*}entry")]
+    for node in nodes:
+        is_atom = node.tag.endswith("entry")
+        title = ((node.findtext("{*}title") if is_atom else node.findtext("title")) or "").strip()
+        if is_atom:
+            link = node.find("{*}link")
+            url = ((link.get("href") if link is not None else "") or "").strip()
+            published_raw = (
+                node.findtext("{*}published") or node.findtext("{*}updated") or ""
+            ).strip()
+            publisher = (
+                publisher_hint
+                or node.findtext("{*}source/{*}title")
+                or node.findtext("{*}author/{*}name")
+                or ""
+            ).strip()
+            summary_raw = node.findtext("{*}summary") or node.findtext("{*}content") or ""
+        else:
+            url = (node.findtext("link") or "").strip()
+            published_raw = (node.findtext("pubDate") or "").strip()
+            source = node.find("source")
+            publisher = (
+                publisher_hint
+                or ((source.text if source is not None else "") or "").strip()
+            )
+            summary_raw = node.findtext("description") or ""
+        image_url, image_source_type = _feed_image(node, summary_raw)
+        summary = _plain_text(summary_raw)
+        normalized_content = f"{title} {summary}".casefold()
+        has_location = "dubai" in normalized_content or "uae" in normalized_content
+        has_automotive_topic = AUTOMOTIVE_TOPIC_PATTERN.search(normalized_content) is not None
         if (
             not title
             or not publisher
             or not has_location
             or not has_automotive_topic
-            or urlparse(url).scheme != "https"
+            or not is_direct_publisher_url(url)
         ):
             continue
-        try:
-            published_at = parsedate_to_datetime(published_raw).astimezone(UTC)
-        except (TypeError, ValueError, OverflowError):
+        published_at = _published_at(published_raw)
+        if published_at is None:
             continue
         if published_at < cutoff or published_at > now.astimezone(UTC) + timedelta(hours=1):
             continue
@@ -111,10 +167,68 @@ def parse_news_feed(
                 publisher=publisher,
                 url=url,
                 published_at=published_at,
+                summary=summary[:2_000],
+                image_url=image_url,
+                image_source_type=image_source_type,
             )
         )
     items.sort(key=lambda item: item.published_at, reverse=True)
     return items[: max(1, min(limit, 5))]
+
+
+def is_direct_publisher_url(url: str) -> bool:
+    """Разрешает HTTPS-ссылку издателя и отбрасывает известные агрегаторы."""
+    parsed = urlparse(url)
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and parsed.hostname.casefold() not in NEWS_AGGREGATOR_HOSTS
+    )
+
+
+def _published_at(value: str) -> datetime | None:
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _plain_text(value: str) -> str:
+    text = BeautifulSoup(value, "html.parser").get_text(" ", strip=True)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def _feed_image(node: ElementTree.Element, summary_raw: str) -> tuple[str, str]:
+    for child in node.iter():
+        local_name = child.tag.rsplit("}", maxsplit=1)[-1].casefold()
+        url = (child.get("url") or child.get("href") or "").strip()
+        media_type = (child.get("type") or "").casefold()
+        if local_name in {"content", "thumbnail"} and url:
+            return url, "rss_media"
+        if local_name == "enclosure" and url and media_type.startswith("image/"):
+            return url, "rss_enclosure"
+    image = BeautifulSoup(summary_raw, "html.parser").find("img")
+    if image is not None:
+        source = str(image.get("src") or "").strip()
+        if source:
+            return source, "rss_media"
+    return "", ""
+
+
+def canonical_news_url(value: str) -> str:
+    """Нормализует HTTPS URL, сохраняя значимую query-часть агрегаторов."""
+    parsed = urlparse(value.strip())
+    return parsed._replace(
+        scheme=parsed.scheme.casefold(),
+        netloc=parsed.netloc.casefold(),
+        fragment="",
+    ).geturl()
 
 
 def format_news(items: list[NewsItem]) -> str:

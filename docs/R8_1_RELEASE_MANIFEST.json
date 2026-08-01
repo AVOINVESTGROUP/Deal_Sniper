@@ -1,0 +1,62 @@
+{
+  "release": "R8.1",
+  "status": "production-active",
+  "source_commit": "aa261129415065b63d4be85f098cd0e255966ab1",
+  "components": {
+    "api": {
+      "digest": "sha256:0efbc0699d8a79f9c8e4802a15f274debb1b25843d5c19cdc3b47d910c73fd0b",
+      "staging_revision": "deal-sniper-api-staging-00042-w8f",
+      "production_revision": "deal-sniper-api-00061-tlq"
+    },
+    "publisher": {
+      "digest": "sha256:0efbc0699d8a79f9c8e4802a15f274debb1b25843d5c19cdc3b47d910c73fd0b",
+      "staging_generation": "6",
+      "production_generation": "41"
+    },
+    "admin_web": {"release_scope": "unchanged"}
+  },
+  "compatibility": {
+    "schema_version": "2",
+    "delivery_templates": ["pro/v1", "pro-news/v1", "market-watch/v2"],
+    "admin_auth": "unchanged",
+    "staging_delivery_queue": "telegram-delivery-staging",
+    "production_delivery_queue": "telegram-delivery"
+  },
+  "verification": {
+    "push_workflow_run": "30431337917",
+    "pull_request_workflow_run": "30431341429",
+    "python": "3.11",
+    "tests": "114 passed, 2 skipped",
+    "result": "passed"
+  },
+  "build": {
+    "id": "2ff0f1e7-6828-4e0f-a06a-35503cf1d328",
+    "source": "exact git archive",
+    "result": "success"
+  },
+  "staging": {
+    "database": "deal-sniper-stage-rc2",
+    "delivery_queue": "telegram-delivery-staging",
+    "delivery_state": "disabled-paused-empty",
+    "publisher_execution": "deal-sniper-publisher-staging-g5ggx"
+  },
+  "production": {
+    "pro_channel_id": "-1004319276577",
+    "content_scheduler": "deal-sniper-content-every-6h",
+    "content_scheduler_state": "enabled",
+    "publisher_executions": ["deal-sniper-publisher-mpxs7", "deal-sniper-publisher-r6ll5"],
+    "news_delivery": {
+      "outbox_id": "eaeed9dd00603e3f92cafb675fb0b10a8fdb8c95e512645f6f0daf8c6e8140ad",
+      "state": "sent",
+      "telegram_message_id": "29"
+    },
+    "duplicate_check": "passed",
+    "webhook": "healthy"
+  },
+  "rollback": {
+    "source_commit": "851ddaf26852aaaa0547df1b60e222d7f74b5d9a",
+    "digest": "sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112",
+    "api_revision": "deal-sniper-api-00060-kkc",
+    "publisher_generation": "40"
+  }
+}

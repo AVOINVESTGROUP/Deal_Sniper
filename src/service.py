@@ -249,12 +249,18 @@ class DealService:
         try:
             fetched = await source.fetch()
         except Exception as error:
+            completed_at = datetime.now(UTC)
+            error_category = getattr(error, "category", "unexpected_error")
+            attempts = getattr(error, "attempts", 1)
             self.repository.record_source_run(
                 metric_name,
                 {
                     "success": False,
                     "duration_seconds": round(perf_counter() - started, 3),
                     "error": f"{type(error).__name__}: {error}",
+                    "error_category": str(error_category),
+                    "attempts": int(attempts),
+                    "completed_at": completed_at.isoformat(),
                 },
             )
             raise
@@ -292,6 +298,7 @@ class DealService:
                 pending_set.add((listing_id, content_hash))
         report.pending = sorted(pending_set)
 
+        completed_at = datetime.now(UTC)
         self.repository.record_source_run(
             metric_name,
             {
@@ -301,6 +308,7 @@ class DealService:
                 "changed": report.changed,
                 "pending": len(report.pending),
                 "duration_seconds": round(perf_counter() - started, 3),
+                "completed_at": completed_at.isoformat(),
             },
         )
 
@@ -408,7 +416,12 @@ class DealService:
             )
             if target_identity is not None:
                 self.repository.save_vehicle_identity(target_identity)
-        peers = select_comparables(target, normalized_vehicles, listing_to_vehicle)
+        peers = select_comparables(
+            target,
+            normalized_vehicles,
+            listing_to_vehicle,
+            min_comparables=self.settings.min_comparables_count,
+        )
         market = self.market_engine.estimate(
             peers,
             min_comparables=self.settings.min_comparables_count,

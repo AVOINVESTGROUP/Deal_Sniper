@@ -171,6 +171,27 @@ def publication_event_id(*, decision_id_value: str, vehicle_id: str, event_type:
     )
 
 
+def publication_revision_id(
+    *,
+    decision_id_value: str,
+    vehicle_id: str,
+    event_type: str,
+    recipient_id: str,
+    template_version: str,
+) -> str:
+    """Идентифицирует неизменяемую публикацию для конкретного получателя и шаблона."""
+    return canonical_hash(
+        "publication-revision-id/v1",
+        {
+            "decision_id": decision_id_value,
+            "vehicle_id": vehicle_id,
+            "event_type": event_type,
+            "recipient_id": recipient_id,
+            "template_version": template_version,
+        },
+    )
+
+
 def cloud_task_name(prefix: str, identity: Mapping[str, Any]) -> str:
     """Формирует допустимое имя Cloud Task с тем же canonical hash."""
     normalized_prefix = "".join(

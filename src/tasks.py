@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from google.api_core.exceptions import AlreadyExists
@@ -19,7 +19,9 @@ class CloudTaskDispatcher:
         if not settings.cloud_run_api_url or not settings.cloud_tasks_location:
             raise ValueError("Cloud Tasks требует CLOUD_RUN_API_URL и CLOUD_TASKS_LOCATION")
         self.settings = settings
-        self.client = tasks_v2.CloudTasksClient()
+        # Клиент создаётся только при фактической постановке задачи. Это позволяет
+        # delivery-off контурам оставаться полностью изолированными от Google ADC.
+        self.client: tasks_v2.CloudTasksClient | None = None
 
     async def enqueue_processing(
         self,
@@ -27,6 +29,7 @@ class CloudTaskDispatcher:
         content_hash: str,
         engine_version: str,
         recalculation_epoch: str | None = None,
+        delay_seconds: int = 0,
     ) -> None:
         epoch = recalculation_epoch or datetime.now(UTC).strftime("%Y%m%d%H")
         await self._enqueue(
@@ -47,6 +50,7 @@ class CloudTaskDispatcher:
                     "recalculation_epoch": epoch,
                 },
             ),
+            delay_seconds=delay_seconds,
         )
 
     async def enqueue_processing_batch(
@@ -55,17 +59,26 @@ class CloudTaskDispatcher:
         engine_version: str,
         concurrency: int = 20,
         recalculation_epoch: str | None = None,
+        delay_seconds: int = 0,
     ) -> None:
         """Ставит большой backfill в очередь с ограниченной параллельностью."""
         semaphore = asyncio.Semaphore(concurrency)
 
         async def enqueue(item: tuple[str, str]) -> None:
             async with semaphore:
-                await self.enqueue_processing(item[0], item[1], engine_version, recalculation_epoch)
+                await self.enqueue_processing(
+                    item[0],
+                    item[1],
+                    engine_version,
+                    recalculation_epoch,
+                    delay_seconds,
+                )
 
         await asyncio.gather(*(enqueue(item) for item in pending))
 
     async def enqueue_delivery(self, payload: dict[str, Any]) -> None:
+        if not self.settings.delivery_enabled:
+            return
         identity = str(
             payload.get("_task_identity")
             or delivery_id(
@@ -83,6 +96,8 @@ class CloudTaskDispatcher:
         )
 
     async def enqueue_content_delivery(self, payload: dict[str, Any]) -> None:
+        if not self.settings.delivery_enabled:
+            return
         identity = str(
             payload.get("_task_identity")
             or delivery_id(
@@ -100,6 +115,8 @@ class CloudTaskDispatcher:
         )
 
     async def enqueue_whatsapp_delivery(self, payload: dict[str, Any]) -> None:
+        if not self.settings.delivery_enabled or not self.settings.whatsapp_enabled:
+            return
         identity = str(
             payload.get("_task_identity")
             or delivery_id(
@@ -122,8 +139,13 @@ class CloudTaskDispatcher:
         path: str,
         payload: dict[str, Any],
         identity: str,
+        delay_seconds: int = 0,
     ) -> None:
-        parent = self.client.queue_path(
+        client = self.client
+        if client is None:
+            client = tasks_v2.CloudTasksClient()
+            self.client = client
+        parent = client.queue_path(
             self.settings.google_cloud_project,
             self.settings.cloud_tasks_location,
             queue_name,
@@ -143,10 +165,13 @@ class CloudTaskDispatcher:
                 "service_account_email": self.settings.task_invoker_service_account,
                 "audience": self.settings.cloud_run_api_url,
             }
+        task: dict[str, Any] = {"name": task_name, "http_request": request}
+        if delay_seconds > 0:
+            task["schedule_time"] = datetime.now(UTC) + timedelta(seconds=delay_seconds)
         try:
             await asyncio.to_thread(
-                self.client.create_task,
-                request={"parent": parent, "task": {"name": task_name, "http_request": request}},
+                client.create_task,
+                request={"parent": parent, "task": task},
             )
         except AlreadyExists:
             return

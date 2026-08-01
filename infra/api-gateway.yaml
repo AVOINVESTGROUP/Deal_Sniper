@@ -56,6 +56,41 @@ paths:
   /admin/overview:
     get: {operationId: adminOverview, responses: {"200": {description: Overview}}}
     options: {operationId: adminOverviewOptions, responses: {"200": {description: CORS}}}
+  /admin/settings:
+    get: {operationId: adminSettings, responses: {"200": {description: Settings}}}
+    options: {operationId: adminSettingsOptions, responses: {"200": {description: CORS}}}
+  /admin/settings/preview:
+    post: {operationId: adminSettingsPreview, responses: {"200": {description: Preview}}}
+    options: {operationId: adminSettingsPreviewOptions, responses: {"200": {description: CORS}}}
+  /admin/settings/apply:
+    post: {operationId: adminSettingsApply, responses: {"200": {description: Applied}}}
+    options: {operationId: adminSettingsApplyOptions, responses: {"200": {description: CORS}}}
+  /admin/settings/rollback:
+    post: {operationId: adminSettingsRollback, responses: {"200": {description: Rolled back}}}
+    options: {operationId: adminSettingsRollbackOptions, responses: {"200": {description: CORS}}}
+  /admin/runs:
+    get: {operationId: adminRuns, responses: {"200": {description: Runs}}}
+    options: {operationId: adminRunsOptions, responses: {"200": {description: CORS}}}
+  /admin/schedulers/{job_name}/action:
+    parameters:
+      - {name: job_name, in: path, required: true, type: string}
+    post: {operationId: adminSchedulerAction, responses: {"200": {description: Updated}}}
+    options: {operationId: adminSchedulerActionOptions, responses: {"200": {description: CORS}}}
+  /admin/listings:
+    get: {operationId: adminListings, responses: {"200": {description: Listings}}}
+    options: {operationId: adminListingsOptions, responses: {"200": {description: CORS}}}
+  /admin/listing-pipeline:
+    get: {operationId: adminListingPipeline, responses: {"200": {description: Listing pipeline}}}
+    options: {operationId: adminListingPipelineOptions, responses: {"200": {description: CORS}}}
+  /admin/decisions:
+    get: {operationId: adminDecisions, responses: {"200": {description: Decisions}}}
+    options: {operationId: adminDecisionsOptions, responses: {"200": {description: CORS}}}
+  /admin/users:
+    get: {operationId: adminUsers, responses: {"200": {description: Users}}}
+    options: {operationId: adminUsersOptions, responses: {"200": {description: CORS}}}
+  /admin/errors:
+    get: {operationId: adminErrors, responses: {"200": {description: Errors}}}
+    options: {operationId: adminErrorsOptions, responses: {"200": {description: CORS}}}
   /admin/sources:
     post: {operationId: adminAddSource, responses: {"200": {description: Added}}}
     options: {operationId: adminAddSourceOptions, responses: {"200": {description: CORS}}}
@@ -91,6 +126,29 @@ paths:
   /admin/preview:
     get: {operationId: adminPreview, responses: {"200": {description: Preview}}}
     options: {operationId: adminPreviewOptions, responses: {"200": {description: CORS}}}
+  /admin/pro-publications:
+    get: {operationId: adminProPublications, responses: {"200": {description: Pro publication coverage}}}
+    options: {operationId: adminProPublicationsOptions, responses: {"200": {description: CORS}}}
+  /admin/pro-publications/run:
+    post: {operationId: adminRunProPublications, responses: {"200": {description: Publisher started}}}
+    options: {operationId: adminRunProPublicationsOptions, responses: {"200": {description: CORS}}}
+  /admin/news-feeds:
+    get: {operationId: adminNewsFeeds, responses: {"200": {description: News feeds}}}
+    post: {operationId: adminAddNewsFeed, responses: {"200": {description: News feed added}}}
+    options: {operationId: adminNewsFeedsOptions, responses: {"200": {description: CORS}}}
+  /admin/news-evidence:
+    get: {operationId: adminNewsEvidence, responses: {"200": {description: News evidence}}}
+    options: {operationId: adminNewsEvidenceOptions, responses: {"200": {description: CORS}}}
+  /admin/news-feeds/{name}:
+    parameters:
+      - {name: name, in: path, required: true, type: string}
+    post: {operationId: adminSetNewsFeedState, responses: {"200": {description: News feed updated}}}
+    options: {operationId: adminSetNewsFeedStateOptions, responses: {"200": {description: CORS}}}
+  /admin/news-feeds/{name}/remove:
+    parameters:
+      - {name: name, in: path, required: true, type: string}
+    post: {operationId: adminRemoveNewsFeed, responses: {"200": {description: News feed removed}}}
+    options: {operationId: adminRemoveNewsFeedOptions, responses: {"200": {description: CORS}}}
   /content/market-pulse:
     get: {operationId: marketPulse, responses: {"200": {description: Pulse}}}
     options: {operationId: marketPulseOptions, responses: {"200": {description: CORS}}}

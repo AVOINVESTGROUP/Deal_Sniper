@@ -67,6 +67,20 @@ class SourceConfiguration(BaseModel):
     sample_count: int = Field(default=0, ge=0)
 
 
+class NewsFeedConfiguration(BaseModel):
+    """Проверенная HTTPS-лента автомобильных новостей."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_-]{2,39}$")
+    publisher: str = Field(min_length=2, max_length=120)
+    url: HttpUrl
+    publisher_domains: list[str] = Field(default_factory=list)
+    image_domains: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sample_count: int = Field(default=0, ge=0)
+
+
 class OutboxState(StrEnum):
     """Состояние внешней доставки без ложного exactly-once."""
 
@@ -208,7 +222,8 @@ class ComparableVehicle(BaseModel):
     evidence_revision_id: str | None = None
     accepted: bool = True
     reason: str = "accepted"
-    adjustment_version: str = "comparable-adjustments/v1"
+    cohort_tier: int = Field(default=1, ge=1, le=3)
+    adjustment_version: str = "comparable-adjustments/v3"
 
 
 class MarketEstimate(BaseModel):
@@ -354,6 +369,38 @@ class VerificationEvidence(BaseModel):
     schema_version: str = "verification-evidence/v2"
 
 
+class NewsEvidence(BaseModel):
+    """Проверяемая ревизия новости и связанного с ней изображения."""
+
+    evidence_id: str
+    semantic_fingerprint: str
+    feed_id: str
+    feed_revision_id: str
+    publisher_name: str
+    publisher_domains: list[str] = Field(default_factory=list)
+    source_url: HttpUrl
+    canonical_url: HttpUrl
+    title: str = Field(min_length=1, max_length=500)
+    summary: str = Field(default="", max_length=2_000)
+    published_at: datetime
+    image_source_url: HttpUrl
+    image_final_url: HttpUrl
+    image_storage_uri: str = Field(min_length=1)
+    image_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    image_content_type: str = Field(pattern=r"^image/")
+    image_size_bytes: int = Field(gt=0)
+    image_width: int | None = Field(default=None, gt=0)
+    image_height: int | None = Field(default=None, gt=0)
+    image_source_type: str = Field(pattern=r"^(rss_media|rss_enclosure|page_metadata)$")
+    source_item_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    evidence_created_at: datetime
+    fetched_at: datetime
+    last_checked_at: datetime
+    valid_until: datetime
+    freshness_status: FreshnessStatus = FreshnessStatus.ACTIVE
+    schema_version: str = "news-evidence/v1"
+
+
 class OutboxRecord(BaseModel):
     """Проверяемая запись внешней доставки."""
 
@@ -396,6 +443,12 @@ class PublicationEvent(BaseModel):
     decision_id: str
     vehicle_id: str
     event_type: str
+    parent_publication_event_id: str | None = None
+    parent_delivery_id: str | None = None
+    parent_message_id: str | None = None
+    listing_id: str | None = None
+    content_hash: str | None = None
+    recipient: str | None = None
     pro_cta_variant_id: str | None = None
     pro_cta_text: str | None = None
     pro_cta_button_label: str | None = None
@@ -403,7 +456,7 @@ class PublicationEvent(BaseModel):
     pro_cta_fingerprint: str | None = None
     pro_cta_template_version: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    template_version: str = "publication/v2"
+    template_version: str = "publication/v3"
 
 
 class TelegramUpdateRecord(BaseModel):

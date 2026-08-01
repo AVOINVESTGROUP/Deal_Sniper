@@ -1,6 +1,7 @@
 # Проверка кандидата `1ce36ff` и корректирующий план R6
 
-Статус: **план ожидает утверждения владельцем; код и deploy запрещены**.
+Статус: **утверждён владельцем 27 июля 2026; R6.7 разрешён, но production cutover
+остановлен на обязательном Chrome gate; готовится новый RC**.
 
 ## 1. Проверенный контур
 
@@ -142,3 +143,65 @@ Firebase sign-in
 ## 5. Критерий утверждения плана
 
 Владелец явно подтверждает этот документ. Только после этого разрешён R6.1. Любое изменение контракта identity, Free/Pro данных, Admin transport или release sequence возвращает работу на стадию документации и повторного утверждения.
+
+## 6. Текущее выполнение
+
+После явного сообщения владельца «План R6 утверждаю» реализован локальный кандидат
+R6.1–R6.4:
+
+- новая immutable publication revision включает subject, recipient, event type и template;
+- старые subject events сохраняются как parent и не переписываются;
+- PublicationEvent и outbox фиксируются одной транзакцией в SQLite и Firestore;
+- повторная обработка возвращает тот же payload и тот же CTA, а противоречивое частичное
+  состояние блокируется;
+- все автомобильные Free-пути используют общий teaser и leakage validator;
+- legacy publisher больше не подменяет отсутствующий Pro-канал бесплатным каналом;
+- Firebase Hosting использует только Gateway browser path без конфликтующих rewrites;
+- Admin Web отдельно сообщает об истёкшей Firebase-сессии и сохраняет частичный рендер.
+
+Локальный gate: Ruff, mypy, 80 pytest, coverage 56%, pip-audit без известных
+уязвимостей, Terraform fmt/validate успешно. GitHub Actions для кандидата `f1bd8fd`
+подтвердил Python 3.11, повторный quality gate, Docker build и Trivy без блокирующих
+HIGH/CRITICAL. Firestore integration, browser smoke и staging rehearsal относятся к
+незавершённым R6.5–R6.6. Реальный integration-тест в named database
+`deal-sniper-stage-rc2` выявил contention при стандартных пяти попытках Firestore
+transaction; publication/CTA retry budget адресно повышен до 20. Повторный тест с 12
+конкурентными reservations, атомарным event+outbox, стабильным retry и очисткой test IDs
+прошёл успешно. Незавершёнными остаются browser smoke и staging rehearsal. Production
+остаётся на прежнем digest.
+
+Authenticated browser smoke затем выполнен в headless Chrome через отдельный staging
+API Gateway: `/admin/overview`, `/content/market-pulse`, `/admin/preview` и два состояния
+`/admin/outbox` вернули 200 при настоящем browser CORS с Hosting-origin. Live CSP ожидаемо
+блокировал незаявленный staging hostname; тестовый route добавлял его только в изолированный
+ответ Chrome, не меняя production Hosting. R6.5 завершён.
+
+Финальный R6.6 выполнен на чистом RC commit
+`2a42735d57af6e3549af1d5fa0a975cee120a76f`. GitHub Actions `30278152829` успешен;
+commit-labelled image имеет digest
+`sha256:abd5cf8b368e2fffa5cc9fc70023ac68baf4572202942634092dc61bef145d8a` и развёрнут
+только в staging revision `deal-sniper-api-staging-00020-mgd`. Конфигурация использует
+`deal-sniper-stage-rc2`, `DELIVERY_ENABLED=false`, `WHATSAPP_ENABLED=false`; `/health` и
+`/version` успешны. Повторный реальный Firestore integration и authenticated browser smoke
+прошли. Telegram payload проверен через Admin preview без фактической доставки. Production
+остаётся на прежнем commit/digest до отдельного разрешения владельца на R6.7.
+
+После отдельного разрешения R6.7 был выполнен STOP и защищённый Firestore export. RC
+`2a42735` развёрнут с delivery off, Hosting опубликован, collector и processing smoke
+успешны. Production Chrome gate обнаружил `504` только у `/admin/overview`, поэтому
+delivery и content не возобновлялись. Диагностика доказала production-only bottleneck:
+последовательные Cloud API waits и потоковое чтение Firestore counts превышали Gateway
+deadline. Исправление ограничено этим слоем: Cloud status и агрегаты выполняются
+параллельно, dashboard counts используют Firestore aggregation. Изменение требует нового
+commit/digest и полного повторения R6.5–R6.6 перед продолжением разрешённого R6.7.
+## 7. Итог выполнения R6.6–R6.7
+
+R6 завершён после отдельного разрешения владельца на production deploy.
+
+- Финальный RC: `851ddaf26852aaaa0547df1b60e222d7f74b5d9a`.
+- Immutable image: `sha256:c2e55afdf949b348ef9307246511edbdfec6f73864ff636a13a76f6846da9112`.
+- Повторный staging gate: Firestore integration и authenticated real-Chrome Admin smoke успешны.
+- Production API и все Jobs используют один digest; `/health`, `/ready` и authenticated Admin browser path успешны.
+- Staged resume выполнен в порядке collectors → processing → delivery → content.
+- Pilot Free CTA: 30 публикаций, 30 уникальных fingerprints, 0 соседних повторов, 0 пропущенных кнопок, 0 pending/unknown.
+- Подробные доказательства находятся в `docs/RELEASE_EVIDENCE_2026-07-27-R6.md`.

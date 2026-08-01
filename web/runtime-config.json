@@ -1,4 +1,5 @@
 {
   "apiBase": "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev",
-  "adminApiBase": "https://deal-sniper-gateway-dglai0gq.ew.gateway.dev"
+  "adminApiBase": "https://deal-sniper-api-1054850076890.me-central1.run.app",
+  "adminGoogleAuthEnabled": true
 }

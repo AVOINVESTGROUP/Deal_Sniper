@@ -2,13 +2,7 @@
   "hosting": {
     "public": "web",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {"source": "/admin/**", "run": {"serviceId": "deal-sniper-api", "region": "me-central1"}},
-      {"source": "/tma/**", "run": {"serviceId": "deal-sniper-api", "region": "me-central1"}},
-      {"source": "/content/**", "run": {"serviceId": "deal-sniper-api", "region": "me-central1"}},
-      {"source": "/version", "run": {"serviceId": "deal-sniper-api", "region": "me-central1"}},
-      {"source": "/health", "run": {"serviceId": "deal-sniper-api", "region": "me-central1"}}
-    ],
+    "rewrites": [],
     "headers": [
       {
         "source": "/{app.html,tma.js,admin.html,admin.js,styles.css,runtime-config.json}",
@@ -17,7 +11,7 @@
       {
         "source": "**",
         "headers": [
-          {"key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://www.gstatic.com https://telegram.org https://apis.google.com; connect-src 'self' https://www.gstatic.com https://*.googleapis.com https://securetoken.googleapis.com https://accounts.google.com https://deal-sniper-gateway-dglai0gq.ew.gateway.dev; frame-src https://avo-deal-sniper.firebaseapp.com https://accounts.google.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; frame-ancestors https://web.telegram.org https://*.telegram.org"},
+          {"key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' https://www.gstatic.com https://telegram.org https://apis.google.com; connect-src 'self' https://www.gstatic.com https://*.googleapis.com https://securetoken.googleapis.com https://accounts.google.com https://deal-sniper-gateway-dglai0gq.ew.gateway.dev https://deal-sniper-api-1054850076890.me-central1.run.app; frame-src https://avo-deal-sniper.firebaseapp.com https://accounts.google.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; frame-ancestors https://web.telegram.org https://*.telegram.org"},
           {"key": "X-Content-Type-Options", "value": "nosniff"}
         ]
       }

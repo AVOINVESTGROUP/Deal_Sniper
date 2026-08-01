@@ -202,6 +202,32 @@ def test_dubicars_rejects_placeholder_price() -> None:
     assert parse_search_page(html) == []
 
 
+def test_dubicars_accepts_direct_item_list_and_price_specification() -> None:
+    html = """
+    <script type="application/ld+json">
+    {"@type":"ItemList","itemListElement":[{"mainEntity":{
+      "@type":"Vehicle","name":"2023 Toyota Yaris","url":"https://www.dubicars.com/yaris-999130.html",
+      "image":{"url":"https://example.com/yaris.jpg"},"brand":{"name":"Toyota"},
+      "model":{"name":"Yaris"},"vehicleModelDate":2023,
+      "mileageFromOdometer":{"value":30000},
+      "priceSpecification":{"price":"48000","priceCurrency":"AED","priceType":"asking"}
+    }}]}
+    </script>
+    """
+    result = parse_search_page(html)
+    assert len(result) == 1
+    assert result[0].source_listing_id == "999130"
+    assert result[0].price_aed == Decimal("48000")
+
+
+def test_dubicars_rejects_monthly_payment() -> None:
+    html = SEARCH_HTML.replace(
+        '"offers": {"price": "79000", "priceCurrency": "AED"}',
+        '"offers": {"price": "1999", "priceCurrency": "AED", "unitText": "monthly"}',
+    )
+    assert parse_search_page(html) == []
+
+
 def test_detail_price_requires_positive_aed_offer() -> None:
     html = """
     <script type="application/ld+json">

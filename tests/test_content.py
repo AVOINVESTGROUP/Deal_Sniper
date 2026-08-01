@@ -72,7 +72,7 @@ def test_poll_contains_no_unverifiable_market_numbers() -> None:
     assert len(poll["options"]) == 4
 
 
-def test_market_watch_card_contains_verified_facts_and_listing_link() -> None:
+def test_market_watch_free_card_does_not_leak_pro_fields() -> None:
     listing = snapshot("75000", datetime.now(UTC)).model_copy(
         update={"image_urls": ["https://example.test/car.jpg"]}
     )
@@ -97,8 +97,9 @@ def test_market_watch_card_contains_verified_facts_and_listing_link() -> None:
     card = format_market_watch_card(listing, decision)
 
     assert "MARKET WATCH" in card
-    assert "Price: 75,000 AED" in card
-    assert "Verified market: 90,000–100,000 AED" in card
-    assert "Open listing" in card
-    assert "not an investment recommendation" in card
+    assert "Toyota Camry 2022" in card
+    assert "75,000 AED" not in card
+    assert "90,000" not in card
+    assert "Open listing" not in card
+    assert "https://" not in card
     assert len(card) < 1024

@@ -1,6 +1,13 @@
 # План реализации Dubai Deal Sniper
 
-Статус: кодовая часть RC подготовлена; production остаётся остановлен до прохождения immutable release, staging rehearsal, migration и cutover.
+> **Текущий рабочий план — `docs/PLAN_R9_FULL_PROJECT_RECOVERY.md`.** Полный аудит
+> 1 августа 2026 года обнаружил release drift, дефекты миграции, evidence/current,
+> delivery, entitlement, Admin, поиска и data coverage. Разделы R6–R8 ниже сохранены
+> только как исторический журнал и не должны исполняться как текущий runbook.
+
+Статус: R9 ожидает единого утверждения владельцем. До этого код, immutable build,
+staging и production по R9 не изменяются. Старые approvals не разрешают продолжать
+частичную последовательность R8.1.3G.
 
 ## Правила выполнения
 
@@ -9,6 +16,22 @@
 3. Ни один этап не разрешает delivery до финального cutover.
 4. Любое изменение после фиксации RC digest аннулирует rehearsal.
 5. WhatsApp не блокирует основной релиз, если единственная причина — отсутствующие внешние Meta credentials.
+6. Авторизация Admin Web не является зависимостью collectors, processing или Telegram publisher.
+7. Контентный и авторизационный релизы имеют отдельные staging evidence и production-разрешения.
+8. Фиктивный Telegram recipient не заменяет настоящий сквозной staging delivery smoke.
+
+## Актуальный порядок R8
+
+```text
+R8.1-DOC   согласование архитектуры и критериев
+R8.1-CODE  минимальный Pro Recovery без изменения Admin Auth
+R8.1-STAGE изолированный реальный Telegram smoke
+R8.1-PROD  отдельное разрешение и bounded cutover
+R8.1-PILOT подтверждение результата
+R8.2       отдельный выпуск Google Admin Auth
+```
+
+До завершения R8.1-PILOT настройка Google OAuth не блокирует восстановление Pro-канала.
 
 ## Матрица реализации
 
@@ -35,6 +58,7 @@
 | 17 | Isolated direct replay с delivery=false | реализовано | ожидает staging/production |
 | 18 | Terraform desired state/IAM/alerts/budget | реализовано, validate | ожидает import/apply |
 | 19 | CI/CD security gates и non-root Python 3.11 image | реализовано | ожидает GitHub Actions/registry |
+| 20 | Единый иллюстрированный news evidence для Free/Pro/бота/чата | локально реализовано, 29.07.2026 | CI и delivery-off staging |
 | 20 | Immutable RC build и manifest | готово к выполнению | ожидает digest |
 | 21 | Staging restore/migration/full rehearsal | готово к выполнению | ожидает execution |
 | 22 | Production migration, merge, cutover и pilot | запрещено до 21 | ожидает execution |
@@ -118,15 +142,18 @@ R6.7  deploy exact digest, Hosting release и live smoke
 
 До завершения R6.1–R6.5 запрещены Cloud Run, Jobs, API Gateway и Firebase Hosting deploy. До R6.6 запрещено включать новые Free-публикации шаблонов v2.
 
-## Рабочая браузерная Admin Panel
+## Целевой контракт R8.2: браузерная Admin Panel
+
+Этот раздел не является prerequisite выпуска R8.1. До отдельного утверждения и smoke
+R8.2 production сохраняет последний проверенный способ административного входа.
 
 1. `/admin.html` открывается в обычном desktop-браузере без Telegram-контекста.
-2. Firebase email/password sign-in включён; пароль хранится только в Firebase Authentication, а backend принимает Firebase ID token только для email из `ADMIN_EMAILS`.
-3. Административная роль определяется allowlist `ADMIN_EMAILS`, а не Telegram ID.
-4. Браузерные запросы Admin Web идут через защищённый API Gateway: Firebase Hosting rewrite в приватный Cloud Run запрещён организационной политикой `allUsers`. Backend всё равно проверяет Firebase ID token и `ADMIN_EMAILS`.
-4. Интерфейс содержит разделы Dashboard, Sources, Runs, Listings, Decisions, Publications, Users & subscriptions, Revenue & referrals, Errors и Settings.
-5. Технические JSON/provenance/stack traces скрыты за подробностями; основной экран показывает человекочитаемые статусы и действия.
-6. Collector получает минимальный доступ чтения/записи raw bucket; API получает read-only роли для Scheduler, Tasks и Run.
+2. Firebase Google Sign-In использует отдельный OAuth client типа Web application; IAP OAuth client для этого запрещён.
+3. Backend принимает Firebase ID token только с `email_verified=true` и email из `ADMIN_EMAILS`; наличие Google-аккаунта само по себе не даёт административной роли.
+4. Браузерные запросы Admin Web идут через защищённый API Gateway: Firebase Hosting rewrite в приватный Cloud Run запрещён организационной политикой `allUsers`. Backend всё равно проверяет Firebase ID token, подтверждённый email и `ADMIN_EMAILS`.
+5. Интерфейс содержит разделы Dashboard, Sources, Runs, Listings, Decisions, Publications, Users & subscriptions, Revenue & referrals, Errors и Settings.
+6. Технические JSON/provenance/stack traces скрыты за подробностями; основной экран показывает человекочитаемые статусы и действия.
+7. Collector получает минимальный доступ чтения/записи raw bucket; API получает read-only роли для Scheduler, Tasks и Run.
 7. Ошибка обязательного этапа делает source run неуспешным; противоречие `success=true` вместе с `error` запрещено тестом.
 8. Telegram используется для клиентского продукта и кратких owner alerts, но не как обязательная оболочка панели.
 
@@ -168,3 +195,6 @@ TG6  staging, 7-day production pilot и решение о масштабиров
 ```
 
 Каждый этап заканчивается unit/integration/contract tests и обновлением документации. Production delivery не принимает Telegram-derived `CONTACT` до отдельного доказательства отсутствия Telegram-only verified decisions.
+# Статус R6
+
+R6 утверждён владельцем и полностью развёрнут в production 27 июля 2026 года. Финальный baseline и результаты pilot зафиксированы в `docs/RELEASE_EVIDENCE_2026-07-27-R6.md`. Следующий этап не изменяет этот baseline: эксплуатационное наблюдение, измерение конверсии Free → Pro и подключение новых источников отдельными проверяемыми адаптерами.
